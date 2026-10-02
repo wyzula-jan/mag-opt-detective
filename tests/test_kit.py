@@ -99,6 +99,30 @@ def test_range_slider_mouse(qtbot, slider):
     assert slider.active_handle() == 0
 
 
+@pytest.mark.parametrize(
+    ("start", "press_at", "drag_to"),
+    [((100.0, 100.0), 101.0, 60.0), ((0.0, 0.0), -1.0, 40.0), ((99.5, 100.0), 101.0, 60.0)],
+)
+def test_range_slider_handles_stay_in_the_extent(qtbot, slider, start, press_at, drag_to):
+    slider.show()
+    qtbot.waitExposed(slider)
+    y = slider.height() // 2
+    slider.set_values(*start)  # handles drawn on top of each other at an end
+    press = QPoint(round(slider._x_for(start[0]) + press_at - start[0]), y)  # a pixel beside
+    qtbot.mousePress(slider, Qt.MouseButton.LeftButton, pos=press)
+    qtbot.mouseMove(slider, QPoint(round(slider._x_for(drag_to)), y))
+    qtbot.mouseRelease(slider, Qt.MouseButton.LeftButton, pos=press)
+    lo, hi = slider.values()
+    assert 0.0 <= lo < hi <= 100.0
+    assert drag_to == pytest.approx(lo if drag_to < start[0] else hi, abs=1.0)  # separated
+
+    slider.set_values(99.5, 100.0)  # a key on the high handle cannot push it past the end
+    slider.set_active_handle(1)
+    focused(qtbot, slider)
+    qtbot.keyClick(slider, Qt.Key.Key_Right)
+    assert slider.values() == pytest.approx((99.0, 100.0))
+
+
 # --- RangeControl --------------------------------------------------------------------------
 @pytest.fixture
 def control(qtbot):

@@ -95,14 +95,23 @@ class RangeSlider(QWidget):
     def _width(self) -> float:
         return (self._b - self._a) or 1.0
 
+    def _span(self) -> float:
+        """The minimum span, at most the whole extent."""
+        return min(self.min_span(), self._b - self._a)
+
     def _move(self, handle: int, value: float) -> bool:
         """Move *handle* to *value* (kept in the extent and min span apart); True if changed."""
-        value = min(max(value, self._a), self._b)
+        a, b, span = self._a, self._b, self._span()
+        value = min(max(value, a), b)
         lo, hi = self._lo, self._hi
         if handle == LO:
-            lo = min(value, hi - self.min_span())
+            lo = min(value, hi - span)
+            if lo < a:  # the other handle sits at the low end: make room inside the extent
+                lo, hi = a, max(hi, a + span)
         else:
-            hi = max(value, lo + self.min_span())
+            hi = max(value, lo + span)
+            if hi > b:
+                lo, hi = min(lo, b - span), b
         if (lo, hi) == (self._lo, self._hi):
             return False
         self._lo, self._hi = lo, hi
@@ -138,11 +147,20 @@ class RangeSlider(QWidget):
     def _handle_at(self, x: float) -> int | None:
         x_lo, x_hi = self._x_for(self._lo), self._x_for(self._hi)
         d_lo, d_hi = abs(x - x_lo), abs(x - x_hi)
-        if min(d_lo, d_hi) > self.HANDLE / 2 + 2:
+        reach = self.HANDLE / 2 + 2
+        if min(d_lo, d_hi) > reach:
             return None
-        if d_lo != d_hi:
-            return LO if d_lo < d_hi else HI
-        return LO if x <= x_lo else HI
+        nearer_lo = d_lo < d_hi or (d_lo == d_hi and x <= x_lo)  # a tie: the side of the press
+        handle, other, d_other = (LO, HI, d_hi) if nearer_lo else (HI, LO, d_lo)
+        if self._pinned(handle) and d_other <= reach:  # take the one that can move
+            return other
+        return handle
+
+    def _pinned(self, handle: int) -> bool:
+        """True if *handle* can move neither way: at an end, with the other one span away."""
+        if self._hi - self._lo > self._span() * (1 + 1e-9):
+            return False
+        return self._lo <= self._a if handle == LO else self._hi >= self._b
 
     # --- mouse -------------------------------------------------------------------------
     def mousePressEvent(self, event: QMouseEvent) -> None:
