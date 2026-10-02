@@ -152,8 +152,29 @@ class ColorMapPlot(_CrosshairMixin, pg.GraphicsLayoutWidget):
         self.plot.addItem(self.all_points)
         self.plot.addItem(self.current_points)
 
+        self._model_curves: list[pg.PlotDataItem] = []
+
         self._init_crosshair(self.plot, self.label)
         self.plot.scene().sigMouseClicked.connect(self._on_click)
+
+    def set_model_curves(self, field: np.ndarray, lines: np.ndarray | None) -> None:
+        """Draw model energies ``lines[i, j]`` at ``field[j]``; None removes them."""
+        n = 0 if lines is None else len(lines)
+        pen = pg.mkPen((255, 255, 255, 210), width=1.5, style=Qt.PenStyle.DashLine)
+        while len(self._model_curves) < n:
+            curve = pg.PlotDataItem(pen=pen)
+            self.plot.addItem(curve, ignoreBounds=True)
+            self._model_curves.append(curve)
+        for i, curve in enumerate(self._model_curves):
+            if i < n:
+                curve.setData(field, lines[i])
+                curve.show()
+            else:
+                curve.hide()
+
+    def model_curve_data(self) -> list[tuple[np.ndarray, np.ndarray]]:
+        """(field, energy) of the visible model curves."""
+        return [c.getData() for c in self._model_curves if c.isVisible()]
 
     def value_at(self, b: float, energy: float) -> float | None:
         """Map value of the pixel under (b, energy), or None outside the image."""

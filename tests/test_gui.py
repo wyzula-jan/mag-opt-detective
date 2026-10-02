@@ -269,3 +269,27 @@ def test_step_ratio_plot_and_export(window, sweep, tmp_path, monkeypatch, errors
     window.export_current()
     assert (tmp_path / "S1_Ratio_Step.csv").exists()
     assert not errors
+
+
+def test_dirac_overlay(window, sweep):
+    from mag_opt_detective.core.models import dirac_interband
+    from mag_opt_detective.core.units import Unit, convert
+
+    load_sweep(window, sweep)
+    window.process_data()
+    cmap = window.plot_panel.color_map
+    assert cmap.model_curve_data() == []
+    mp = window.models_page
+    mp.n_lines.setValue(3)
+    mp.delta.setValue(10.0)
+    mp.velocity.setValue(5.0)
+    mp.show_dirac.setChecked(True)
+    curves = cmap.model_curve_data()
+    assert len(curves) == 3
+    field, energy = curves[1]
+    expected = convert(dirac_interband(field, 5.0, 10.0, 3)[1], Unit.MEV, Unit.CM1)
+    np.testing.assert_allclose(energy, expected)
+    mp.n_lines.setValue(2)
+    assert len(cmap.model_curve_data()) == 2
+    mp.show_dirac.setChecked(False)
+    assert cmap.model_curve_data() == []

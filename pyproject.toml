@@ -46,8 +46,8 @@ src = ["src", "tests"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "SIM", "NPY", "RUF"]
-# en dash is used on purpose in UI labels such as "E min – max"
-allowed-confusables = ["–"]
+# typographic characters used on purpose in UI labels ("E min – max", "×10⁵ m/s")
+allowed-confusables = ["–", "×"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
