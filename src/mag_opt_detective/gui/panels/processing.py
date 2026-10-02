@@ -97,6 +97,20 @@ class ProcessingPanel(QWidget):
             return None
         return self.baseline_lo.cm1(), self.baseline_hi.cm1()
 
+    def show_ranges(self, energy_cut: Range | None, baseline: Range | None) -> None:
+        """Show the two ranges (cm^-1); None switches one off and keeps its typed ends."""
+        for switch, lo, hi, rng in (
+            (self.cut_on, self.cut_lo, self.cut_hi, energy_cut),
+            (self.baseline_on, self.baseline_lo, self.baseline_hi, baseline),
+        ):
+            if rng is None:
+                switch.setChecked(False)
+                continue
+            for edit, value in zip((lo, hi), rng, strict=True):
+                if edit.cm1() != value:
+                    edit.set_cm1(value)
+            switch.setChecked(True)
+
 
 @user_action("Process")
 def process(window) -> None:
@@ -112,8 +126,23 @@ def install(window) -> None:
         "Energy window and baseline, in the energy unit of the toolbar.", rail_text="Process",
     )  # fmt: skip
 
+    pulling = False
+
     def push() -> None:
-        c.set_processing(energy_cut=panel.energy_cut(), baseline=panel.baseline())
+        if not pulling:
+            c.set_processing(energy_cut=panel.energy_cut(), baseline=panel.baseline())
+
+    def pull() -> None:
+        """Show ranges set through the controller (e.g. by another area)."""
+        nonlocal pulling
+        state = c.processing
+        if (panel.energy_cut(), panel.baseline()) == (state.energy_cut, state.baseline):
+            return
+        pulling = True
+        try:
+            panel.show_ranges(state.energy_cut, state.baseline)
+        finally:
+            pulling = False
 
     for switch in (panel.cut_on, panel.baseline_on):
         switch.toggled.connect(push)
@@ -138,6 +167,7 @@ def install(window) -> None:
         lambda changed: panel.status.setText(CHANGED if changed else APPLIED)
     )
     push()
+    c.processingChanged.connect(pull)
 
     window.commands["process"].triggered.connect(lambda: process(window))
 

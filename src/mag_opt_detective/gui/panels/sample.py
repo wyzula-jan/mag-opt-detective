@@ -47,8 +47,8 @@ def field_range_of(tab: MeasurementTab) -> FieldRange:
 def connect_measurement(window, tab: MeasurementTab, which: str) -> None:
     """Keep the file lists and the custom field range of *tab* in the controller.
 
-    *which* is "sample" or "reference". File lists follow the controller both ways, so
-    files set elsewhere (e.g. the Open sweep button) show here too.
+    *which* is "sample" or "reference". Both follow the controller both ways, so values set
+    elsewhere (e.g. files from the Open sweep button) show here too.
     """
     c = window.controller
     files_key, field_key = f"{which}_files", f"{which}_field"
@@ -62,18 +62,26 @@ def connect_measurement(window, tab: MeasurementTab, which: str) -> None:
     def pull() -> None:
         nonlocal syncing
         files: SweepFiles = getattr(c.processing, files_key)
+        field: FieldRange = getattr(c.processing, field_key)
+        box = tab.field_range
         syncing = True
         try:
             if tuple(tab.zero_paths()) != files.zero:
                 tab.zero_list.set_paths(files.zero)
             if tuple(tab.field_paths()) != files.field:
                 tab.field_list.set_paths(files.field)
+            for edit, value in zip(
+                (box.start, box.step, box.end), (field.start, field.step, field.end), strict=True
+            ):
+                if parse_float(edit.text()) != value:
+                    edit.setText("" if value is None else str(value))
         finally:
             syncing = False
         tab.set_custom_field_enabled(c.processing.custom_field)
 
     def push_field() -> None:
-        c.set_processing(**{field_key: field_range_of(tab)})
+        if not syncing:
+            c.set_processing(**{field_key: field_range_of(tab)})
 
     tab.zero_list.pathsChanged.connect(push_files)
     tab.field_list.pathsChanged.connect(push_files)
@@ -106,8 +114,14 @@ def install(window) -> None:
     def on_field_source() -> None:
         c.set_processing(custom_field=panel.custom_field())
 
+    def follow_field_source() -> None:
+        text = FIELD_CUSTOM if c.processing.custom_field else FIELD_FROM_NAMES
+        if panel.field_source.currentText() != text:
+            panel.field_source.setCurrentText(text)
+
     panel.field_source.currentIndexChanged.connect(on_field_source)
     on_field_source()
+    c.processingChanged.connect(follow_field_source)
     c.processingChanged.connect(lambda: page.set_subtitle(_summary(c.processing.sample_files)))
     page.set_subtitle(_summary(c.processing.sample_files))
 

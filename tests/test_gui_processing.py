@@ -20,6 +20,7 @@ from mag_opt_detective.core.pipeline import PlotKind, ReferenceMode
 from mag_opt_detective.core.processing import Axis
 from mag_opt_detective.core.spectra import load_tsv
 from mag_opt_detective.core.units import Unit
+from mag_opt_detective.gui.controller import FieldRange
 from mag_opt_detective.gui.widgets import FileListWidget
 
 window, errors = gui_helpers.window, gui_helpers.errors  # shared fixtures
@@ -335,3 +336,37 @@ def test_changed_since_process(window, sweep):
     assert tb.process_button.dot
     process(window)
     assert not tb.process_button.dot and not window._rail_buttons["processing"].badge
+
+
+def test_panels_follow_the_processing_state(window, sweep):
+    c = window.controller
+    set_unit(window, "meV")
+    c.set_processing(
+        energy_cut=(200.0, 800.0),
+        baseline=(300.0, None),
+        reference_mode=ReferenceMode.SELF,
+        smooth=True,
+        sg_window=15,
+        custom_field=True,
+        sample_field=FieldRange(1.0, 0.5, 3.0),
+    )
+    processing = window.panels["processing"]
+    assert processing.cut_on.isChecked() and processing.baseline_on.isChecked()
+    assert processing.cut_lo.text() == "24.7967" and processing.baseline_hi.text() == ""
+    reference = window.panels["reference"]
+    assert reference.ref_self.isChecked() and reference.smooth.isChecked()
+    assert reference.sg_window.value() == 15
+    assert window.panel_pages["reference"].subtitle.text().startswith("Uses the (smoothed)")
+    sample = window.panels["sample"]
+    assert sample.custom_field() and sample.measurement.field_range.isEnabled()
+    box = sample.measurement.field_range
+    assert (box.start.text(), box.step.text(), box.end.text()) == ("1.0", "0.5", "3.0")
+
+    processing.baseline_on.setChecked(False)  # an unrelated edit keeps the rest
+    assert c.processing.energy_cut == (200.0, 800.0) and c.processing.baseline is None
+    assert c.processing.sample_field == FieldRange(1.0, 0.5, 3.0)
+    assert c.processing.sg_window == 15
+    c.set_processing(energy_cut=None, custom_field=False)
+    assert not processing.cut_on.isChecked() and not sample.custom_field()
+    processing.cut_on.setChecked(True)  # the typed ends come back
+    assert c.processing.energy_cut == pytest.approx((200.0, 800.0))

@@ -28,7 +28,11 @@ def install(window) -> None:
     )
     connect_measurement(window, tab, "reference")
 
+    pulling = False
+
     def push() -> None:
+        if pulling:
+            return
         c.set_processing(
             reference_mode=tab.reference_mode(),
             smooth=tab.smooth.isChecked(),
@@ -37,11 +41,27 @@ def install(window) -> None:
         )
         page.set_subtitle(SUBTITLES[c.processing.reference_mode])
 
+    def pull() -> None:
+        """Show options set through the controller (e.g. by another area)."""
+        nonlocal pulling
+        p = c.processing
+        pulling = True
+        try:
+            if tab.reference_mode() is not p.reference_mode:
+                tab.set_reference_mode(p.reference_mode)
+            tab.smooth.setChecked(p.smooth)
+            tab.sg_window.setValue(p.sg_window)
+            tab.sg_poly.setValue(p.sg_poly)
+        finally:
+            pulling = False
+        page.set_subtitle(SUBTITLES[p.reference_mode])
+
     tab.ref_group.buttonToggled.connect(lambda _b, checked: checked and push())
     tab.smooth.toggled.connect(push)
     tab.sg_window.valueChanged.connect(push)
     tab.sg_poly.valueChanged.connect(push)
     push()
+    c.processingChanged.connect(pull)
 
     for text, slot, shortcut in (
         ("Load Reference Field…", tab.load_field_dialog, "Ctrl+R"),

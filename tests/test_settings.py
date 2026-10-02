@@ -4,7 +4,10 @@ import pytest
 from PySide6.QtCore import QSettings, Qt
 from PySide6.QtGui import QGuiApplication
 
+from mag_opt_detective.core.pipeline import PlotKind, ReferenceMode
+from mag_opt_detective.core.processing import Axis
 from mag_opt_detective.core.units import Unit
+from mag_opt_detective.gui.controller import PlotSelection
 from mag_opt_detective.gui.main_window import MainWindow
 from mag_opt_detective.gui.plots import BarScale
 from mag_opt_detective.gui.settings import PREFIX
@@ -126,6 +129,20 @@ def test_restoring_does_not_depend_on_the_order(qtbot, ini):
         assert w2.panels["processing"].baseline_lo.text() == "60"
         assert view_page(w2).energy_min.text() == "10"
         w2.close()
+
+
+def test_state_set_through_the_controller_is_remembered(qtbot, ini):
+    w = make_window(qtbot, ini)
+    c = w.controller
+    c.set_unit("THz")
+    c.set_selection(kind=PlotKind.DATA, order=1, axis=Axis.FIELD, physical=True)
+    c.set_processing(energy_cut=(200.0, 800.0), reference_mode=ReferenceMode.SELF)
+    w.close()
+    c2 = make_window(qtbot, ini).controller
+    assert c2.unit is Unit.THZ
+    assert c2.selection == PlotSelection(PlotKind.DATA, 1, Axis.FIELD, physical=True)
+    assert c2.processing.energy_cut == (200.0, 800.0)
+    assert c2.processing.reference_mode is ReferenceMode.SELF
 
 
 def test_invalid_values_fall_back_to_defaults(qtbot, ini):
