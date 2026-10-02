@@ -5,10 +5,12 @@ import numpy as np
 import pytest
 
 from mag_opt_detective.core import picking as pk
-from mag_opt_detective.core.picking import Feature, Peak
+from mag_opt_detective.core.picking import Feature, Peak, Track
+from mag_opt_detective.core.spectra import FieldMap
 
 STEP = 0.5  # energy step of the synthetic maps
 ENERGY = np.arange(100.0, 200.0 + STEP / 2, STEP)
+FIELD = np.linspace(0.25, 9.0, 36)
 
 
 def lorentz(x, x0, g):
@@ -19,6 +21,26 @@ def dispersive(x, x0, g):
     """Minus the derivative of a Lorentzian (scaled): rising inflection at x0, falling at x0±g."""
     u = (x - x0) / g
     return 2.0 * u / (1.0 + u**2) ** 2
+
+
+def line_map(lines, *, energy=ENERGY, field=FIELD, width=1.5, noise=0.0, seed=0, shape=lorentz):
+    """Map with one line per callable ``E(B)``; ``nan`` energies leave a column empty."""
+    rng = np.random.default_rng(seed)
+    values = noise * rng.standard_normal((energy.size, field.size))
+    for line in lines:
+        for j, b in enumerate(field):
+            e0 = line(b)
+            if np.isfinite(e0):
+                values[:, j] += shape(energy, e0, width)
+    return FieldMap(energy=energy, field=field, values=values, unit="meV")
+
+
+def linear(b):
+    return 130.0 + 4.0 * b
+
+
+def sqrt_line(b):
+    return 120.0 + 15.0 * np.sqrt(b)
 
 
 # ---- find_features ----------------------------------------------------------------------
@@ -141,7 +163,168 @@ def test_find_features_rejects_bad_input():
         pk.find_features(ENERGY, ENERGY, "peak")
 
 
+# ---- track ------------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("line", [linear, sqrt_line])
+def test_track_follows_a_noisy_line(line):
+    fmap = line_map([line], noise=0.01, seed=4)
+    seed = (FIELD[18], line(FIELD[18]) + 0.8)
+    result = pk.track(fmap, seed, Feature.MAX, window=3.0, prominence=0.2)
+    np.testing.assert_array_equal(result.field, FIELD)
+    assert np.max(np.abs(result.energy - line(FIELD))) < STEP / 4
+    assert np.all(result.strength > 0.8)
+    assert len(result) == FIELD.size
+
+
+def test_track_minimum_of_inverted_lines():
+    fmap = line_map([linear], noise=0.01, seed=5)
+    fmap = fmap.with_values(1.0 - 0.5 * fmap.values)
+    result = pk.track(fmap, (FIELD[0], linear(FIELD[0])), "min", window=3.0, prominence=0.1)
+    assert np.max(np.abs(result.energy - linear(FIELD))) < STEP / 4
+
+
+def test_track_rising_inflection():
+    fmap = line_map([sqrt_line], width=4.0, shape=dispersive)
+    result = pk.track(fmap, (FIELD[-1], sqrt_line(FIELD[-1])), "rising", window=3.0)
+    assert result.field.size == FIELD.size
+    assert np.max(np.abs(result.energy - sqrt_line(FIELD))) < STEP / 4
+
+
+def test_track_direction():
+    fmap = line_map([linear])
+    seed = (FIELD[10], linear(FIELD[10]))
+    up = pk.track(fmap, seed, "max", window=3.0, direction="up")
+    down = pk.track(fmap, seed, "max", window=3.0, direction="down")
+    np.testing.assert_array_equal(up.field, FIELD[10:])
+    np.testing.assert_array_equal(down.field, FIELD[:11])
+    with pytest.raises(ValueError, match="direction"):
+        pk.track(fmap, seed, "max", window=3.0, direction="sideways")
+
+
+def test_track_stops_after_max_misses_when_the_line_ends():
+    end = FIELD[25]
+    fmap = line_map([lambda b: linear(b) if b <= end else np.nan], noise=0.01, seed=6)
+    result = pk.track(fmap, (FIELD[5], linear(FIELD[5])), "max", window=3.0, prominence=0.2)
+    np.testing.assert_array_equal(result.field, FIELD[:26])
+
+
+def test_track_bridges_at_most_max_misses_columns():
+    gap = FIELD[[12, 13]]
+    fmap = line_map([lambda b: np.nan if b in gap else linear(b)], noise=0.01, seed=7)
+    seed = (FIELD[5], linear(FIELD[5]))
+    bridged = pk.track(fmap, seed, "max", window=3.0, prominence=0.2, max_misses=2)
+    np.testing.assert_array_equal(bridged.field, np.delete(FIELD, [12, 13]))
+    stopped = pk.track(fmap, seed, "max", window=3.0, prominence=0.2, max_misses=1)
+    np.testing.assert_array_equal(stopped.field, FIELD[:12])
+
+
+def test_track_skips_nan_columns():
+    fmap = line_map([sqrt_line])
+    values = fmap.values.copy()
+    values[:, [3, 4, 5, 20]] = np.nan
+    values[:40, 10] = np.nan  # partly empty column, away from the line
+    fmap = fmap.with_values(values)
+    result = pk.track(fmap, (FIELD[15], sqrt_line(FIELD[15])), "max", window=3.0, max_misses=0)
+    np.testing.assert_array_equal(result.field, np.delete(FIELD, [3, 4, 5, 20]))
+    assert np.max(np.abs(result.energy - sqrt_line(result.field))) < STEP / 4
+
+
+def test_track_on_a_non_uniform_energy_grid():
+    steps = np.linspace(0.3, 0.8, 180)
+    energy = 100.0 + np.concatenate([[0.0], np.cumsum(steps)])
+    fmap = line_map([linear], energy=energy, width=2.0)
+    result = pk.track(fmap, (FIELD[0], linear(FIELD[0])), "max", window=3.0)
+    local = np.interp(result.energy, energy[1:], steps)
+    assert result.field.size == FIELD.size
+    assert np.all(np.abs(result.energy - linear(FIELD)) < local / 4)
+
+
+def test_track_seed_errors():
+    fmap = line_map([linear])
+    with pytest.raises(ValueError, match="outside"):
+        pk.track(fmap, (FIELD[-1] + 1.0, 150.0), "max", window=3.0)
+    with pytest.raises(ValueError, match="outside"):
+        pk.track(fmap, (FIELD[0], ENERGY[0] - 1.0), "max", window=3.0)
+    with pytest.raises(ValueError, match="no max feature"):
+        pk.track(fmap, (FIELD[0], linear(FIELD[0]) + 10.0), "max", window=3.0)
+    with pytest.raises(ValueError, match="no min feature"):
+        pk.track(fmap, (FIELD[0], linear(FIELD[0])), "min", window=3.0, prominence=0.1)
+    with pytest.raises(ValueError, match="window"):
+        pk.track(fmap, (FIELD[0], linear(FIELD[0])), "max", window=0.0)
+
+
+# ---- detect -----------------------------------------------------------------------------
+
+
+def falling_line(b):
+    return 190.0 - 1.5 * b
+
+
+def test_detect_finds_two_separate_lines():
+    fmap = line_map([linear, falling_line], noise=0.01, seed=8)
+    tracks = pk.detect(fmap, feature="max", prominence=0.2)
+    assert len(tracks) == 2
+    for result, line in zip(tracks, [linear, falling_line], strict=True):
+        np.testing.assert_array_equal(result.field, FIELD)
+        assert np.max(np.abs(result.energy - line(FIELD))) < STEP / 4
+
+
+def test_detect_box_limits():
+    fmap = line_map([linear, falling_line])
+    tracks = pk.detect(fmap, feature="max", b_range=(2.0, 6.0), e_range=(155.0, None))
+    assert len(tracks) == 1
+    inside = (FIELD >= 2.0) & (FIELD <= 6.0)
+    np.testing.assert_array_equal(tracks[0].field, FIELD[inside])
+    assert np.allclose(tracks[0].energy, falling_line(FIELD[inside]), atol=STEP / 4)
+
+
+def test_detect_prominence_excludes_noise_only_columns():
+    fmap = line_map([lambda b: linear(b) if b < 4.0 else np.nan], noise=0.01, seed=9)
+    tracks = pk.detect(fmap, feature="max", prominence=0.2)
+    assert len(tracks) == 1
+    np.testing.assert_array_equal(tracks[0].field, FIELD[FIELD < 4.0])
+    assert len(pk.detect(fmap, feature="max")) > 1
+
+
+def test_detect_skips_nan_columns_and_drops_short_tracks():
+    fmap = line_map([linear, lambda b: 185.0 if b < 0.6 else np.nan])
+    values = fmap.values.copy()
+    values[:, [6, 7, 30]] = np.nan
+    fmap = fmap.with_values(values)
+    tracks = pk.detect(fmap, feature="max")
+    assert len(tracks) == 1
+    np.testing.assert_array_equal(tracks[0].field, np.delete(FIELD, [6, 7, 30]))
+    assert len(pk.detect(fmap, feature="max", min_length=3)) == 1
+    assert len(pk.detect(fmap, feature="max", min_length=2)) == 2
+
+
+def test_detect_max_jump_limits_linking():
+    fmap = line_map([lambda b: 110.0 + 8.0 * b])  # 2 meV (4 samples) per column
+    assert len(pk.detect(fmap, feature="max", min_length=1)) == FIELD.size
+    tracks = pk.detect(fmap, feature="max", max_jump=3.0)
+    assert len(tracks) == 1
+    assert len(tracks[0]) == FIELD.size
+
+
+def test_detect_rejects_bad_options():
+    fmap = line_map([linear])
+    with pytest.raises(ValueError, match="max_jump"):
+        pk.detect(fmap, feature="max", max_jump=0.0)
+    with pytest.raises(ValueError, match="min_length"):
+        pk.detect(fmap, feature="max", min_length=0)
+
+
 # ---- types ------------------------------------------------------------------------------
+
+
+def test_track_is_sorted_by_field():
+    result = Track(field=[2.0, 1.0, 3.0], energy=[20.0, 10.0, 30.0], strength=[0.2, 0.1, 0.3])
+    np.testing.assert_array_equal(result.field, [1.0, 2.0, 3.0])
+    np.testing.assert_array_equal(result.energy, [10.0, 20.0, 30.0])
+    np.testing.assert_array_equal(result.strength, [0.1, 0.2, 0.3])
+    with pytest.raises(ValueError, match="equal length"):
+        Track(field=[1.0], energy=[1.0, 2.0], strength=[1.0])
 
 
 def test_feature_and_peak_values():

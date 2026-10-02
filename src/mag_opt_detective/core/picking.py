@@ -8,15 +8,23 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
+from typing import Literal
 
 import numpy as np
 from scipy.signal import find_peaks, savgol_filter
+
+from mag_opt_detective.core.spectra import FieldMap
 
 Smoothing = tuple[int, int]
 """Savitzky-Golay ``(window, polyorder)``; the window is in samples and odd."""
 
 Range = tuple[float | None, float | None]
 """Inclusive ``(lo, hi)``; None leaves that side open."""
+
+Direction = Literal["both", "up", "down"]
+
+#: default linking distance of :func:`detect`, in median energy steps
+JUMP_SAMPLES = 3.0
 
 
 class Feature(StrEnum):
@@ -42,6 +50,29 @@ class Peak:
     energy: float
     strength: float
     index: int
+
+
+@dataclass(frozen=True, eq=False)
+class Track:
+    """One feature followed across field columns, sorted by field."""
+
+    field: np.ndarray
+    energy: np.ndarray
+    strength: np.ndarray
+
+    def __post_init__(self) -> None:
+        field = np.asarray(self.field, dtype=float)
+        energy = np.asarray(self.energy, dtype=float)
+        strength = np.asarray(self.strength, dtype=float)
+        if field.ndim != 1 or not field.shape == energy.shape == strength.shape:
+            raise ValueError("field, energy and strength must be 1D arrays of equal length")
+        order = np.argsort(field, kind="stable")
+        object.__setattr__(self, "field", field[order])
+        object.__setattr__(self, "energy", energy[order])
+        object.__setattr__(self, "strength", strength[order])
+
+    def __len__(self) -> int:
+        return self.field.size
 
 
 def find_features(
@@ -95,6 +126,153 @@ def find_features(
         for e, s, i in zip(positions, strengths, nearest, strict=True)
     ]
     return sorted(peaks, key=lambda p: p.energy)
+
+
+def track(
+    fmap: FieldMap,
+    seed: tuple[float, float],
+    feature: Feature | str,
+    *,
+    window: float,
+    smooth: Smoothing | None = None,
+    prominence: float | None = None,
+    max_misses: int = 2,
+    history: int = 3,
+    direction: Direction = "both",
+) -> Track:
+    """Follow one feature through *fmap*, starting at *seed* = ``(field, energy)``.
+
+    The feature nearest the seed energy within ±*window* in the field column nearest the
+    seed starts the track. From there the walk goes column by column up and/or down in
+    field (*direction*): the next energy is predicted by a straight line through the last
+    *history* accepted points and the feature nearest the prediction within ±*window* is
+    accepted. A direction stops after more than *max_misses* consecutive columns without
+    a feature. Columns without any finite value are skipped and do not count as misses.
+    Features are searched in the full column with :func:`find_features`.
+    """
+    feature = Feature(feature)
+    if not window > 0:
+        raise ValueError("the search window must be positive")
+    if max_misses < 0 or history < 1:
+        raise ValueError("max_misses must be >= 0 and history >= 1")
+    if direction not in ("both", "up", "down"):
+        raise ValueError(f"unknown direction {direction!r}")
+    if fmap.field.size == 0 or fmap.energy.size == 0:
+        raise ValueError("the map is empty")
+    b, e = (float(v) for v in seed)
+    in_field = np.nanmin(fmap.field) <= b <= np.nanmax(fmap.field)
+    in_energy = np.nanmin(fmap.energy) <= e <= np.nanmax(fmap.energy)
+    if not (in_field and in_energy):
+        raise ValueError(f"seed ({b:g} T, {e:g} {fmap.unit}) is outside the map")
+
+    def features(j: int) -> list[Peak]:
+        return find_features(
+            fmap.energy, fmap.values[:, j], feature, smooth=smooth, prominence=prominence
+        )
+
+    start = int(np.abs(fmap.field - b).argmin())
+    first = _nearest_peak(features(start), e, window)
+    if first is None:
+        raise ValueError(
+            f"no {feature} feature within ±{window:g} {fmap.unit} of the seed "
+            f"at {fmap.field[start]:g} T"
+        )
+    order = np.argsort(fmap.field, kind="stable")
+    pos = int(np.flatnonzero(order == start)[0])
+    points = [(float(fmap.field[start]), first)]
+    walks = {"up": [order[pos + 1 :]], "down": [order[:pos][::-1]]}
+    walks["both"] = walks["up"] + walks["down"]
+    for walk in walks[direction]:
+        accepted = [points[0]]
+        misses = 0
+        for j in walk:
+            if not np.isfinite(fmap.values[:, j]).any():
+                continue
+            b_j = float(fmap.field[j])
+            recent = accepted[-history:]
+            guess = _predict([p[0] for p in recent], [p[1].energy for p in recent], b_j)
+            peak = _nearest_peak(features(j), guess, window)
+            if peak is None:
+                misses += 1
+                if misses > max_misses:
+                    break
+                continue
+            misses = 0
+            accepted.append((b_j, peak))
+        points += accepted[1:]
+    return _to_track(points)
+
+
+def detect(
+    fmap: FieldMap,
+    *,
+    feature: Feature | str,
+    b_range: Range | None = None,
+    e_range: Range | None = None,
+    smooth: Smoothing | None = None,
+    prominence: float | None = None,
+    max_jump: float | None = None,
+    min_length: int = 3,
+) -> list[Track]:
+    """All tracks of *feature* inside the box *b_range* x *e_range*, sorted by mean energy.
+
+    Features are found in every column of the box with :func:`find_features` and linked
+    between neighbouring columns (in field order) by nearest neighbour: the closest pairs
+    of a track end and a feature of the next column within *max_jump* are joined first,
+    each track and each feature at most once; features left over start new tracks.
+    *max_jump* defaults to :data:`JUMP_SAMPLES` median energy steps. Columns without any
+    finite value inside the box are skipped: tracks link across them, with the jump limit
+    multiplied by the number of field steps bridged. Tracks with fewer than *min_length*
+    points are dropped.
+    """
+    feature = Feature(feature)
+    if min_length < 1:
+        raise ValueError("min_length must be >= 1")
+    if max_jump is None:
+        steps = np.diff(np.sort(fmap.energy[np.isfinite(fmap.energy)]))
+        max_jump = JUMP_SAMPLES * float(np.median(steps)) if steps.size else 0.0
+    elif not max_jump > 0:
+        raise ValueError("max_jump must be positive")
+    columns = np.flatnonzero(_inside(fmap.field, b_range))
+    columns = columns[np.argsort(fmap.field[columns], kind="stable")]
+    rows = _inside(fmap.energy, e_range)
+
+    done: list[list[tuple[float, Peak]]] = []
+    active: list[list[tuple[float, Peak]]] = []
+    previous = 0
+    for n, j in enumerate(columns):
+        if not np.isfinite(fmap.values[rows, j]).any():
+            continue
+        limit = max_jump * max(n - previous, 1)
+        previous = n
+        b_j = float(fmap.field[j])
+        peaks = find_features(
+            fmap.energy,
+            fmap.values[:, j],
+            feature,
+            smooth=smooth,
+            prominence=prominence,
+            e_range=e_range,
+        )
+        ends = np.array([t[-1][1].energy for t in active])
+        found = np.array([p.energy for p in peaks])
+        dist = np.abs(ends[:, None] - found[None, :])
+        t_idx, p_idx = np.nonzero(dist <= limit)
+        by_distance = np.argsort(dist[t_idx, p_idx], kind="stable")
+        used_t: set[int] = set()
+        used_p: set[int] = set()
+        for t, p in zip(t_idx[by_distance], p_idx[by_distance], strict=True):
+            if t in used_t or p in used_p:
+                continue
+            used_t.add(int(t))
+            used_p.add(int(p))
+            active[t].append((b_j, peaks[p]))
+        done += [tr for i, tr in enumerate(active) if i not in used_t]
+        active = [tr for i, tr in enumerate(active) if i in used_t]
+        active += [[(b_j, pk)] for i, pk in enumerate(peaks) if i not in used_p]
+    done += active
+    tracks = [_to_track(tr) for tr in done if len(tr) >= min_length]
+    return sorted(tracks, key=lambda tr: float(tr.energy.mean()))
 
 
 def _check_smoothing(smooth: Smoothing | None) -> None:
@@ -187,3 +365,24 @@ def _nearest_index(x: np.ndarray, positions: np.ndarray) -> np.ndarray:
     """Index of the sample of sorted *x* nearest to each position."""
     i = np.clip(np.searchsorted(x, positions), 1, x.size - 1)
     return np.where(positions - x[i - 1] <= x[i] - positions, i - 1, i)
+
+
+def _nearest_peak(peaks: list[Peak], target: float, window: float) -> Peak | None:
+    near = [p for p in peaks if abs(p.energy - target) <= window]
+    return min(near, key=lambda p: abs(p.energy - target), default=None)
+
+
+def _predict(field: list[float], energy: list[float], b: float) -> float:
+    """Energy at *b* from a straight line through the given points (or the last one)."""
+    if len(field) < 2 or np.ptp(field) == 0:
+        return energy[-1]
+    slope, intercept = np.polyfit(field, energy, 1)
+    return float(slope * b + intercept)
+
+
+def _to_track(points: list[tuple[float, Peak]]) -> Track:
+    return Track(
+        field=np.array([b for b, _ in points]),
+        energy=np.array([p.energy for _, p in points]),
+        strength=np.array([p.strength for _, p in points]),
+    )
