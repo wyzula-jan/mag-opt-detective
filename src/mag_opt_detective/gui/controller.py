@@ -1,8 +1,8 @@
 """Application state and the actions on it, without widgets.
 
 :class:`AppController` keeps what the window shows: the processed result, the picked points,
-the library slots, the display energy unit, the view (:class:`ViewState`) and the processing
-options (:class:`ProcessingState`). Data, slots, points, the energy window and the baseline
+the library maps, the display energy unit, the view (:class:`ViewState`) and the processing
+options (:class:`ProcessingState`). Data, maps, points, the energy window and the baseline
 region are kept in cm^-1; the display unit is applied only when showing or exporting, so a
 unit switch never reprocesses anything. Area modules (panels, inspector, plot area) change the
 state through this class and redraw on its signals.
@@ -411,6 +411,24 @@ class FigureState:
     overlays: dict[str, list[Curve]]
 
 
+@dataclass(eq=False)
+class LibraryEntry:
+    """A processed map in the library (cm^-1) with its tick and cut limits.
+
+    *energy_cut* is in cm^-1 and *field_cut* in T; a None end keeps everything on that side.
+    *key* identifies the entry while it is in the library.
+    """
+
+    name: str
+    fmap: FieldMap
+    kind: str = KIND_LABELS[PlotKind.RATIO]
+    used: bool = True
+    energy_cut: Range = (None, None)
+    field_cut: Range = (None, None)
+    source: str = ""  # the file it was loaded from ("" for a saved map)
+    key: int = 0
+
+
 # ---------------------------------------------------------------------- controller
 class AppController(QObject):
     """State of the window and the actions on it (no widgets)."""
@@ -423,14 +441,17 @@ class AppController(QObject):
     processingChanged = Signal()
     changedSinceProcess = Signal(bool)
     pointsChanged = Signal()
-    slotsChanged = Signal()
+    libraryChanged = Signal()  # library entries added or removed
+    entryChanged = Signal(int)  # key of a library entry whose tick or limits changed
     restored = Signal()  # settings were restored; re-derive what is shown from stored state
 
     def __init__(self, parent: QObject | None = None):
         super().__init__(parent)
         self.result: ProcessResult | None = None
         self.points: PointTable | None = None
-        self.slots: dict[int, FieldMap] = {}
+        self.library: list[LibraryEntry] = []  # processed maps, cm^-1
+        self._next_key = 0
+        self._library_name = ""  # of the library map shown
         self.processed_at: datetime | None = None  # of the last Process
         self.result_source = ""  # "process" or "library": where the shown result comes from
         self._unit = Unit.CM1
@@ -861,9 +882,40 @@ class AppController(QObject):
         self.points.save_tsv(path, unit=self._unit)
         logger.info("Exported points to %s", path)
 
-    # --- library slots -----------------------------------------------------------------
-    def load_slot(self, slot: int, path: str | Path, field_values: np.ndarray | None = None):
-        """Read a processed table into *slot* (kept in cm^-1); returns its file unit.
+    # --- library -----------------------------------------------------------------------
+    def entry(self, key: int) -> LibraryEntry:
+        for entry in self.library:
+            if entry.key == key:
+                return entry
+        raise panel_error("that map is no longer in the library", "library")
+
+    def _unique_name(self, name: str) -> str:
+        names = {entry.name for entry in self.library}
+        if name not in names:
+            return name
+        n = 2
+        while f"{name} ({n})" in names:
+            n += 1
+        return f"{name} ({n})"
+
+    def add_map(
+        self, fmap: FieldMap, name: str, kind: str = KIND_LABELS[PlotKind.RATIO], source: str = ""
+    ) -> LibraryEntry:
+        """Add a processed map (kept in cm^-1) to the library, ticked."""
+        self._next_key += 1
+        entry = LibraryEntry(
+            name=self._unique_name(name.strip() or "Map"),
+            fmap=fmap.to_unit(Unit.CM1),
+            kind=kind,
+            source=source,
+            key=self._next_key,
+        )
+        self.library.append(entry)
+        self.libraryChanged.emit()
+        return entry
+
+    def load_table(self, path: str | Path, field_values: np.ndarray | None = None) -> LibraryEntry:
+        """Add an exported table to the library (kept in cm^-1).
 
         A table without a unit in its header is in the display unit. *field_values* replace
         the field read from the header.
@@ -871,7 +923,6 @@ class AppController(QObject):
         with in_panel("library"):
             fmap = load_tsv(path, default_unit=self._unit)
             file_unit = fmap.unit
-            fmap = fmap.to_unit(Unit.CM1)
             if field_values is not None:
                 if field_values.size != fmap.field.size:
                     raise ValueError(
@@ -879,85 +930,132 @@ class AppController(QObject):
                         f"the table has {fmap.field.size}"
                     )
                 fmap = fmap.replace(field=field_values)
-        self.slots[slot] = fmap
-        logger.info("Slot %d: loaded %s (energy in %s)", slot, Path(path).name, file_unit)
-        self.slotsChanged.emit()
-        return file_unit
+        entry = self.add_map(fmap, Path(path).name, source=str(path))
+        logger.info("Library: loaded %s (energy in %s)", Path(path).name, file_unit)
+        return entry
 
-    def save_slot(self, slot: int) -> None:
+    def result_name(self) -> str:
+        """A name for the map shown: the sweep's common file prefix, or the library map's."""
+        if self.result_source == "library":
+            return self._library_name or "Library map"
+        used = self._processed_with
+        files = used.sample_files.field if used is not None else ()
+        return common_prefix([Path(f).name for f in files]).strip(SEPARATORS) or "Processed map"
+
+    def save_current_map(self, name: str | None = None) -> LibraryEntry:
+        """Add the R(B)/R(0) map shown to the library."""
         if self.result is None:
             raise panel_error("nothing to save - process data first", "library")
-        self.slots[slot] = self.result.ratio
-        logger.info("Slot %d: current R(B)/R(0) saved", slot)
-        self.slotsChanged.emit()
+        entry = self.add_map(self.result.ratio, name or self.result_name())
+        logger.info("Library: saved the current R(B)/R(0) as %r", entry.name)
+        return entry
 
-    def slot(self, slot: int) -> FieldMap:
-        if slot not in self.slots:
-            raise panel_error(f"slot {slot} is empty", "library")
-        return self.slots[slot]
+    def remove_entry(self, entry: LibraryEntry) -> None:
+        if entry in self.library:
+            self.library.remove(entry)
+            logger.info("Library: removed %r", entry.name)
+            self.libraryChanged.emit()
 
-    def _slot_energy(self, slot: int, rng: Range | None) -> FieldMap:
-        fmap = self.slot(slot)
-        if rng is None or rng == (None, None):
-            return fmap
-        self.check_energy_range(f"slot {slot}: E range", rng, fmap.energy, "library")
-        return crop_energy(fmap, *rng)
+    def update_entry(self, entry: LibraryEntry, **changes) -> None:
+        """Change an entry's ``used`` tick, ``energy_cut`` (cm^-1) or ``field_cut`` (T)."""
+        unknown = set(changes) - {"used", "energy_cut", "field_cut"}
+        if unknown:
+            raise TypeError(f"cannot change {sorted(unknown)} of a library entry")
+        changed = False
+        for name, value in changes.items():
+            if name != "used":
+                value = tuple(None if v is None else float(v) for v in value)
+            if getattr(entry, name) != value:
+                setattr(entry, name, value)
+                changed = True
+        if changed:
+            self.entryChanged.emit(entry.key)
 
-    def plot_slot(self, slot: int, energy_range: Range | None = None) -> ProcessResult:
-        """Show *slot*, cut to *energy_range* (cm^-1) if given."""
-        fmap = self._slot_energy(slot, energy_range)
-        logger.info("-" * 40)
-        logger.info("Plotting slot %d", slot)
+    def ticked(self) -> list[LibraryEntry]:
+        return [entry for entry in self.library if entry.used]
+
+    def _energy_cut(self, entry: LibraryEntry) -> FieldMap:
+        rng = entry.energy_cut
+        if rng == (None, None):
+            return entry.fmap
+        self.check_energy_range(f"{entry.name}: E range", rng, entry.fmap.energy, "library")
+        return crop_energy(entry.fmap, *rng)
+
+    def _field_cut(self, entry: LibraryEntry) -> Range:
+        lo, hi = entry.field_cut
+        if lo is not None and hi is not None and lo >= hi:
+            raise panel_error(
+                f"{entry.name}: B range: the first value must be below the second; it is "
+                f"{fmt(lo)} – {fmt(hi)} T",
+                "library",
+            )
+        return lo, hi
+
+    def _show_library(self, fmap: FieldMap, name: str) -> ProcessResult:
+        self._library_name = name
         return self.from_map(fmap)
 
-    def merge_by_energy(self, parts: list[tuple[int, Range | None]]) -> ProcessResult:
-        """Join slots measured in different spectral ranges, each cut to its range (cm^-1)."""
-        if not parts:
-            raise panel_error("no slot selected - load slots and tick them", "library")
-        for slot, rng in parts:
-            if rng is not None:
+    def plot_entry(self, entry: LibraryEntry, cut_energy: bool = False) -> ProcessResult:
+        """Show *entry*, cut to its E limits if *cut_energy*."""
+        fmap = self._energy_cut(entry) if cut_energy else entry.fmap
+        logger.info("-" * 40)
+        logger.info("Plotting library map %r", entry.name)
+        return self._show_library(fmap, entry.name)
+
+    def _parts(self, entries: list[LibraryEntry] | None) -> list[LibraryEntry]:
+        parts = self.ticked() if entries is None else list(entries)
+        if len(parts) < 2:
+            raise panel_error("tick at least two maps to merge or average them", "library")
+        return parts
+
+    def merge_by_energy(self, entries: list[LibraryEntry] | None = None) -> ProcessResult:
+        """Join maps measured in different spectral ranges, each cut to its E limits.
+
+        *entries* default to the ticked ones.
+        """
+        parts = self._parts(entries)
+        for entry in parts:
+            if entry.energy_cut != (None, None):
                 self.check_energy_range(
-                    f"slot {slot}: E range", rng, self.slot(slot).energy, "library"
+                    f"{entry.name}: E range", entry.energy_cut, entry.fmap.energy, "library"
                 )
         with in_panel("library"):
-            merged = merge_energy([(self.slot(i), *(rng or (None, None))) for i, rng in parts])
+            merged = merge_energy([(e.fmap, *e.energy_cut) for e in parts])
+        names = [e.name for e in parts]
         logger.info("-" * 40)
-        logger.info(
-            "Merged slots %s by energy; energy re-gridded to a uniform step.",
-            [i for i, _ in parts],
-        )
-        return self.from_map(merged)
+        logger.info("Merged %s by energy; energy re-gridded to a uniform step.", names)
+        return self._show_library(merged, "Merged by energy: " + " + ".join(names))
 
-    def merge_by_field(self, parts: list[tuple[int, Range | None]]) -> ProcessResult:
-        """Join slots measured over different field ranges, each cut to its range (T)."""
-        if not parts:
-            raise panel_error("no slot selected - load slots and tick them", "library")
+    def merge_by_field(self, entries: list[LibraryEntry] | None = None) -> ProcessResult:
+        """Join maps measured over different field ranges, each cut to its B limits (T)."""
+        parts = self._parts(entries)
         with in_panel("library"):
-            merged = merge_field([(self.slot(i), *(rng or (None, None))) for i, rng in parts])
+            merged = merge_field([(e.fmap, *self._field_cut(e)) for e in parts])
+        names = [e.name for e in parts]
         logger.info("-" * 40)
         logger.info(
-            "Merged slots %s by field: %d fields, B = %g … %g T.",
-            [i for i, _ in parts],
+            "Merged %s by field: %d fields, B = %g … %g T.",
+            names,
             merged.field.size,
             merged.field[0],
             merged.field[-1],
         )
-        return self.from_map(merged)
+        return self._show_library(merged, "Merged by field: " + " + ".join(names))
 
-    def average(self, parts: list[tuple[int, Range | None, Range | None]]) -> ProcessResult:
-        """Average slots, each cut to its energy (cm^-1) and field range."""
-        if not parts:
-            raise panel_error("no slot selected - load slots and tick them", "library")
+    def average(self, entries: list[LibraryEntry] | None = None) -> ProcessResult:
+        """Average maps, each cut to its E limits (cm^-1) and B limits (T)."""
+        parts = self._parts(entries)
         maps = []
-        for slot, e_range, b_range in parts:
-            fmap = self._slot_energy(slot, e_range)
+        for entry in parts:
+            fmap = self._energy_cut(entry)
             with in_panel("library"):
-                maps.append(crop_field(fmap, *(b_range or (None, None))))
+                maps.append(crop_field(fmap, *self._field_cut(entry)))
         with in_panel("library"):
             averaged = average_maps(maps)
+        names = [e.name for e in parts]
         logger.info("-" * 40)
-        logger.info("Averaged slots %s (%d datasets).", [i for i, *_ in parts], len(parts))
-        return self.from_map(averaged)
+        logger.info("Averaged %s (%d datasets).", names, len(parts))
+        return self._show_library(averaged, "Average: " + " + ".join(names))
 
 
 def _mirrored(

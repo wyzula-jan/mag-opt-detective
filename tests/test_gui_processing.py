@@ -346,14 +346,15 @@ def test_library_maps_leave_the_process_state(window, sweep, errors):
     load_sweep(window, sweep)
     process(window)
     c, tb = window.controller, window.toolbar
-    library.save_slot(window, 0)
-    library.plot_slot(window, 0)
+    library.save_current(window)
+    key = c.library[0].key
+    library.plot_entry(window, key)
     assert "Showing a library map" in window.state_text() and not tb.process_button.dot
     window.panels["processing"].baseline_on.setChecked(True)
     window.panels["processing"].baseline_lo.setText("100")
     window.panels["processing"].baseline_hi.setText("200")
     assert tb.process_button.dot
-    library.plot_slot(window, 0)  # the sweep was not processed again
+    library.plot_entry(window, key)  # the sweep was not processed again
     assert tb.process_button.dot and "Settings changed" in window.state_text()
     process(window)
     assert not tb.process_button.dot and "Processed" in window.state_text()
