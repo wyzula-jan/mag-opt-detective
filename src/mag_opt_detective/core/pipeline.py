@@ -1,4 +1,8 @@
-"""The processing chain behind the "Process" button."""
+"""The processing chain behind the "Process" button.
+
+Everything is processed in cm^-1, the unit of the measured files; :meth:`ProcessResult.get`
+gives a map in the unit that is shown or exported.
+"""
 
 from __future__ import annotations
 
@@ -9,6 +13,7 @@ from mag_opt_detective.core import processing as proc
 from mag_opt_detective.core.processing import Axis
 from mag_opt_detective.core.readers import Measurement
 from mag_opt_detective.core.spectra import FieldMap
+from mag_opt_detective.core.units import Unit
 
 
 class ReferenceMode(Enum):
@@ -30,11 +35,13 @@ class ProcessOptions:
     smooth_reference: bool = False
     sg_window: int = 11
     sg_poly: int = 2
-    baseline_region: tuple[float, float] | None = None
+    baseline_region: tuple[float, float] | None = None  # in cm^-1
 
 
 @dataclass(frozen=True, eq=False)
 class ProcessResult:
+    """The processed maps, all with the energy axis in cm^-1."""
+
     data: FieldMap
     ratio: FieldMap
     average: FieldMap
@@ -60,12 +67,16 @@ class ProcessResult:
         order: int = 0,
         axis: Axis = Axis.ENERGY,
         physical: bool = False,
+        unit: Unit | str = Unit.CM1,
     ) -> FieldMap:
-        """Map of *kind*, differentiated *order* times along *axis*.
+        """Map of *kind* in energy *unit*, differentiated *order* times along *axis*.
 
-        *physical* divides by the real axis spacing instead of one data point.
+        *physical* divides by the real axis spacing instead of one data point, so an
+        energy derivative is per *unit*: it scales with ``CM1_PER_UNIT[unit] ** order``
+        (:func:`~mag_opt_detective.core.units.derivative_scale`). Derivatives along the
+        field and per data point do not depend on the unit.
         """
-        fmap = self.base(kind)
+        fmap = self.base(kind).to_unit(unit)  # convert first: d/dE is per *unit*
         for _ in range(order):
             fmap = proc.derivative(fmap, axis, physical=physical)
         return fmap
@@ -77,8 +88,10 @@ class ProcessResult:
         """Wrap an already processed map (Processed tab).
 
         Data, R(B)/R(0) and R(B)/R(B-average) all show the loaded map; the field-step
-        ratio is computed from it.
+        ratio is computed from it. The map is converted to cm^-1 (if needed), the unit
+        of *baseline_region*.
         """
+        fmap = fmap.to_unit(Unit.CM1)
         corrected = _baseline(fmap, baseline_region)
         step = _baseline(_step_or_none(fmap), baseline_region)
         return cls(data=fmap, ratio=corrected, average=corrected, step=step)
@@ -94,13 +107,26 @@ def _baseline(fmap: FieldMap | None, region: tuple[float, float] | None) -> Fiel
     return proc.baseline_normalize(fmap, region)
 
 
+def _in_cm1(measurement: Measurement) -> Measurement:
+    spectra = measurement.spectra
+    if spectra.unit is Unit.CM1:
+        return measurement
+    return Measurement(spectra=spectra.to_unit(Unit.CM1), zero=measurement.zero)
+
+
 def process(
     sample: Measurement,
     reference: Measurement | None = None,
     options: ProcessOptions | None = None,
 ) -> ProcessResult:
-    """Build Data, R(B)/R(0) and R(B)/R(B-average) maps from a measurement."""
+    """Build Data, R(B)/R(0) and R(B)/R(B-average) maps from a measurement.
+
+    The maps are in cm^-1 (measurements in another unit are converted first), the unit
+    of ``options.baseline_region``.
+    """
     options = options or ProcessOptions()
+    sample = _in_cm1(sample)
+    reference = None if reference is None else _in_cm1(reference)
     data = sample.spectra
     ratio = proc.ratio_to_zero(sample)
     ref_data: FieldMap | None = None

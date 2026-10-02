@@ -8,7 +8,7 @@ from mag_opt_detective.core.readers import (
     read_spectrum,
     sort_paths,
 )
-from mag_opt_detective.core.units import Unit, convert
+from mag_opt_detective.core.units import Unit, convert_range, from_cm1
 
 
 @pytest.mark.parametrize(
@@ -50,9 +50,10 @@ def test_read_spectrum_text_and_opus(tmp_path):
 
 
 def test_load_measurement_field_from_names(sweep):
-    m = load_measurement(sweep["zero"], sweep["field"], unit=Unit.MEV)
+    m = load_measurement(sweep["zero"], sweep["field"])
     np.testing.assert_allclose(m.spectra.field, sweep["fields"])
-    np.testing.assert_allclose(m.spectra.energy, convert(sweep["x"], Unit.CM1, Unit.MEV))
+    assert m.spectra.unit is Unit.CM1  # always the unit of the files
+    np.testing.assert_allclose(m.spectra.energy, sweep["x"])
     assert m.spectra.values.shape == (sweep["x"].size, 4)
     assert m.zero.shape == (sweep["x"].size, 2)
 
@@ -62,9 +63,23 @@ def test_load_measurement_custom_field_and_cut(sweep):
         sweep["zero"][:1], sweep["field"], field=np.arange(1, 5), energy_limits=(200, 500)
     )
     np.testing.assert_allclose(m.spectra.field, [1, 2, 3, 4])
-    assert m.spectra.energy.min() >= 200
-    assert m.spectra.energy.max() <= 500
+    np.testing.assert_allclose(m.spectra.energy[[0, -1]], [200, 500])  # cut in cm-1, inclusive
     assert m.zero.shape[0] == m.spectra.energy.size
+    upper = load_measurement(sweep["zero"], sweep["field"], energy_limits=(None, 150))
+    np.testing.assert_allclose(upper.spectra.energy, [100, 110, 120, 130, 140, 150])
+    with pytest.raises(ValueError, match="cut 1200 to open cm-1 leaves no data"):
+        load_measurement(sweep["zero"], sweep["field"], energy_limits=(1200, None))
+
+
+@pytest.mark.parametrize("unit", [Unit.MEV, Unit.THZ])
+def test_cut_typed_in_another_unit_keeps_boundary_samples(sweep, unit):
+    """A cut typed in *unit* exactly at a sample keeps that sample after conversion."""
+    x = sweep["x"]
+    shown = from_cm1(x, unit)  # what the user sees (and may type) for each sample
+    for k in range(x.size):
+        cut = convert_range((shown[k], shown[k]), unit, Unit.CM1)
+        m = load_measurement(sweep["zero"][:1], sweep["field"][:1], energy_limits=cut)
+        np.testing.assert_array_equal(m.spectra.energy, x[k : k + 1])
 
 
 def test_load_measurement_errors(sweep, tmp_path):

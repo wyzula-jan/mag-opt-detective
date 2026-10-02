@@ -1,4 +1,8 @@
-"""Numerical treatment of field maps (all functions are pure)."""
+"""Numerical treatment of field maps (all functions are pure).
+
+Energy limits are in the unit of the maps they apply to: cm^-1 for processed data.
+Maps that are combined must share one unit.
+"""
 
 from __future__ import annotations
 
@@ -99,7 +103,7 @@ def step_ratio(fmap: FieldMap) -> FieldMap:
 
 
 def baseline_normalize(fmap: FieldMap, region: tuple[float, float]) -> FieldMap:
-    """Shift every spectrum so that its mean over *region* (inclusive) equals one."""
+    """Shift every spectrum so that its mean over the energy *region* (inclusive) equals one."""
     mask = energy_mask(fmap.energy, *region)
     if not mask.any():
         raise ValueError(f"baseline region {region[0]} to {region[1]} {fmap.unit} contains no data")
@@ -134,6 +138,7 @@ def savgol(fmap: FieldMap, window: int, poly: int) -> FieldMap:
 
 
 def crop_energy(fmap: FieldMap, lo: float | None, hi: float | None) -> FieldMap:
+    """Keep the energies inside ``[lo, hi]`` (inclusive; None = no limit)."""
     mask = energy_mask(fmap.energy, lo, hi)
     if not mask.any():
         raise ValueError(f"energy range {lo} to {hi} {fmap.unit} contains no data")
@@ -187,7 +192,7 @@ def _common_energy(maps: Sequence[FieldMap]) -> np.ndarray:
     lo = max(m.energy[0] for m in maps)
     hi = min(m.energy[-1] for m in maps)
     energy = maps[0].energy
-    energy = energy[(energy >= lo) & (energy <= hi)]
+    energy = energy[energy_mask(energy, lo, hi)]  # inclusive, robust to rounded tables
     if energy.size < 2:
         raise ValueError("the datasets have no common energy range")
     return energy

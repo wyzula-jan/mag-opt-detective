@@ -4,9 +4,11 @@ from PySide6.QtCore import QMimeData, QPointF, Qt, QUrl
 from PySide6.QtGui import QDropEvent
 from PySide6.QtWidgets import QFileDialog, QMessageBox
 
+import golden
 from mag_opt_detective.core.pipeline import PlotKind, ReferenceMode
 from mag_opt_detective.core.processing import Axis
 from mag_opt_detective.core.spectra import load_tsv
+from mag_opt_detective.core.units import Unit, convert, to_cm1
 from mag_opt_detective.gui.main_window import MainWindow
 from mag_opt_detective.gui.widgets import FileListWidget
 
@@ -34,6 +36,18 @@ def load_sweep(window, sweep):
 
 def shown_image(window) -> np.ndarray:
     return window.plot_panel.color_map.image.image
+
+
+def energy_label(window) -> str:
+    return window.plot_panel.color_map.plot.getAxis("left").labelText
+
+
+def save_to(monkeypatch, path) -> None:
+    monkeypatch.setattr(QFileDialog, "getSaveFileName", lambda *a, **k: (str(path), ""))
+
+
+def open_from(monkeypatch, path) -> None:
+    monkeypatch.setattr(QFileDialog, "getOpenFileName", lambda *a, **k: (str(path), ""))
 
 
 def test_file_list_accepts_drop(qtbot, sweep):
@@ -130,29 +144,106 @@ def test_export_slots_and_merge(window, sweep, tmp_path, monkeypatch, errors):
     load_sweep(window, sweep)
     window.data_panel.unit.setCurrentText("meV")
     window.process_data()
-    out = tmp_path / "S1.csv"
-    monkeypatch.setattr(QFileDialog, "getSaveFileName", lambda *a, **k: (str(out), ""))
+    assert window.result.ratio.unit is Unit.CM1  # processed in cm-1, shown in meV
+    assert energy_label(window) == "Energy (meV)"
+    save_to(monkeypatch, tmp_path / "S1.csv")
     window.export_current()
     exported = tmp_path / "S1_Ratio.csv"
-    assert exported.exists()
+    assert exported.read_text().startswith("Energy (meV)\t0.50T")  # legacy header
     fmap = load_tsv(exported)
-    assert str(fmap.unit) == "meV"
+    assert fmap.unit is Unit.MEV
+    np.testing.assert_allclose(fmap.energy, sweep["x"] / 8.0656)
+    np.testing.assert_allclose(fmap.values, window.result.ratio.values, rtol=1e-11)
 
-    monkeypatch.setattr(QFileDialog, "getOpenFileName", lambda *a, **k: (str(exported), ""))
+    open_from(monkeypatch, exported)
     window.load_slot(0)
     window.save_slot(1)
+    assert window.slots[0].unit is window.slots[1].unit is Unit.CM1
+    np.testing.assert_allclose(window.slots[0].energy, sweep["x"], rtol=1e-11)
     processed = window.data_panel.processed
-    processed.set_energy_range(0, None, 60)
+    processed.set_energy_range(0, None, 60)  # meV, the unit of the panel
     processed.set_energy_range(1, 60, None)
     window.merge_slots()
     assert not errors
     merged = window.result.ratio
-    np.testing.assert_allclose(merged.energy[[0, -1]], fmap.energy[[0, -1]])
+    np.testing.assert_allclose(merged.energy[[0, -1]], sweep["x"][[0, -1]], rtol=1e-11)
     np.testing.assert_allclose(np.diff(merged.energy), np.diff(merged.energy)[0])
+    assert energy_label(window) == "Energy (meV)"
 
     processed.full_energy.setChecked(False)
     window.plot_slot(0)
-    assert window.result.ratio.energy.max() <= 60
+    assert window.result.ratio.energy.max() <= to_cm1(60, Unit.MEV)
+    assert window.result.ratio.to_unit(Unit.MEV).energy.max() <= 60
+    window.plot_slot(1)
+    assert window.result.ratio.to_unit(Unit.MEV).energy.min() >= 60
+
+
+def test_slots_from_different_units_merge(window, sweep, tmp_path, monkeypatch, errors):
+    """Slots keep cm-1, so slots saved while another unit was chosen still combine."""
+    load_sweep(window, sweep)
+    dp, processed = window.data_panel, window.data_panel.processed
+    dp.unit.setCurrentText("meV")
+    window.process_data()
+    window.save_slot(0)
+    save_to(monkeypatch, tmp_path / "S1.csv")
+    window.export_current()  # an meV table
+
+    dp.unit.setCurrentText("THz")
+    open_from(monkeypatch, tmp_path / "S1_Ratio.csv")
+    window.load_slot(1)
+    window.process_data()
+    window.save_slot(2)
+    for slot in (1, 2):
+        np.testing.assert_allclose(window.slots[slot].energy, window.slots[0].energy, rtol=1e-11)
+    processed.set_used(2, False)
+    processed.set_energy_range(0, None, 15)  # THz, about 500 cm-1
+    processed.set_energy_range(1, 15, None)
+    window.merge_slots()
+    assert not errors
+    assert window.display_unit() is Unit.THZ
+    assert energy_label(window) == "Energy (THz)"
+    shown = window.result.get(PlotKind.RATIO, unit=Unit.THZ)
+    np.testing.assert_allclose(shown_image(window), shown.values)
+    np.testing.assert_allclose(window.result.ratio.energy[[0, -1]], [100, 1000], rtol=1e-11)
+
+    processed.set_used(2, True)
+    for slot in (0, 1):
+        processed.set_energy_range(slot, None, None)
+    window.average_slots()
+    window.merge_slots_by_field()
+    assert not errors
+    np.testing.assert_allclose(window.result.ratio.values, window.slots[2].values, rtol=1e-9)
+
+
+def test_golden_exports_through_the_window(window, tmp_path, monkeypatch, errors):
+    """Cut, baseline and exports typed and written in meV reproduce the golden tables."""
+    zero, field = golden.write_sweep(tmp_path)
+    window.data_panel.sample.zero_list.set_paths(zero)
+    window.data_panel.sample.field_list.set_paths(field)
+    window.data_panel.unit.setCurrentText("meV")
+    limits, c = window.limits_page, window.corrections
+    limits.energy_cut.setChecked(True)
+    limits.energy_min.set_value(golden.ENERGY_CUT[0])
+    limits.energy_max.set_value(golden.ENERGY_CUT[1])
+    c.baseline_on.setChecked(True)
+    c.baseline_min.set_value(golden.BASELINE[0])
+    c.baseline_max.set_value(golden.BASELINE[1])
+    window.process_data()
+    pp = window.plot_panel
+    save_to(monkeypatch, tmp_path / "G.csv")
+    for kind, order, per_unit in (
+        (PlotKind.RATIO, 0, False),
+        (PlotKind.DATA, 0, False),
+        (PlotKind.RATIO, 1, False),
+        (PlotKind.RATIO, 1, True),
+    ):
+        pp.kind_buttons[kind].click()
+        pp.order_buttons[order].click()
+        pp.per_unit.setChecked(per_unit)
+        window.export_current()
+    assert not errors
+    for name in golden.MAPS:
+        golden.assert_matches(load_tsv(tmp_path / f"G_{name}.csv"), name)
 
 
 def test_real_macro_data(window, data_dir, errors):
@@ -169,17 +260,22 @@ def test_real_macro_data(window, data_dir, errors):
 
 def test_per_unit_derivative(window, sweep, tmp_path, monkeypatch, errors):
     load_sweep(window, sweep)
+    window.data_panel.unit.setCurrentText("meV")
     window.process_data()
     pp = window.plot_panel
+    pp.kind_buttons[PlotKind.DATA].click()
     pp.order_buttons[1].click()
     pp.per_unit.setChecked(True)
-    expected = window.result.get(PlotKind.RATIO, 1, Axis.ENERGY, physical=True)
+    expected = window.result.get(PlotKind.DATA, 1, Axis.ENERGY, physical=True, unit=Unit.MEV)
     np.testing.assert_allclose(shown_image(window), expected.values)
+    per_cm1 = window.result.get(PlotKind.DATA, 1, Axis.ENERGY, physical=True)
+    np.testing.assert_allclose(shown_image(window), per_cm1.values * 8.0656, rtol=1e-9)
 
-    out = tmp_path / "S1.csv"
-    monkeypatch.setattr(QFileDialog, "getSaveFileName", lambda *a, **k: (str(out), ""))
+    save_to(monkeypatch, tmp_path / "S1.csv")
     window.export_current()
-    assert (tmp_path / "S1_Ratio_1stDer_perUnit.csv").exists()
+    exported = load_tsv(tmp_path / "S1_Data_1stDer_perUnit.csv")
+    assert exported.unit is Unit.MEV
+    np.testing.assert_allclose(exported.values, expected.values, rtol=1e-11)
     assert not errors
 
 
@@ -239,10 +335,12 @@ def test_colour_map_choice(window, sweep):
 
 def test_cursor_shows_value(window, sweep):
     load_sweep(window, sweep)
+    window.data_panel.unit.setCurrentText("meV")
     window.process_data()
     cmap = window.plot_panel.color_map
-    ratio = window.result.ratio
+    ratio = window.result.get(PlotKind.RATIO, unit=Unit.MEV)
     text = cmap._cursor_text(ratio.field[1], ratio.energy[3])
+    assert f"E = {ratio.energy[3]:.3f} meV" in text
     assert f"value = {ratio.values[3, 1]:.5g}" in text
     assert "value" not in cmap._cursor_text(100.0, ratio.energy[3])
 
@@ -273,9 +371,9 @@ def test_step_ratio_plot_and_export(window, sweep, tmp_path, monkeypatch, errors
 
 def test_dirac_overlay(window, sweep):
     from mag_opt_detective.core.models import dirac_interband
-    from mag_opt_detective.core.units import Unit, convert
 
     load_sweep(window, sweep)
+    window.data_panel.unit.setCurrentText("THz")
     window.process_data()
     cmap = window.plot_panel.color_map
     assert cmap.model_curve_data() == []
@@ -287,7 +385,7 @@ def test_dirac_overlay(window, sweep):
     curves = cmap.model_curve_data()
     assert len(curves) == 3
     field, energy = curves[1]
-    expected = convert(dirac_interband(field, 5.0, 10.0, 3)[1], Unit.MEV, Unit.CM1)
+    expected = convert(dirac_interband(field, 5.0, 10.0, 3)[1], Unit.MEV, Unit.THZ)
     np.testing.assert_allclose(energy, expected)
     mp.n_lines.setValue(2)
     assert len(cmap.model_curve_data()) == 2

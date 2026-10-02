@@ -10,8 +10,8 @@ from pathlib import Path
 import numpy as np
 
 from mag_opt_detective.core.opus import is_opus_file, read_opus
-from mag_opt_detective.core.spectra import FieldMap
-from mag_opt_detective.core.units import Unit, from_cm1
+from mag_opt_detective.core.spectra import FieldMap, energy_mask
+from mag_opt_detective.core.units import Unit
 
 # Field encoded in file names, e.g. ``..._Sam2_a01p250T.txt`` -> 1.25 T.
 # Zero-field references look like ``..._a00p000T_a16p000T`` -> the last match wins (16 T).
@@ -65,6 +65,7 @@ class Measurement:
 
     ``zero`` has shape ``(n_energy, n_zero)``. With two zero-field spectra (measured
     before and after the sweep) the zero reference drifts linearly over the sweep.
+    :func:`load_measurement` gives the energy axis in cm^-1.
     """
 
     spectra: FieldMap
@@ -92,17 +93,15 @@ def load_measurement(
     zero_paths: Sequence[str | Path],
     field_paths: Sequence[str | Path],
     field: np.ndarray | None = None,
-    unit: Unit | str = Unit.CM1,
     energy_limits: tuple[float | None, float | None] = (None, None),
 ) -> Measurement:
-    """Load a field sweep.
+    """Load a field sweep; the energy axis stays in cm^-1, the unit of the files.
 
     Args:
         zero_paths: one or two zero-field spectra (before / after the sweep).
         field_paths: spectra measured in field, sorted with :func:`sort_paths`.
         field: field values; if None they are parsed from the file names.
-        unit: energy unit of the result.
-        energy_limits: optional inclusive energy cut (in *unit*).
+        energy_limits: optional inclusive energy cut in cm^-1 (None = no limit).
     """
     if not field_paths:
         raise ValueError("no field files loaded")
@@ -134,15 +133,10 @@ def load_measurement(
     if x_zero.shape != x.shape or not np.allclose(x_zero, x, rtol=0, atol=1e-6):
         raise ValueError("zero-field and field spectra have different energy axes")
 
-    energy = from_cm1(x, unit)
-    lo, hi = energy_limits
-    mask = np.ones(energy.size, dtype=bool)
-    if lo is not None:
-        mask &= energy >= lo
-    if hi is not None:
-        mask &= energy <= hi
+    mask = energy_mask(x, *energy_limits)
     if not mask.any():
-        raise ValueError(f"energy cut {lo} to {hi} {Unit(unit)} leaves no data")
+        lo, hi = ("open" if v is None else f"{v:.6g}" for v in energy_limits)
+        raise ValueError(f"energy cut {lo} to {hi} cm-1 leaves no data")
 
-    spectra = FieldMap(energy=energy[mask], field=field, values=values[mask], unit=unit)
+    spectra = FieldMap(energy=x[mask], field=field, values=values[mask], unit=Unit.CM1)
     return Measurement(spectra=spectra, zero=zero[mask])

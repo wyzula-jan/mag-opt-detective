@@ -34,7 +34,7 @@ from mag_opt_detective.core.processing import (
 )
 from mag_opt_detective.core.readers import Measurement, load_measurement
 from mag_opt_detective.core.spectra import FieldMap, load_tsv, save_tsv
-from mag_opt_detective.core.units import Unit, convert
+from mag_opt_detective.core.units import Range, Unit, convert, convert_range, from_cm1
 from mag_opt_detective.gui.console import QtLogHandler
 from mag_opt_detective.gui.data_panel import DataPanel
 from mag_opt_detective.gui.measurement_tab import MeasurementTab
@@ -104,6 +104,7 @@ class MainWindow(QMainWindow):
         self.resize(1400, 900)
 
         self.result: ProcessResult | None = None
+        self.shown_unit = Unit.CM1  # energy unit the result is shown in, see display_unit()
         self.points: PointTable | None = None
         self.slots: dict[int, FieldMap] = {}
 
@@ -296,18 +297,33 @@ class MainWindow(QMainWindow):
         logger.error("%s: %s", title, message)
         QMessageBox.warning(self, title, message)
 
-    def _load(self, tab: MeasurementTab, energy_cut) -> Measurement:
+    def display_unit(self) -> Unit:
+        """Energy unit of the plots, exports and picked points.
+
+        Data are kept in cm^-1. The unit chosen in the panel applies to the energies
+        typed in (cut, baseline, slot ranges) and is shown from the next Process, slot
+        plot or merge on; without a result it is the panel's unit.
+        """
+        return self.shown_unit if self.result is not None else self.data_panel.energy_unit()
+
+    def _baseline_region(self, unit: Unit) -> Range | None:
+        """Baseline region of the Tools tab (typed in *unit*) in cm^-1."""
+        return convert_range(self.corrections.baseline_region(), unit, Unit.CM1)
+
+    def _load(self, tab: MeasurementTab, energy_cut: Range) -> Measurement:
+        """Load a sweep in cm^-1; *energy_cut* is in cm^-1."""
         dp = self.data_panel
         return load_measurement(
             tab.zero_paths(),
             tab.field_paths(),
             field=tab.field_range.field() if dp.custom_field() else None,
-            unit=dp.energy_unit(),
             energy_limits=energy_cut,
         )
 
-    def _set_result(self, result: ProcessResult) -> None:
+    def _set_result(self, result: ProcessResult, unit: Unit) -> None:
+        """Show *result* (cm^-1) in energy *unit*."""
         self.result = result
+        self.shown_unit = unit
         self._init_points_if_requested(result.ratio.field)
         self.replot_all()
 
@@ -315,7 +331,8 @@ class MainWindow(QMainWindow):
     @user_action("Process")
     def process_data(self) -> None:
         dp = self.data_panel
-        limits = self.limits_page.limits()
+        unit = dp.energy_unit()
+        energy_cut = convert_range(self.limits_page.limits().energy_cut, unit, Unit.CM1)
         ref_tab = dp.reference
         mode = ref_tab.reference_mode()
         options = ProcessOptions(
@@ -323,24 +340,25 @@ class MainWindow(QMainWindow):
             smooth_reference=ref_tab.smooth.isChecked(),
             sg_window=ref_tab.sg_window.value(),
             sg_poly=ref_tab.sg_poly.value(),
-            baseline_region=self.corrections.baseline_region(),
+            baseline_region=self._baseline_region(unit),
         )
         logger.info("-" * 40)
-        sample = self._load(dp.sample, limits.energy_cut)
+        sample = self._load(dp.sample, energy_cut)
         spectra = sample.spectra
+        e_lo, e_hi = from_cm1(spectra.energy[[0, -1]], unit)
         logger.info(
             "Sample: %d spectra, B = %g … %g T, %d zero-field file(s), E = %.4g … %.4g %s",
             spectra.field.size,
             spectra.field.min(),
             spectra.field.max(),
             sample.zero.shape[1],
-            spectra.energy[0],
-            spectra.energy[-1],
-            spectra.unit,
+            e_lo,
+            e_hi,
+            unit,
         )
         reference = None
         if mode is ReferenceMode.SEPARATE:
-            reference = self._load(ref_tab, limits.energy_cut)
+            reference = self._load(ref_tab, energy_cut)
             logger.info(
                 "Reference: %d spectra interpolated onto the sample field",
                 reference.spectra.field.size,
@@ -353,9 +371,9 @@ class MainWindow(QMainWindow):
             )
         result = process(sample, reference, options)
         if options.baseline_region is not None:
-            lo, hi = options.baseline_region
-            logger.info("Baseline corrected in range %g – %g %s.", lo, hi, spectra.unit)
-        self._set_result(result)
+            lo, hi = self.corrections.baseline_region()
+            logger.info("Baseline corrected in range %g – %g %s.", lo, hi, unit)
+        self._set_result(result, unit)
 
     # ------------------------------------------------------------------ plotting
     def replot_all(self) -> None:
@@ -369,7 +387,7 @@ class MainWindow(QMainWindow):
         pp = self.plot_panel
         limits = self.limits_page.limits()
         kind, order, physical = pp.kind(), pp.order(), pp.physical()
-        fmap = self.result.get(kind, order, pp.axis(), physical=physical)
+        fmap = self.result.get(kind, order, pp.axis(), physical=physical, unit=self.display_unit())
         # the derivative limits in Tools are per data point; per-unit maps autoscale
         levels = None if physical and order else limits.levels_for(kind, order)
         pp.color_map.set_map(
@@ -398,7 +416,7 @@ class MainWindow(QMainWindow):
         lo = max(0.0, float(shown.field.min()))
         field = np.linspace(lo, float(shown.field.max()), 300)
         lines_mev = dirac_interband(field, model.velocity, model.delta, model.n_lines)
-        cmap.set_model_curves(field, convert(lines_mev, Unit.MEV, shown.unit))
+        cmap.set_model_curves(field, convert(lines_mev, Unit.MEV, self.display_unit()))
 
     @user_action("Plot reference")
     def plot_reference(self) -> None:
@@ -410,6 +428,7 @@ class MainWindow(QMainWindow):
         limits = self.limits_page.limits()
         kind = pp.reference_kind()
         fmap = result.reference_data if kind is PlotKind.DATA else result.reference_ratio
+        fmap = fmap.to_unit(self.display_unit())
         pp.reference_map.set_map(
             fmap,
             levels=limits.levels_for(kind),
@@ -440,7 +459,7 @@ class MainWindow(QMainWindow):
             raise ValueError("nothing to export - process data first")
         pp = self.plot_panel
         kind, order, physical = pp.kind(), pp.order(), pp.physical()
-        fmap = self.result.get(kind, order, pp.axis(), physical=physical)
+        fmap = self.result.get(kind, order, pp.axis(), physical=physical, unit=self.display_unit())
         name = (
             EXPORT_NAMES[kind]
             + ORDER_SUFFIX[order]
@@ -552,11 +571,10 @@ class MainWindow(QMainWindow):
         path = open_file(self, f"Load processed table into slot {slot}")
         if not path:
             return
-        unit = self.data_panel.energy_unit()
-        fmap = load_tsv(path, default_unit=unit)
-        if fmap.unit != unit:
-            logger.info("Converted %s from %s to %s.", Path(path).name, fmap.unit, unit)
-            fmap = fmap.replace(energy=convert(fmap.energy, fmap.unit, unit), unit=unit)
+        # a table without unit in its header is read in the panel's unit; slots keep cm^-1
+        fmap = load_tsv(path, default_unit=self.data_panel.energy_unit())
+        file_unit = fmap.unit
+        fmap = fmap.to_unit(Unit.CM1)
         if not self.data_panel.processed.auto_field.isChecked():
             field = self.data_panel.sample.field_range.field()
             if field.size != fmap.field.size:
@@ -566,7 +584,7 @@ class MainWindow(QMainWindow):
             fmap = fmap.replace(field=field)
         self.slots[slot] = fmap
         self.data_panel.processed.set_slot_name(slot, Path(path).name)
-        logger.info("Slot %d: loaded %s", slot, Path(path).name)
+        logger.info("Slot %d: loaded %s (energy in %s)", slot, Path(path).name, file_unit)
 
     @user_action("Save slot")
     def save_slot(self, slot: int) -> None:
@@ -581,12 +599,17 @@ class MainWindow(QMainWindow):
         if slot not in self.slots:
             raise ValueError(f"slot {slot} is empty")
         processed = self.data_panel.processed
+        unit = self.data_panel.energy_unit()
         fmap = self.slots[slot]
         if not processed.full_energy.isChecked():
-            fmap = crop_energy(fmap, *processed.energy_range(slot))
+            fmap = crop_energy(fmap, *self._slot_energy_range(slot, unit))
         logger.info("-" * 40)
         logger.info("Plotting slot %d: %s", slot, processed.slot_name(slot))
-        self._set_result(ProcessResult.from_map(fmap, self.corrections.baseline_region()))
+        self._set_result(ProcessResult.from_map(fmap, self._baseline_region(unit)), unit)
+
+    def _slot_energy_range(self, slot: int, unit: Unit) -> Range:
+        """E min / E max of a slot (typed in *unit*) in cm^-1."""
+        return convert_range(self.data_panel.processed.energy_range(slot), unit, Unit.CM1)
 
     def _used_slots(self) -> list[int]:
         used = self.data_panel.processed.used_slots(self.slots)
@@ -596,16 +619,17 @@ class MainWindow(QMainWindow):
 
     @user_action("Merge by energy")
     def merge_slots(self) -> None:
-        processed = self.data_panel.processed
+        unit = self.data_panel.energy_unit()
         used = self._used_slots()
-        merged = merge_energy([(self.slots[i], *processed.energy_range(i)) for i in used])
+        merged = merge_energy([(self.slots[i], *self._slot_energy_range(i, unit)) for i in used])
         logger.info("-" * 40)
         logger.info("Merged slots %s by energy; energy re-gridded to a uniform step.", used)
-        self._set_result(ProcessResult.from_map(merged, self.corrections.baseline_region()))
+        self._set_result(ProcessResult.from_map(merged, self._baseline_region(unit)), unit)
 
     @user_action("Merge by field")
     def merge_slots_by_field(self) -> None:
         processed = self.data_panel.processed
+        unit = self.data_panel.energy_unit()
         used = self._used_slots()
         merged = merge_field([(self.slots[i], *processed.field_range(i)) for i in used])
         logger.info("-" * 40)
@@ -616,15 +640,16 @@ class MainWindow(QMainWindow):
             merged.field[0],
             merged.field[-1],
         )
-        self._set_result(ProcessResult.from_map(merged, self.corrections.baseline_region()))
+        self._set_result(ProcessResult.from_map(merged, self._baseline_region(unit)), unit)
 
     @user_action("Average")
     def average_slots(self) -> None:
         processed = self.data_panel.processed
+        unit = self.data_panel.energy_unit()
         used = self._used_slots()
         maps = [
             crop_field(
-                crop_energy(self.slots[i], *processed.energy_range(i)),
+                crop_energy(self.slots[i], *self._slot_energy_range(i, unit)),
                 *processed.field_range(i),
             )
             for i in used
@@ -632,7 +657,7 @@ class MainWindow(QMainWindow):
         averaged = average_maps(maps)
         logger.info("-" * 40)
         logger.info("Averaged slots %s (%d datasets).", used, len(used))
-        self._set_result(ProcessResult.from_map(averaged, self.corrections.baseline_region()))
+        self._set_result(ProcessResult.from_map(averaged, self._baseline_region(unit)), unit)
 
     # ------------------------------------------------------------------ window
     def center_on_screen(self) -> None:

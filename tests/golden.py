@@ -1,7 +1,9 @@
 """Golden exports of a small synthetic sweep, the reference for the energy-unit refactor.
 
 The files in ``tests/data/`` were written in meV by the code that converted the energy
-axis when loading. Regenerate them with ``python tests/golden.py [out_dir]``.
+axis when loading (commit 147b0c8). The code now processes in cm-1 and converts only for
+export; :func:`exports` must still reproduce them. Regenerate them (with the current
+code) with ``python tests/golden.py [out_dir]``.
 """
 
 from __future__ import annotations
@@ -17,8 +19,8 @@ from mag_opt_detective.core.pipeline import PlotKind, ProcessOptions, process
 from mag_opt_detective.core.points import PointTable
 from mag_opt_detective.core.processing import Axis
 from mag_opt_detective.core.readers import load_measurement
-from mag_opt_detective.core.spectra import FieldMap, save_tsv
-from mag_opt_detective.core.units import Unit
+from mag_opt_detective.core.spectra import FieldMap, load_tsv, save_tsv
+from mag_opt_detective.core.units import Unit, convert_range
 
 GOLDEN_DIR = Path(__file__).resolve().parent / "data"
 UNIT = Unit.MEV
@@ -31,6 +33,17 @@ POINTS = "golden_points.tsv"
 
 def map_path(name: str, folder: Path = GOLDEN_DIR) -> Path:
     return folder / f"golden_{name}.tsv"
+
+
+def assert_matches(got: FieldMap, name: str) -> None:
+    """*got* equals the golden map *name* within the 12 digits of the exported table."""
+    expected = load_tsv(map_path(name))
+    assert expected.unit is UNIT
+    assert got.unit is expected.unit
+    np.testing.assert_allclose(got.field, expected.field)
+    np.testing.assert_allclose(got.energy, expected.energy, rtol=1e-11)
+    atol = 1e-9 * np.abs(expected.values).max()  # derivatives cross zero
+    np.testing.assert_allclose(got.values, expected.values, rtol=1e-9, atol=atol)
 
 
 def write_sweep(folder: Path) -> tuple[list[Path], list[Path]]:
@@ -56,13 +69,17 @@ def write_sweep(folder: Path) -> tuple[list[Path], list[Path]]:
 def exports(folder: Path) -> dict[str, FieldMap]:
     """The exported maps (in meV), keyed by their export name."""
     zero, field = write_sweep(folder)
-    sample = load_measurement(zero, field, unit=UNIT, energy_limits=ENERGY_CUT)
-    result = process(sample, options=ProcessOptions(baseline_region=BASELINE))
+    cut = convert_range(ENERGY_CUT, UNIT, Unit.CM1)
+    sample = load_measurement(zero, field, energy_limits=cut)
+    baseline = convert_range(BASELINE, UNIT, Unit.CM1)
+    result = process(sample, options=ProcessOptions(baseline_region=baseline))
     return {
-        "Ratio": result.get(PlotKind.RATIO),
-        "Data": result.get(PlotKind.DATA),
-        "Ratio_1stDer": result.get(PlotKind.RATIO, 1, Axis.ENERGY),
-        "Ratio_1stDer_perUnit": result.get(PlotKind.RATIO, 1, Axis.ENERGY, physical=True),
+        "Ratio": result.get(PlotKind.RATIO, unit=UNIT),
+        "Data": result.get(PlotKind.DATA, unit=UNIT),
+        "Ratio_1stDer": result.get(PlotKind.RATIO, 1, Axis.ENERGY, unit=UNIT),
+        "Ratio_1stDer_perUnit": result.get(
+            PlotKind.RATIO, 1, Axis.ENERGY, physical=True, unit=UNIT
+        ),
     }
 
 

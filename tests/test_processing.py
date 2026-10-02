@@ -12,8 +12,8 @@ from mag_opt_detective.core.pipeline import (
 )
 from mag_opt_detective.core.points import PointTable
 from mag_opt_detective.core.processing import Axis
-from mag_opt_detective.core.readers import load_measurement, sort_paths
-from mag_opt_detective.core.spectra import FieldMap, load_tsv
+from mag_opt_detective.core.readers import Measurement, load_measurement, sort_paths
+from mag_opt_detective.core.spectra import FieldMap
 from mag_opt_detective.core.units import Unit
 
 
@@ -143,13 +143,17 @@ def test_real_reference_correction(data_dir):
         zero = [f for f in files if "_a00p000T_a" in f]
         return zero, [f for f in files if f not in zero]
 
-    sam = load_measurement(*split(data_dir / "TR" / "Sam1" / "txt_files"), unit="meV")
-    ref = load_measurement(*split(data_dir / "TR" / "Ref1" / "txt_files"), unit="meV")
+    sam = load_measurement(*split(data_dir / "TR" / "Sam1" / "txt_files"))
+    ref = load_measurement(*split(data_dir / "TR" / "Ref1" / "txt_files"))
     assert sam.spectra.field.size == 2 * ref.spectra.field.size
     opts = ProcessOptions(reference_mode=ReferenceMode.SEPARATE, smooth_reference=True)
     res = process(sam, ref, opts)
     np.testing.assert_allclose(res.reference_ratio.field, sam.spectra.field)
     assert res.ratio.values.shape == sam.spectra.values.shape
+    assert res.ratio.unit is res.reference_data.unit is Unit.CM1
+    shown = res.get(PlotKind.RATIO, unit=Unit.MEV)
+    np.testing.assert_allclose(shown.energy, sam.spectra.energy / 8.0656)
+    assert shown.values is res.ratio.values
 
 
 def test_physical_derivative_on_non_uniform_grids():
@@ -181,6 +185,54 @@ def test_result_get_physical(sweep):
     got = res.get(PlotKind.DATA, order=1, axis=Axis.FIELD, physical=True)
     expected = proc.derivative(res.data, Axis.FIELD, physical=True)
     np.testing.assert_allclose(got.values, expected.values)
+
+
+def assert_scaled(got: FieldMap, cm1: FieldMap, factor: float, base: FieldMap) -> None:
+    """*got* equals *cm1* times *factor*, up to rounding of the *base* values."""
+    atol = 1e-11 * np.abs(base.values).max() * factor
+    np.testing.assert_allclose(got.values, cm1.values * factor, rtol=1e-9, atol=atol)
+
+
+@pytest.mark.parametrize("unit", [Unit.MEV, Unit.THZ])
+@pytest.mark.parametrize("kind", [PlotKind.RATIO, PlotKind.DATA, PlotKind.STEP])
+def test_result_get_in_unit(sweep, unit, kind):
+    """d/dE per unit scales with CM1_PER_UNIT ** order; d/dB and per-point do not."""
+    res = process(load_measurement(sweep["zero"], sweep["field"]))
+    data = res.get(PlotKind.DATA, 1, Axis.ENERGY, physical=True, unit=unit).values
+    assert np.abs(data).max() > 1e-3  # a real slope, so the scaling below is visible
+    k = {Unit.MEV: 8.0656, Unit.THZ: 33.35641}[unit]
+    plain = res.get(kind, unit=unit)
+    assert plain.unit is unit
+    np.testing.assert_allclose(plain.energy, res.base(kind).energy / k)
+    np.testing.assert_array_equal(plain.values, res.base(kind).values)
+    for order in (1, 2):
+        per_unit = res.get(kind, order, Axis.ENERGY, physical=True, unit=unit)
+        assert per_unit.unit is unit
+        cm1 = res.get(kind, order, Axis.ENERGY, physical=True)
+        assert_scaled(per_unit, cm1, k**order, plain)
+        for axis, physical in ((Axis.ENERGY, False), (Axis.FIELD, True), (Axis.FIELD, False)):
+            got = res.get(kind, order, axis, physical=physical, unit=unit)
+            expected = res.get(kind, order, axis, physical=physical)
+            np.testing.assert_array_equal(got.values, expected.values)  # not scaled at all
+
+
+def test_process_and_from_map_keep_cm1(sweep):
+    m = load_measurement(sweep["zero"], sweep["field"])
+    mev = Measurement(spectra=m.spectra.to_unit(Unit.MEV), zero=m.zero)
+    region = (300.0, 600.0)  # cm-1
+    expected = process(m, m, ProcessOptions(ReferenceMode.SEPARATE, baseline_region=region))
+    res = process(mev, mev, ProcessOptions(ReferenceMode.SEPARATE, baseline_region=region))
+    for name in ("data", "ratio", "average", "step", "reference_data", "reference_ratio"):
+        got, ref = getattr(res, name), getattr(expected, name)
+        assert got.unit is Unit.CM1, name
+        np.testing.assert_allclose(got.energy, ref.energy, rtol=1e-12)
+        np.testing.assert_allclose(got.values, ref.values, rtol=1e-12)
+
+    wrapped = ProcessResult.from_map(expected.data.to_unit(Unit.THZ), baseline_region=region)
+    direct = ProcessResult.from_map(expected.data, baseline_region=region)
+    assert wrapped.ratio.unit is Unit.CM1
+    np.testing.assert_allclose(wrapped.ratio.values, direct.ratio.values, rtol=1e-12)
+    np.testing.assert_allclose(wrapped.step.values, direct.step.values, rtol=1e-12)
 
 
 def test_crop_field():
@@ -250,15 +302,6 @@ def test_process_step_ratio(sweep):
     np.testing.assert_allclose(ProcessResult.from_map(make_map()).step.field, [2.0, 3.0])
 
 
-def assert_same_map(got: FieldMap, expected: FieldMap) -> None:
-    """Equal within the 12 digits of the exported tables (derivatives may be near zero)."""
-    assert got.unit is expected.unit
-    np.testing.assert_allclose(got.field, expected.field)
-    np.testing.assert_allclose(got.energy, expected.energy, rtol=1e-11)
-    atol = 1e-9 * np.abs(expected.values).max()
-    np.testing.assert_allclose(got.values, expected.values, rtol=1e-9, atol=atol)
-
-
 @pytest.fixture(scope="module")
 def golden_maps(tmp_path_factory) -> dict[str, FieldMap]:
     return golden.exports(tmp_path_factory.mktemp("golden"))
@@ -266,9 +309,7 @@ def golden_maps(tmp_path_factory) -> dict[str, FieldMap]:
 
 @pytest.mark.parametrize("name", golden.MAPS)
 def test_golden_exports(golden_maps, name):
-    expected = load_tsv(golden.map_path(name))
-    assert expected.unit is Unit.MEV
-    assert_same_map(golden_maps[name], expected)
+    golden.assert_matches(golden_maps[name], name)
 
 
 def test_golden_points(golden_maps):
@@ -278,3 +319,11 @@ def test_golden_points(golden_maps):
     np.testing.assert_allclose(table.field, expected.field)
     for name in table.names:
         np.testing.assert_allclose(table.column(name), expected.column(name), rtol=1e-9)
+
+
+def test_common_energy_keeps_samples_of_rounded_tables():
+    a = make_map(energy=np.linspace(100, 200, 11))
+    b = a.replace(energy=a.energy * (1 + 1e-12))  # read back from a 12-digit table
+    assert proc.average_maps([a, b]).energy.size == 11
+    shifted = b.replace(field=b.field + 3)
+    assert proc.merge_field([(a, None, None), (shifted, None, None)]).energy.size == 11
