@@ -51,6 +51,11 @@ def level_key(kind: PlotKind | str, order: int = 0) -> str:
 
 @dataclass(frozen=True)
 class PlotLimits:
+    """Limits as typed: fields in T, energies in the energy unit chosen in the panel.
+
+    The window converts the energy cut to cm^-1 before loading.
+    """
+
     field_range: Range | None = None
     energy_mode: EnergyMode = EnergyMode.AUTO
     energy_range: Range = (0.0, 200.0)
@@ -281,6 +286,7 @@ class CorrectionsPage(QWidget):
         layout.addWidget(points, stretch=1)
 
     def baseline_region(self) -> Range | None:
+        """Region as typed (in the panel's energy unit), or None when disabled."""
         if not self.baseline_on.isChecked():
             return None
         lo, hi = self.baseline_min.value(), self.baseline_max.value()

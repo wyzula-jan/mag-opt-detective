@@ -143,6 +143,7 @@ class ProcessedTab(QWidget):
         return values[0], values[1]
 
     def energy_range(self, slot: int) -> tuple[float | None, float | None]:
+        """E min / E max as typed (in the panel's energy unit; None = no cut)."""
         return self._range(slot, (COL_EMIN, COL_EMAX), ("E min", "E max"))
 
     def field_range(self, slot: int) -> tuple[float | None, float | None]:
