@@ -2,9 +2,15 @@ import json
 
 import pytest
 from PySide6.QtCore import QPoint, QSettings, Qt
-from PySide6.QtWidgets import QWidget
+from PySide6.QtWidgets import QLabel, QSplitter, QVBoxLayout, QWidget
 
-from mag_opt_detective.gui.kit import RangeControl, RangeSlider, SegmentedControl
+from mag_opt_detective.gui.kit import (
+    CollapsibleSection,
+    RangeControl,
+    RangeSlider,
+    SegmentedControl,
+    SlidePanel,
+)
 from mag_opt_detective.gui.settings import Persistence
 
 
@@ -270,6 +276,187 @@ def test_segmented_settings_protocol(segmented):
     assert segmented.set_settings_value("7") is False
     assert segmented.set_settings_value(1) is False
     assert segmented.value() == "1"
+
+
+# --- SlidePanel ----------------------------------------------------------------------------
+class Content(QWidget):
+    def __init__(self, text: str):
+        super().__init__()
+        layout = QVBoxLayout(self)
+        layout.addWidget(QLabel(text))
+        self.setMinimumSize(120, 60)
+
+
+def make_splitter(qtbot, orientation=Qt.Orientation.Horizontal, size=(1000, 600)):
+    splitter = QSplitter(orientation)
+    qtbot.addWidget(splitter)
+    left = SlidePanel(Content("left"), 250)
+    centre = QLabel("plot")
+    right = SlidePanel(Content("right"), 200)
+    for widget in (left, centre, right):
+        splitter.addWidget(widget)
+    splitter.setStretchFactor(1, 1)
+    splitter.resize(*size)
+    return splitter, left, right
+
+
+def shown(qtbot, splitter):
+    splitter.show()
+    qtbot.waitExposed(splitter)
+    return splitter
+
+
+def test_slide_panel_open_close_without_animation(qtbot):
+    splitter, left, _right = make_splitter(qtbot)
+    shown(qtbot, splitter)
+    total = sum(splitter.sizes())
+    assert splitter.sizes()[0] == 250
+    assert splitter.sizes()[2] == 200
+
+    with qtbot.waitSignal(left.openChanged) as closed:
+        left.set_open(False, animate=False)
+    assert closed.args == [False]
+    assert not left.is_open()
+    assert splitter.sizes()[0] == 0
+    assert sum(splitter.sizes()) == total  # the plot got the space
+    assert not left.content().isVisible()  # hidden content leaves the Tab order
+
+    left.toggle(animate=False)
+    assert left.is_open()
+    assert splitter.sizes() == [250, total - 450, 200]
+    assert left.content().isVisible()
+    with qtbot.assertNotEmitted(left.openChanged):
+        left.set_open(True, animate=False)
+
+
+def test_slide_panel_user_drag_and_restore(qtbot):
+    splitter, left, _right = make_splitter(qtbot)
+    shown(qtbot, splitter)
+    sizes = splitter.sizes()
+    splitter.setSizes([180, sizes[1] + 70, sizes[2]])  # the user drags the handle
+    splitter.splitterMoved.emit(180, 1)
+    assert left.open_size() == 180
+
+    with qtbot.waitSignal(left.openChanged) as closed:  # dragging to zero closes
+        splitter.setSizes([0, sizes[1] + 250, sizes[2]])
+        splitter.splitterMoved.emit(0, 1)
+    assert closed.args == [False]
+    assert not left.is_open()
+
+    left.set_open(True, animate=False)  # reopening restores the last open size
+    assert splitter.sizes()[0] == 180
+
+    left.set_open(False, animate=False)
+    with qtbot.waitSignal(left.openChanged) as reopened:  # dragging out of zero opens
+        splitter.setSizes([150, sizes[1] + 100, sizes[2]])
+        splitter.splitterMoved.emit(150, 1)
+    assert reopened.args == [True]
+    assert left.open_size() == 150
+
+
+def test_slide_panel_vertical_drawer(qtbot):
+    splitter, _top, drawer = make_splitter(qtbot, Qt.Orientation.Vertical, size=(500, 800))
+    shown(qtbot, splitter)
+    assert splitter.sizes()[2] == 200
+    drawer.set_open(False, animate=False)
+    assert splitter.sizes()[2] == 0
+    drawer.set_open(True, animate=False)
+    assert splitter.sizes()[2] == 200
+
+
+def test_slide_panel_animation_keeps_the_content_size(qtbot):
+    splitter, left, right = make_splitter(qtbot)
+    shown(qtbot, splitter)
+    right.duration_ms = 1500  # slow enough to look at a frame halfway
+    right.set_open(False)
+    assert right.is_animating()
+    assert not right.is_open()
+    qtbot.waitUntil(lambda: 20 < splitter.sizes()[2] < 180)
+    content = right.content().geometry()
+    assert content.width() == 200  # not squeezed, clipped by the pane
+    assert content.x() == 0  # the trailing pane slides towards the plot
+    assert right.minimumSizeHint().width() == 0
+    right.set_open(True)  # reverses from where it is
+    left.set_open(False)
+    qtbot.waitUntil(lambda: not left.is_animating() and not right.is_animating(), timeout=4000)
+    assert splitter.sizes()[0] == 0
+    assert splitter.sizes()[2] == 200
+    assert right.minimumSizeHint().width() >= 120
+
+
+def test_slide_panel_before_show_and_settings(qtbot):
+    splitter, left, _right = make_splitter(qtbot)
+    assert left.set_settings_value('{"open": false, "size": 240}')
+    assert not left.is_open()
+    assert json.loads(left.settings_value()) == {"open": False, "size": 240}
+    shown(qtbot, splitter)
+    qtbot.waitUntil(lambda: splitter.sizes()[0] == 0)
+    left.set_open(True, animate=False)
+    assert splitter.sizes()[0] == 240
+    for bad in ("{}", '{"open": true, "size": 0}', '{"open": "maybe", "size": 10}', "x"):
+        assert left.set_settings_value(bad) is False
+    assert left.is_open()
+
+
+def test_slide_panel_restores_an_exact_open_size_before_show(qtbot):
+    splitter, left, _right = make_splitter(qtbot)
+    assert left.set_settings_value('{"open": true, "size": 320}')
+    shown(qtbot, splitter)  # setSizes before show is only relative; the panel settles after
+    qtbot.waitUntil(lambda: splitter.sizes()[0] == 320)
+
+
+def test_slide_panel_outside_a_splitter(qtbot):
+    panel = SlidePanel(Content("alone"), 100)
+    qtbot.addWidget(panel)
+    panel.show()
+    panel.set_open(False)
+    assert not panel.content().isVisible()
+    panel.set_open(True)
+    assert panel.content().isVisible()
+
+
+# --- CollapsibleSection --------------------------------------------------------------------
+def test_collapsible_section(qtbot):
+    sub = QLabel("Ratio · 0th")
+    section = CollapsibleSection("Colour", trailing=sub)
+    qtbot.addWidget(section)
+    section.body_layout().addWidget(QLabel("body"))
+    section.show()
+    qtbot.waitExposed(section)
+    assert section.is_expanded()
+    assert section.trailing() is sub
+    assert section.button.accessibleName() == "Colour"
+
+    with qtbot.waitSignal(section.toggled) as toggled:
+        section.set_expanded(False, animate=False)
+    assert toggled.args == [False]
+    assert not section.body.isVisible()
+    assert not section.button.isChecked()
+
+    section.duration_ms = 300
+    with qtbot.waitSignal(section.toggled) as clicked:
+        section.button.click()  # animated
+    assert clicked.args == [True]
+    assert section.is_animating()
+    qtbot.waitUntil(lambda: not section.is_animating())
+    assert section.body.isVisible()
+    assert section.body.height() > 0
+
+    with qtbot.waitSignal(section.toggled):  # a click anywhere on the header toggles
+        pos = QPoint(section.header.width() - 3, section.header.height() // 2)
+        qtbot.mouseClick(section.header, Qt.MouseButton.LeftButton, pos=pos)
+    assert not section.is_expanded()
+
+
+def test_collapsible_section_settings_protocol(qtbot):
+    section = CollapsibleSection("View", expanded=False)
+    qtbot.addWidget(section)
+    assert section.settings_value() is False
+    assert section.set_settings_value("true")
+    assert section.is_expanded()
+    assert section.set_settings_value(False)
+    assert not section.is_expanded()
+    assert section.set_settings_value("maybe") is False
 
 
 # --- settings protocol through Persistence -------------------------------------------------
