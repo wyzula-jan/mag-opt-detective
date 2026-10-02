@@ -517,6 +517,15 @@ def test_save_keeps_the_figure_canvas(map_state, tmp_path):
         assert fig.canvas is canvas
 
 
+def test_save_hides_fonttools_info(map_state, tmp_path, caplog):
+    fonttools = logging.getLogger("fontTools")
+    level = fonttools.level
+    with caplog.at_level(logging.INFO):
+        save(nature_single(map_state), tmp_path / "figure.pdf", dpi=100)
+    assert not [r for r in caplog.records if r.name.startswith("fontTools")]
+    assert fonttools.level == level  # no lasting change to the library's logger
+
+
 def test_eps_and_ps_save(map_state, tmp_path):
     fig = nature_single(map_state)
     eps = save(fig, tmp_path / "figure.eps", dpi=150).read_bytes()

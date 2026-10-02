@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import logging
 import weakref
+from collections.abc import Iterator
+from contextlib import contextmanager
 from functools import lru_cache
 from pathlib import Path
 
@@ -34,8 +36,6 @@ from mag_opt_detective.export.presets import JournalPreset, get_preset
 from mag_opt_detective.export.state import FigureState, Range
 
 logger = logging.getLogger(__name__)
-# fontTools logs every font subset of a PDF/PS save at INFO, which would flood the app log
-logging.getLogger("fontTools").setLevel(logging.WARNING)
 
 MM_PER_INCH = 25.4
 FIELD_LABEL = "Magnetic field (T)"
@@ -466,8 +466,20 @@ def save(fig: Figure, path: str | Path, *, dpi: float) -> Path:
     old_canvas = fig.canvas
     try:
         canvas = _VECTOR_CANVASES[fmt](fig)
-        with mpl.rc_context(_rc(fig)):
+        with mpl.rc_context(_rc(fig)), _quiet_fonttools():
             canvas.print_figure(path, format=fmt, dpi=dpi, metadata={"Creator": CREATOR})
     finally:
         fig.set_canvas(old_canvas)
     return path
+
+
+@contextmanager
+def _quiet_fonttools() -> Iterator[None]:
+    """Hide fontTools' INFO line per font subset of a PDF/PS save (it floods the app log)."""
+    log = logging.getLogger("fontTools")
+    level = log.level
+    log.setLevel(max(level, logging.WARNING))
+    try:
+        yield
+    finally:
+        log.setLevel(level)
