@@ -47,11 +47,20 @@ class ProcessResult:
             PlotKind.AVERAGE: self.average,
         }[PlotKind(kind)]
 
-    def get(self, kind: PlotKind, order: int = 0, axis: Axis = Axis.ENERGY) -> FieldMap:
-        """Map of *kind*, differentiated *order* times along *axis*."""
+    def get(
+        self,
+        kind: PlotKind,
+        order: int = 0,
+        axis: Axis = Axis.ENERGY,
+        physical: bool = False,
+    ) -> FieldMap:
+        """Map of *kind*, differentiated *order* times along *axis*.
+
+        *physical* divides by the real axis spacing instead of one data point.
+        """
         fmap = self.base(kind)
         for _ in range(order):
-            fmap = proc.derivative(fmap, axis)
+            fmap = proc.derivative(fmap, axis, physical=physical)
         return fmap
 
     @classmethod

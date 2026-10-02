@@ -147,3 +147,34 @@ def test_real_reference_correction(data_dir):
     res = process(sam, ref, opts)
     np.testing.assert_allclose(res.reference_ratio.field, sam.spectra.field)
     assert res.ratio.values.shape == sam.spectra.values.shape
+
+
+def test_physical_derivative_on_non_uniform_grids():
+    energy = np.linspace(1.0, 3.0, 400) ** 2  # non-uniform spacing
+    field = np.array([0.5, 1.0, 2.0, 4.0])
+    values = np.sin(energy)[:, None] * field[None, :]
+    fmap = make_map(energy=energy, field=field, values=values)
+
+    d_energy = proc.derivative(fmap, Axis.ENERGY, physical=True).values
+    expected = np.cos(energy)[:, None] * field[None, :]
+    np.testing.assert_allclose(d_energy[1:-1], expected[1:-1], atol=2e-3)
+
+    d_field = proc.derivative(fmap, Axis.FIELD, physical=True).values
+    np.testing.assert_allclose(d_field, np.broadcast_to(np.sin(energy)[:, None], values.shape))
+
+    per_point = proc.derivative(fmap, Axis.FIELD).values
+    np.testing.assert_allclose(per_point[:, 0], d_field[:, 0] * 0.5)
+
+
+def test_physical_derivative_rejects_repeated_axis():
+    fmap = make_map(field=np.array([1.0, 1.0, 2.0]))
+    with pytest.raises(ValueError, match="repeated"):
+        proc.derivative(fmap, Axis.FIELD, physical=True)
+
+
+def test_result_get_physical(sweep):
+    m = load_measurement(sweep["zero"], sweep["field"])
+    res = process(m)
+    got = res.get(PlotKind.DATA, order=1, axis=Axis.FIELD, physical=True)
+    expected = proc.derivative(res.data, Axis.FIELD, physical=True)
+    np.testing.assert_allclose(got.values, expected.values)

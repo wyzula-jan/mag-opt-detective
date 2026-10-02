@@ -106,11 +106,21 @@ def baseline_normalize(fmap: FieldMap, region: tuple[float, float]) -> FieldMap:
     return fmap.with_values(fmap.values - offset)
 
 
-def derivative(fmap: FieldMap, axis: Axis = Axis.ENERGY) -> FieldMap:
-    """Gradient along *axis* with unit (sample-index) spacing, as in the legacy tool."""
+def derivative(fmap: FieldMap, axis: Axis = Axis.ENERGY, physical: bool = False) -> FieldMap:
+    """Gradient along *axis*.
+
+    By default the spacing is one sample (per data point), as in the legacy tool. With
+    *physical* the real axis values are used, giving d/dE per energy unit or d/dB per
+    tesla; non-uniform grids are handled to second order.
+    """
     if fmap.values.shape[axis] < 2:
         return fmap.with_values(np.zeros_like(fmap.values))
-    return fmap.with_values(np.gradient(fmap.values, axis=int(axis)))
+    if not physical:
+        return fmap.with_values(np.gradient(fmap.values, axis=int(axis)))
+    coords = fmap.energy if axis == Axis.ENERGY else fmap.field
+    if np.any(np.diff(coords) == 0):
+        raise ValueError(f"{axis.name.lower()} axis has repeated values; cannot differentiate")
+    return fmap.with_values(np.gradient(fmap.values, coords, axis=int(axis)))
 
 
 def savgol(fmap: FieldMap, window: int, poly: int) -> FieldMap:

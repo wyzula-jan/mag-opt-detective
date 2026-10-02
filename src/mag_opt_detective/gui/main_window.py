@@ -39,6 +39,7 @@ logger = logging.getLogger("mag_opt_detective")
 
 EXPORT_NAMES = {PlotKind.RATIO: "Ratio", PlotKind.DATA: "Data", PlotKind.AVERAGE: "Ratio_AVR"}
 ORDER_SUFFIX = {0: "", 1: "_1stDer", 2: "_2ndDer"}
+PER_UNIT_SUFFIX = "_perUnit"
 
 SHORTCUTS = [
     ("Ctrl+F", "Process"),
@@ -241,11 +242,13 @@ class MainWindow(QMainWindow):
             return
         pp = self.plot_panel
         limits = self.limits_page.limits()
-        kind, order = pp.kind(), pp.order()
-        fmap = self.result.get(kind, order, pp.axis())
+        kind, order, physical = pp.kind(), pp.order(), pp.physical()
+        fmap = self.result.get(kind, order, pp.axis(), physical=physical)
+        # the derivative limits in Tools are per data point; per-unit maps autoscale
+        levels = None if physical and order else limits.levels_for(kind, order)
         pp.color_map.set_map(
             fmap,
-            levels=limits.levels_for(kind, order),
+            levels=levels,
             cmap="magma" if order == 0 else "grey",
             x_range=limits.field_range,
             y_range=limits.energy_view,
@@ -281,8 +284,13 @@ class MainWindow(QMainWindow):
         if self.result is None:
             raise ValueError("nothing to export - process data first")
         pp = self.plot_panel
-        kind, order = pp.kind(), pp.order()
-        fmap = self.result.get(kind, order, pp.axis())
+        kind, order, physical = pp.kind(), pp.order(), pp.physical()
+        fmap = self.result.get(kind, order, pp.axis(), physical=physical)
+        name = (
+            EXPORT_NAMES[kind]
+            + ORDER_SUFFIX[order]
+            + (PER_UNIT_SUFFIX if physical and order else "")
+        )
         path = save_file(self, "Export current plot")
         if not path:
             return
@@ -290,9 +298,9 @@ class MainWindow(QMainWindow):
         if not out.suffix:
             out = out.with_suffix(".csv")
         if self.data_panel.export_type_suffix.isChecked():
-            out = out.with_name(f"{out.stem}_{EXPORT_NAMES[kind]}{ORDER_SUFFIX[order]}{out.suffix}")
+            out = out.with_name(f"{out.stem}_{name}{out.suffix}")
         save_tsv(fmap, out)
-        logger.info("Exported %s to %s", EXPORT_NAMES[kind] + ORDER_SUFFIX[order], out)
+        logger.info("Exported %s to %s", name, out)
 
     # ------------------------------------------------------------------ points
     def _init_points_if_requested(self, field: np.ndarray) -> None:

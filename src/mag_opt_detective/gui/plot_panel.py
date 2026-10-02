@@ -67,7 +67,14 @@ class PlotPanel(QWidget):
         self.axis_combo = QComboBox()
         self.axis_combo.addItems(["along Energy", "along Field"])
         grid.addWidget(self.axis_combo, 1, len(self.ORDERS) + 1)
-        grid.setColumnStretch(len(self.ORDERS) + 2, 1)
+        self.per_unit = QCheckBox("per unit")
+        self.per_unit.setToolTip(
+            "Divide by the real step: d/dE per energy unit or d/dB per tesla.\n"
+            "Off: per data point, as in the old versions (matches the Tools limits).\n"
+            "Derivatives per unit are colour-scaled automatically."
+        )
+        grid.addWidget(self.per_unit, 1, len(self.ORDERS) + 2)
+        grid.setColumnStretch(len(self.ORDERS) + 3, 1)
         layout.addLayout(grid)
 
         self.tabs = QTabWidget()
@@ -115,6 +122,7 @@ class PlotPanel(QWidget):
                 lambda _b, checked: checked and self.selectionChanged.emit()
             )
         self.axis_combo.currentIndexChanged.connect(self.selectionChanged)
+        self.per_unit.toggled.connect(self.selectionChanged)
         self.stacked_enabled.toggled.connect(self.selectionChanged)
         self.replot_button.clicked.connect(self.selectionChanged)
         self.offset.editingFinished.connect(self.selectionChanged)
@@ -130,6 +138,9 @@ class PlotPanel(QWidget):
 
     def axis(self) -> Axis:
         return Axis.FIELD if self.axis_combo.currentIndex() == 1 else Axis.ENERGY
+
+    def physical(self) -> bool:
+        return self.per_unit.isChecked()
 
     def reference_kind(self) -> PlotKind:
         return PlotKind.DATA if self.ref_data.isChecked() else PlotKind.RATIO
