@@ -206,6 +206,19 @@ def test_range_control_refuses_an_empty_range_inline(qtbot, control):
     assert control.note.property("error") is False
     assert control.lo_spin.property("invalid") is False
 
+    focused(qtbot, control.lo_spin)  # resetting the fields drops a pending error
+    type_into(qtbot, control.lo_spin, "40")
+    assert control.error()
+    control.set_extent(0.0, 50.0)
+    assert control.error() == ""
+    assert control.note.text() == "Data 0 – 50 T"
+    assert control.lo_spin.property("invalid") is False
+    assert control.lo_spin.value() == 20.0
+    type_into(qtbot, control.lo_spin, "40")
+    control.set_unit("mT")
+    assert control.error() == ""
+    assert control.note.property("error") is False
+
 
 def test_range_control_slider_and_auto_fixed(qtbot, control):
     focused(qtbot, control.slider)

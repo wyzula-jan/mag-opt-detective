@@ -153,7 +153,6 @@ class RangeControl(QWidget):
         if not (math.isfinite(lo) and math.isfinite(hi)):
             raise ValueError("range limits must be finite")
         self._lo, self._hi = min(lo, hi), max(lo, hi)
-        self._error = ""
         self._sync()
 
     def range(self) -> tuple[float, float]:
@@ -161,7 +160,6 @@ class RangeControl(QWidget):
 
     def set_auto(self, auto: bool) -> None:
         self._auto = bool(auto)
-        self._error = ""
         self._sync()
 
     def is_auto(self) -> bool:
@@ -187,7 +185,6 @@ class RangeControl(QWidget):
     # --- user edits --------------------------------------------------------------------
     def _on_mode(self, value: str) -> None:
         self._auto = value == "auto"
-        self._error = ""
         self._sync()
         if self._auto:
             self.autoRequested.emit()
@@ -197,7 +194,6 @@ class RangeControl(QWidget):
     def _on_slider(self, lo: float, hi: float) -> None:
         self._lo, self._hi = lo, hi
         self._auto = False
-        self._error = ""
         self._sync()
         self.rangeEdited.emit(lo, hi)
 
@@ -211,13 +207,13 @@ class RangeControl(QWidget):
             return
         self._lo, self._hi = lo, hi
         self._auto = False
-        self._error = ""
         self._sync()
         self.rangeEdited.emit(lo, hi)
 
     # --- display -----------------------------------------------------------------------
     def _sync(self) -> None:
-        """Show the stored state in the child widgets (without emitting)."""
+        """Show the stored (valid) state in the child widgets, without emitting."""
+        self._error = ""  # the fields get the stored values back
         width = self._b - self._a
         decimals = decimals_for(width if width > 0 else abs(self._hi - self._lo))
         span = max(width, self._hi - self._lo, 1e-12)
