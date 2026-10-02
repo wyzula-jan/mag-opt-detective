@@ -220,3 +220,24 @@ def merge_field(parts: Sequence[tuple[FieldMap, float | None, float | None]]) ->
     summed = np.zeros((energy.size, field.size))
     np.add.at(summed.T, inverse, values.T)
     return first.replace(energy=energy, field=field, values=summed / counts)
+
+
+def average_maps(maps: Sequence[FieldMap]) -> FieldMap:
+    """Mean of repeated measurements of the same field points.
+
+    All maps must have the same unit and field values. They are interpolated onto the
+    energy axis of the first map, restricted to the range all maps cover.
+    """
+    if not maps:
+        raise ValueError("nothing to average")
+    first = maps[0]
+    for fmap in maps[1:]:
+        if fmap.unit != first.unit:
+            raise ValueError(f"cannot average {fmap.unit} with {first.unit} data")
+        if fmap.field.shape != first.field.shape or not np.allclose(fmap.field, first.field):
+            raise ValueError("averaged datasets must have the same field values")
+    if len(maps) == 1:
+        return first
+    energy = _common_energy(maps)
+    stack = np.stack([_on_energy(m, energy).values for m in maps])
+    return first.replace(energy=energy, values=stack.mean(axis=0))

@@ -24,7 +24,13 @@ from mag_opt_detective.core.pipeline import (
     process,
 )
 from mag_opt_detective.core.points import PointTable
-from mag_opt_detective.core.processing import crop_energy, merge_energy, merge_field
+from mag_opt_detective.core.processing import (
+    average_maps,
+    crop_energy,
+    crop_field,
+    merge_energy,
+    merge_field,
+)
 from mag_opt_detective.core.readers import Measurement, load_measurement
 from mag_opt_detective.core.spectra import FieldMap, load_tsv, save_tsv
 from mag_opt_detective.core.units import convert
@@ -165,6 +171,7 @@ class MainWindow(QMainWindow):
         pt.plotRequested.connect(self.plot_slot)
         pt.mergeEnergyRequested.connect(self.merge_slots)
         pt.mergeFieldRequested.connect(self.merge_slots_by_field)
+        pt.averageRequested.connect(self.average_slots)
 
     # ------------------------------------------------------------------ helpers
     def report_error(self, title: str, message: str) -> None:
@@ -425,7 +432,7 @@ class MainWindow(QMainWindow):
     def _used_slots(self) -> list[int]:
         used = self.data_panel.processed.used_slots(self.slots)
         if not used:
-            raise ValueError("no slot to merge - load slots and tick them in the Use column")
+            raise ValueError("no slot selected - load slots and tick them in the Use column")
         return used
 
     @user_action("Merge by energy")
@@ -451,6 +458,22 @@ class MainWindow(QMainWindow):
             merged.field[-1],
         )
         self._set_result(ProcessResult.from_map(merged, self.corrections.baseline_region()))
+
+    @user_action("Average")
+    def average_slots(self) -> None:
+        processed = self.data_panel.processed
+        used = self._used_slots()
+        maps = [
+            crop_field(
+                crop_energy(self.slots[i], *processed.energy_range(i)),
+                *processed.field_range(i),
+            )
+            for i in used
+        ]
+        averaged = average_maps(maps)
+        logger.info("-" * 40)
+        logger.info("Averaged slots %s (%d datasets).", used, len(used))
+        self._set_result(ProcessResult.from_map(averaged, self.corrections.baseline_region()))
 
     # ------------------------------------------------------------------ window
     def center_on_screen(self) -> None:

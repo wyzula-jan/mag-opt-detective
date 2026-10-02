@@ -32,6 +32,7 @@ class ProcessedTab(QWidget):
     plotRequested = Signal(int)
     mergeEnergyRequested = Signal()
     mergeFieldRequested = Signal()
+    averageRequested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -52,6 +53,10 @@ class ProcessedTab(QWidget):
         self.merge_field_button.setToolTip(
             "Join slots measured over different field ranges, each cut to B min – max"
         )
+        self.average_button = QPushButton("Average")
+        self.average_button.setToolTip(
+            "Average repeated measurements in the ticked slots (same field values)"
+        )
         self.full_energy = QCheckBox("Full energy")
         self.full_energy.setChecked(True)
         self.full_energy.setToolTip("Unchecked: Plot Slot uses the E min / E max of the slot")
@@ -67,10 +72,11 @@ class ProcessedTab(QWidget):
         grid.addWidget(self.auto_field, 1, 1)
         grid.addWidget(self.merge_energy_button, 1, 2)
         grid.addWidget(self.merge_field_button, 1, 3)
+        grid.addWidget(self.average_button, 2, 3)
         layout.addLayout(grid)
 
         hint = QLabel(
-            "Load exported R(B)/R(0) tables. Merging uses the slots ticked in Use, "
+            "Load exported R(B)/R(0) tables. Merging and averaging use the slots ticked in Use, "
             "each cut to its E and B range (empty = no cut)."
         )
         hint.setWordWrap(True)
@@ -101,6 +107,7 @@ class ProcessedTab(QWidget):
         self.plot_button.clicked.connect(lambda: self.plotRequested.emit(self.slot()))
         self.merge_energy_button.clicked.connect(self.mergeEnergyRequested)
         self.merge_field_button.clicked.connect(self.mergeFieldRequested)
+        self.average_button.clicked.connect(self.averageRequested)
 
     def slot(self) -> int:
         return self.slot_spin.value()
