@@ -35,6 +35,25 @@ uv run mag-opt-detective
 
 or `uv run python -m mag_opt_detective`.
 
+### Without Python
+
+Standalone apps for Windows, macOS and Linux are attached to each
+[release](https://github.com/wyzula-jan/mag-opt-detective/releases) (and to every run of
+the *App bundles* workflow). Unzip and start `mag-opt-detective` (`.exe` on Windows,
+*Magneto-Optical Detective.app* on macOS). The bundles are not code-signed: on macOS
+right-click the app and choose *Open* the first time, on Windows choose *More info → Run
+anyway*.
+
+Build one yourself:
+
+```bash
+uv sync --group bundle
+uv run pyinstaller packaging/mag-opt-detective.spec --noconfirm
+```
+
+`mag-opt-detective --smoke-test` processes a small synthetic measurement and exits with 0;
+the workflow runs it on every bundle.
+
 ## Input files
 
 | File | Content |

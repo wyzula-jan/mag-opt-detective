@@ -35,6 +35,9 @@ dev = [
     "ruff>=0.16",
     "pre-commit>=4",
 ]
+bundle = [
+    "pyinstaller>=6.20",
+]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/mag_opt_detective"]
