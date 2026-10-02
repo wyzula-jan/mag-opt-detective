@@ -88,6 +88,16 @@ def ratio_to_average(fmap: FieldMap) -> FieldMap:
     return fmap.with_values(fmap.values / fmap.values.mean(axis=1, keepdims=True))
 
 
+def step_ratio(fmap: FieldMap) -> FieldMap:
+    """R(B)/R(B - dB): every spectrum divided by the one at the previous field step.
+
+    The result is assigned to the higher field, so it has one field point less.
+    """
+    if fmap.field.size < 2:
+        raise ValueError("the field-step ratio needs at least two field values")
+    return fmap.replace(field=fmap.field[1:], values=fmap.values[:, 1:] / fmap.values[:, :-1])
+
+
 def energy_mask(energy: np.ndarray, lo: float | None, hi: float | None) -> np.ndarray:
     mask = np.ones(energy.size, dtype=bool)
     if lo is not None:

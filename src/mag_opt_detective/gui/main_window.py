@@ -50,7 +50,12 @@ from mag_opt_detective.gui.widgets import (
 
 logger = logging.getLogger("mag_opt_detective")
 
-EXPORT_NAMES = {PlotKind.RATIO: "Ratio", PlotKind.DATA: "Data", PlotKind.AVERAGE: "Ratio_AVR"}
+EXPORT_NAMES = {
+    PlotKind.RATIO: "Ratio",
+    PlotKind.DATA: "Data",
+    PlotKind.AVERAGE: "Ratio_AVR",
+    PlotKind.STEP: "Ratio_Step",
+}
 ORDER_SUFFIX = {0: "", 1: "_1stDer", 2: "_2ndDer"}
 PER_UNIT_SUFFIX = "_perUnit"
 
@@ -60,7 +65,7 @@ SHORTCUTS = [
     ("Ctrl+Shift+E", "Save the visible plot as an image"),
     ("Ctrl+L / Ctrl+Shift+L", "Load sample field / zero-field files"),
     ("Ctrl+R / Ctrl+Shift+R", "Load reference field / zero-field files"),
-    ("Ctrl+1 / 2 / 3", "Plot R(B)/R(0) / Data / R(B)/R(B-AVR)"),
+    ("Ctrl+1 / 2 / 3 / 4", "Plot R(B)/R(0) / Data / R(B)/R(B-AVR) / R(B)/R(B-ΔB)"),
     ("Alt+1 / 2 / 3", "No / 1st / 2nd derivative"),
 ]
 

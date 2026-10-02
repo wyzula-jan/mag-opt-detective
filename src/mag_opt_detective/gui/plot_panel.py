@@ -32,6 +32,7 @@ class PlotPanel(QWidget):
         (PlotKind.RATIO, "R(B)/R(0)", "Ctrl+1"),
         (PlotKind.DATA, "Data", "Ctrl+2"),
         (PlotKind.AVERAGE, "R(B)/R(B-AVR)", "Ctrl+3"),
+        (PlotKind.STEP, "R(B)/R(B-ΔB)", "Ctrl+4"),
     )
     ORDERS = ((0, "No", "Alt+1"), (1, "1st", "Alt+2"), (2, "2nd", "Alt+3"))
     AUTO_COLOURS = "Auto"

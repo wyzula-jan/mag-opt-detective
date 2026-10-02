@@ -21,6 +21,7 @@ class PlotKind(StrEnum):
     RATIO = "Ratio"  # R(B)/R(0)
     DATA = "Data"  # R(B) (divided by the reference, if any)
     AVERAGE = "Ratio_AVR"  # R(B)/R(B-average)
+    STEP = "Ratio_Step"  # R(B)/R(B - dB), the ratio of neighbouring field steps
 
 
 @dataclass(frozen=True)
@@ -37,15 +38,21 @@ class ProcessResult:
     data: FieldMap
     ratio: FieldMap
     average: FieldMap
+    step: FieldMap | None = None  # None when there is only one field value
     reference_data: FieldMap | None = None
     reference_ratio: FieldMap | None = None
 
     def base(self, kind: PlotKind) -> FieldMap:
+        kind = PlotKind(kind)
+        if kind is PlotKind.STEP:
+            if self.step is None:
+                raise ValueError("R(B)/R(B-dB) needs at least two field values")
+            return self.step
         return {
             PlotKind.RATIO: self.ratio,
             PlotKind.DATA: self.data,
             PlotKind.AVERAGE: self.average,
-        }[PlotKind(kind)]
+        }[kind]
 
     def get(
         self,
@@ -67,11 +74,24 @@ class ProcessResult:
     def from_map(
         cls, fmap: FieldMap, baseline_region: tuple[float, float] | None = None
     ) -> ProcessResult:
-        """Wrap an already processed map (Processed tab): all kinds show the same data."""
-        corrected = fmap
-        if baseline_region is not None:
-            corrected = proc.baseline_normalize(fmap, baseline_region)
-        return cls(data=fmap, ratio=corrected, average=corrected)
+        """Wrap an already processed map (Processed tab).
+
+        Data, R(B)/R(0) and R(B)/R(B-average) all show the loaded map; the field-step
+        ratio is computed from it.
+        """
+        corrected = _baseline(fmap, baseline_region)
+        step = _baseline(_step_or_none(fmap), baseline_region)
+        return cls(data=fmap, ratio=corrected, average=corrected, step=step)
+
+
+def _step_or_none(fmap: FieldMap) -> FieldMap | None:
+    return proc.step_ratio(fmap) if fmap.field.size >= 2 else None
+
+
+def _baseline(fmap: FieldMap | None, region: tuple[float, float] | None) -> FieldMap | None:
+    if fmap is None or region is None:
+        return fmap
+    return proc.baseline_normalize(fmap, region)
 
 
 def process(
@@ -102,14 +122,15 @@ def process(
         ratio = proc.divide(ratio, ref_ratio)
 
     average = proc.ratio_to_average(data)
-    if options.baseline_region is not None:
-        ratio = proc.baseline_normalize(ratio, options.baseline_region)
-        average = proc.baseline_normalize(average, options.baseline_region)
+    step = _step_or_none(ratio)
+    region = options.baseline_region
+    ratio, average, step = (_baseline(m, region) for m in (ratio, average, step))
 
     return ProcessResult(
         data=data,
         ratio=ratio,
         average=average,
+        step=step,
         reference_data=ref_data,
         reference_ratio=ref_ratio,
     )

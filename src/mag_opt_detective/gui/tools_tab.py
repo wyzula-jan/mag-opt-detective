@@ -97,6 +97,7 @@ class PlotLimitsPage(QWidget):
         (str(PlotKind.RATIO), "R(B)/R(0)", 0.9, 1.1),
         (str(PlotKind.DATA), "Data", 0.0, 2.0),
         (str(PlotKind.AVERAGE), "R(B)/R(B-AVR)", 0.9, 1.1),
+        (str(PlotKind.STEP), "R(B)/R(B-ΔB)", 0.98, 1.02),
         ("der1", "1st derivative", -0.01, 0.01),
         ("der2", "2nd derivative", -0.001, 0.001),
     )

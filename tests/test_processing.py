@@ -224,3 +224,24 @@ def test_average_maps():
         proc.average_maps([a, make_map(field=np.array([1.0, 2.0, 4.0]))])
     with pytest.raises(ValueError, match="cannot average"):
         proc.average_maps([a, make_map(unit="THz")])
+
+
+def test_step_ratio():
+    fmap = make_map(field=np.array([1.0, 2.0, 4.0]), values=np.array([[1.0, 2.0, 8.0]] * 11))
+    step = proc.step_ratio(fmap)
+    np.testing.assert_allclose(step.field, [2.0, 4.0])
+    np.testing.assert_allclose(step.values, [[2.0, 4.0]] * 11)
+    with pytest.raises(ValueError, match="two field"):
+        proc.step_ratio(make_map(field=np.array([1.0]), values=np.ones((11, 1))))
+
+
+def test_process_step_ratio(sweep):
+    m = load_measurement(sweep["zero"], sweep["field"])
+    res = process(m, options=ProcessOptions(baseline_region=(100, 1000)))
+    step = res.get(PlotKind.STEP)
+    np.testing.assert_allclose(step.field, sweep["fields"][1:])
+    np.testing.assert_allclose(step.values.mean(axis=0), 1.0)  # baseline applied
+    single = make_map(field=np.array([1.0]), values=np.ones((11, 1)))
+    with pytest.raises(ValueError, match="two field"):
+        ProcessResult.from_map(single).get(PlotKind.STEP)
+    np.testing.assert_allclose(ProcessResult.from_map(make_map()).step.field, [2.0, 3.0])
