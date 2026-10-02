@@ -640,3 +640,20 @@ def test_settings_protocol_duck_typing(qtbot, tmp_path):
     duck.value = [1, 2]
     with pytest.raises(TypeError):
         persistence.save()
+
+
+def test_gallery_shows_every_widget(qtbot, tmp_path):
+    from mag_opt_detective.gui.kit.gallery import Gallery
+    from mag_opt_detective.gui.theme import Theme
+
+    gallery = Gallery(Theme("light"))
+    qtbot.addWidget(gallery)
+    gallery.resize(1100, 800)
+    gallery.show()
+    qtbot.waitExposed(gallery)
+    kinds = (CollapsibleSection, InfoBar, RangeControl, RangeSlider, SegmentedControl)
+    for kind in (*kinds, SlidePanel, Switch):
+        assert gallery.findChildren(kind), kind.__name__
+    gallery.log.set_open(False, animate=False)
+    assert gallery.stage.sizes()[1] == 0
+    assert gallery.grab().save(str(tmp_path / "gallery.png"))
