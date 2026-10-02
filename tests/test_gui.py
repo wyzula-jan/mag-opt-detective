@@ -181,3 +181,23 @@ def test_per_unit_derivative(window, sweep, tmp_path, monkeypatch, errors):
     window.export_current()
     assert (tmp_path / "S1_Ratio_1stDer_perUnit.csv").exists()
     assert not errors
+
+
+def test_merge_by_field_uses_ticked_slots(window, sweep, errors):
+    load_sweep(window, sweep)
+    window.process_data()
+    processed = window.data_panel.processed
+    for slot in (0, 1, 2):
+        window.save_slot(slot)
+    assert processed.used_slots(window.slots) == [0, 1, 2]
+    processed.set_field_range(0, None, 1.0)
+    processed.set_field_range(1, 1.5, None)
+    processed.set_used(2, False)
+    window.merge_slots_by_field()
+    assert not errors
+    np.testing.assert_allclose(window.result.ratio.field, sweep["fields"])
+
+    for slot in (0, 1):
+        processed.set_used(slot, False)
+    window.merge_slots_by_field()
+    assert errors and "Use column" in errors[-1]

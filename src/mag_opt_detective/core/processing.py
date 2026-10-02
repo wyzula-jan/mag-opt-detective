@@ -167,3 +167,56 @@ def merge_energy(parts: Sequence[tuple[FieldMap, float | None, float | None]]) -
     grid = np.linspace(energy[0], energy[-1], energy.size)
     values = interp_linear(grid, energy, values, axis=Axis.ENERGY)
     return first.replace(energy=grid, values=values)
+
+
+def crop_field(fmap: FieldMap, lo: float | None, hi: float | None) -> FieldMap:
+    """Keep the field columns inside ``[lo, hi]`` (inclusive)."""
+    mask = np.ones(fmap.field.size, dtype=bool)
+    if lo is not None:
+        mask &= fmap.field >= lo
+    if hi is not None:
+        mask &= fmap.field <= hi
+    if not mask.any():
+        raise ValueError(f"field range {lo} to {hi} T contains no data")
+    return fmap.replace(field=fmap.field[mask], values=fmap.values[:, mask])
+
+
+def _common_energy(maps: Sequence[FieldMap]) -> np.ndarray:
+    """Energy axis of the first map restricted to the range all maps cover."""
+    lo = max(m.energy[0] for m in maps)
+    hi = min(m.energy[-1] for m in maps)
+    energy = maps[0].energy
+    energy = energy[(energy >= lo) & (energy <= hi)]
+    if energy.size < 2:
+        raise ValueError("the datasets have no common energy range")
+    return energy
+
+
+def _on_energy(fmap: FieldMap, energy: np.ndarray) -> FieldMap:
+    if fmap.energy.shape == energy.shape and np.allclose(fmap.energy, energy, rtol=1e-9, atol=0):
+        return fmap
+    return interpolate_energy(fmap, energy)
+
+
+def merge_field(parts: Sequence[tuple[FieldMap, float | None, float | None]]) -> FieldMap:
+    """Join maps measured over different field ranges into one map.
+
+    Every part is cut to its ``(lo, hi)`` field range and interpolated onto the energy
+    axis of the first part, restricted to the energy range all parts cover. Fields that
+    occur in more than one part are averaged; the result is sorted by field.
+    """
+    if not parts:
+        raise ValueError("nothing to merge")
+    first = parts[0][0]
+    for fmap, _, _ in parts:
+        if fmap.unit != first.unit:
+            raise ValueError(f"cannot merge {fmap.unit} with {first.unit} data")
+    cropped = [crop_field(fmap, lo, hi) for fmap, lo, hi in parts]
+    energy = _common_energy(cropped)
+    aligned = [_on_energy(c, energy) for c in cropped]
+    field = np.concatenate([a.field for a in aligned])
+    values = np.concatenate([a.values for a in aligned], axis=1)
+    field, inverse, counts = np.unique(field, return_inverse=True, return_counts=True)
+    summed = np.zeros((energy.size, field.size))
+    np.add.at(summed.T, inverse, values.T)
+    return first.replace(energy=energy, field=field, values=summed / counts)
