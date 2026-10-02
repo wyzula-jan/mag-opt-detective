@@ -16,7 +16,11 @@ import matplotlib as mpl
 import numpy as np
 from matplotlib import font_manager, patheffects
 from matplotlib.axes import Axes
+from matplotlib.backend_bases import FigureCanvasBase
 from matplotlib.backends.backend_agg import FigureCanvasAgg
+from matplotlib.backends.backend_pdf import FigureCanvasPdf
+from matplotlib.backends.backend_ps import FigureCanvasPS
+from matplotlib.backends.backend_svg import FigureCanvasSVG
 from matplotlib.cm import ScalarMappable
 from matplotlib.colors import Colormap, LinearSegmentedColormap, ListedColormap, Normalize
 from matplotlib.figure import Figure
@@ -45,6 +49,14 @@ FORMATS: dict[str, str] = {
     ".png": "png",
     ".tif": "tiff",
     ".tiff": "tiff",
+}
+# Vector formats are drawn by these canvases, imported here rather than loaded by name
+# through matplotlib's backend registry so that PyInstaller bundles them.
+_VECTOR_CANVASES: dict[str, type[FigureCanvasBase]] = {
+    "pdf": FigureCanvasPdf,
+    "svg": FigureCanvasSVG,
+    "eps": FigureCanvasPS,
+    "ps": FigureCanvasPS,
 }
 CREATOR = f"Magneto-Optical Detective {__version__}"
 FALLBACK_FONT = "DejaVu Sans"  # ships with matplotlib
@@ -412,10 +424,10 @@ def rasterize(fig: Figure, dpi: float) -> np.ndarray:
     """
     if dpi <= 0:
         raise ValueError("dpi must be positive")
-    size, old_dpi = fig.get_size_inches().copy(), fig.dpi
+    size, old_dpi, old_canvas = fig.get_size_inches().copy(), fig.dpi, fig.canvas
     pixels = np.round(size * dpi)
-    canvas = FigureCanvasAgg(fig)
     try:
+        canvas = FigureCanvasAgg(fig)
         # Agg truncates the pixel size, so ask for a hair more than the rounded size
         fig.set_size_inches((pixels + 1e-3) / dpi, forward=False)
         fig.dpi = dpi
@@ -425,6 +437,7 @@ def rasterize(fig: Figure, dpi: float) -> np.ndarray:
     finally:
         fig.set_size_inches(size, forward=False)
         fig.dpi = old_dpi
+        fig.set_canvas(old_canvas)
 
 
 def save(fig: Figure, path: str | Path, *, dpi: float) -> Path:
@@ -450,6 +463,11 @@ def save(fig: Figure, path: str | Path, *, dpi: float) -> Path:
         else:
             rgb.save(path, format="TIFF", dpi=(dpi, dpi), compression="tiff_lzw")
         return path
-    with mpl.rc_context(_rc(fig)):
-        fig.savefig(path, format=fmt, dpi=dpi, metadata={"Creator": CREATOR})
+    old_canvas = fig.canvas
+    try:
+        canvas = _VECTOR_CANVASES[fmt](fig)
+        with mpl.rc_context(_rc(fig)):
+            canvas.print_figure(path, format=fmt, dpi=dpi, metadata={"Creator": CREATOR})
+    finally:
+        fig.set_canvas(old_canvas)
     return path

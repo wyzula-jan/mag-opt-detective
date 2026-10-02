@@ -509,6 +509,14 @@ def test_svg_keeps_text(map_state, tmp_path):
     assert all("font-family" in t.get("style", "") for t in texts)
 
 
+def test_save_keeps_the_figure_canvas(map_state, tmp_path):
+    fig = nature_single(map_state)
+    canvas = fig.canvas
+    for suffix in (".pdf", ".svg", ".eps", ".ps", ".png"):
+        save(fig, tmp_path / f"figure{suffix}", dpi=100)
+        assert fig.canvas is canvas
+
+
 def test_eps_and_ps_save(map_state, tmp_path):
     fig = nature_single(map_state)
     eps = save(fig, tmp_path / "figure.eps", dpi=150).read_bytes()
@@ -561,3 +569,21 @@ def test_export_does_not_import_qt_or_pyplot(tmp_path):
     ).stdout
     assert out.strip() == ""
     assert len(list(tmp_path.iterdir())) == 8
+
+
+def test_export_imports_its_vector_canvases():
+    """matplotlib loads them by name; a plain import lets PyInstaller see and bundle them."""
+    code = textwrap.dedent(
+        """
+        import sys
+
+        import mag_opt_detective.export
+
+        wanted = [f"matplotlib.backends.backend_{name}" for name in ("agg", "pdf", "svg", "ps")]
+        print(",".join(m for m in wanted if m not in sys.modules))
+        """
+    )
+    out = subprocess.run(
+        [sys.executable, "-c", code], capture_output=True, text=True, check=True
+    ).stdout
+    assert out.strip() == ""
