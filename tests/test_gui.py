@@ -42,6 +42,11 @@ def energy_label(window) -> str:
     return window.plot_panel.color_map.plot.getAxis("left").labelText
 
 
+def current_marker_energies(cmap) -> np.ndarray:
+    """Energies of the current curve's markers (drawn last on the "points" layer)."""
+    return cmap.layer("points").point_data()[-1][1]
+
+
 def save_to(monkeypatch, path) -> None:
     monkeypatch.setattr(QFileDialog, "getSaveFileName", lambda *a, **k: (str(path), ""))
 
@@ -128,7 +133,7 @@ def test_points_record_remove_export(window, sweep, tmp_path, monkeypatch, error
     assert window.point_model.rowCount() == 4
     assert window.point_model.data(window.point_model.index(1, 0)) == "37.2"
     np.testing.assert_allclose(window.points.points("LL 1")[1], [37.2 * 8.0656, 38.5 * 8.0656])
-    np.testing.assert_allclose(cmap.current_points.getData()[1], [37.2, 38.5])  # markers in meV
+    np.testing.assert_allclose(current_marker_energies(cmap), [37.2, 38.5])  # markers in meV
     c.point_remove.setChecked(True)
     cmap.pointClicked.emit(2.0, 0.0)
     b, _ = window.points.points("LL 1")
@@ -150,7 +155,7 @@ def test_points_record_remove_export(window, sweep, tmp_path, monkeypatch, error
     window.load_points()
     np.testing.assert_allclose(window.points.points("LL 2")[1], [40 * 8.0656, 41 * 8.0656])
     assert window.point_model.data(window.point_model.index(3, 0)) == "41"
-    np.testing.assert_allclose(cmap.current_points.getData()[1], [40, 41])
+    np.testing.assert_allclose(current_marker_energies(cmap), [40, 41])
     assert not errors
 
 
@@ -165,14 +170,14 @@ def test_points_keep_cm1_when_the_unit_changes(window, sweep, errors):
     dp.unit.setCurrentText("THz")  # applies from the next Process on (no live switch yet)
     pp.order_buttons[1].click()
     assert energy_label(window) == "Energy (meV)"
-    np.testing.assert_allclose(pp.color_map.current_points.getData()[1], [40.0])
+    np.testing.assert_allclose(current_marker_energies(pp.color_map), [40.0])
 
     window.process_data()  # keeps the table: "New table on next Process" is off now
     assert not errors
     assert energy_label(window) == "Energy (THz)"
     thz = 40.0 * 8.0656 / 33.35641
     np.testing.assert_allclose(window.points.points("LL 1")[1], [40.0 * 8.0656])
-    np.testing.assert_allclose(pp.color_map.current_points.getData()[1], [thz])
+    np.testing.assert_allclose(current_marker_energies(pp.color_map), [thz])
     assert window.point_model.data(window.point_model.index(1, 0)) == f"{thz:.5g}"
 
 
