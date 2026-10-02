@@ -201,3 +201,13 @@ def test_merge_by_field_uses_ticked_slots(window, sweep, errors):
         processed.set_used(slot, False)
     window.merge_slots_by_field()
     assert errors and "Use column" in errors[-1]
+
+
+def test_average_slots(window, sweep, errors):
+    load_sweep(window, sweep)
+    window.process_data()
+    window.save_slot(0)
+    window.save_slot(1)
+    window.average_slots()
+    assert not errors
+    np.testing.assert_allclose(window.result.ratio.values, window.slots[0].values)

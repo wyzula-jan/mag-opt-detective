@@ -211,3 +211,16 @@ def test_merge_field_interpolates_to_common_energy():
         proc.merge_field([(a, None, None), (make_map(energy=np.linspace(20, 30, 5)), None, None)])
     with pytest.raises(ValueError, match="cannot merge"):
         proc.merge_field([(a, None, None), (make_map(unit="meV"), None, None)])
+
+
+def test_average_maps():
+    a = make_map(values=np.full((11, 3), 1.0))
+    b = make_map(energy=np.linspace(0, 10, 21), values=np.full((21, 3), 3.0))
+    avg = proc.average_maps([a, b])
+    np.testing.assert_allclose(avg.energy, a.energy)
+    np.testing.assert_allclose(avg.values, 2.0)
+    assert proc.average_maps([a]) is a
+    with pytest.raises(ValueError, match="same field"):
+        proc.average_maps([a, make_map(field=np.array([1.0, 2.0, 4.0]))])
+    with pytest.raises(ValueError, match="cannot average"):
+        proc.average_maps([a, make_map(unit="THz")])
