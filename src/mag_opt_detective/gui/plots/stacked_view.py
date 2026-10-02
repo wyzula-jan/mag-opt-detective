@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 import pyqtgraph as pg
+from PySide6.QtCore import Signal
 from PySide6.QtGui import QColor
 
 from mag_opt_detective.core.colormaps import lut
@@ -21,8 +22,11 @@ class StackedPlot(PlotView):
     """All spectra of a map on top of each other, shifted by a constant offset.
 
     By default every field gets a trace in its own hue; see :meth:`set_trace_options`.
-    Emits :attr:`cursorMoved` ``(energy, y, None)``.
+    Emits :attr:`cursorMoved` ``(energy, y, None)``, and :attr:`tracesChanged` whenever the
+    traces are drawn again or cleared, so markers placed with :meth:`trace_y` can follow.
     """
+
+    tracesChanged = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -85,6 +89,7 @@ class StackedPlot(PlotView):
         for k, (j, pen) in enumerate(zip(self._shown, self._pens(fmap, self._shown), strict=True)):
             curve = self.plot.plot(fmap.energy, fmap.values[:, j] + k * self._offset, pen=pen)
             self._curves.append(curve)
+        self.tracesChanged.emit()
 
     def _remove_curves(self) -> None:
         for curve in self._curves:
@@ -95,6 +100,7 @@ class StackedPlot(PlotView):
     def clear_map(self) -> None:
         self._remove_curves()
         self._fmap = None
+        self.tracesChanged.emit()
 
     # ------------------------------------------------------------------ traces
     def shown_fields(self) -> np.ndarray:

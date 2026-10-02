@@ -183,3 +183,19 @@ def test_pick_works_on_the_map_only(window, sweep):
     assert pick.isChecked() and pick.isEnabled()
     area.set_current_view("stacked")
     assert tools.active() == "navigate" and panel.point_off.isChecked()
+
+
+def test_stacked_plot_signals_redrawn_traces(qtbot):
+    from mag_opt_detective.core.spectra import FieldMap
+    from mag_opt_detective.gui.plots import StackedPlot
+
+    stacked = StackedPlot()
+    qtbot.addWidget(stacked)
+    fmap = FieldMap(np.linspace(100.0, 200.0, 11), np.array([0.5, 1.0, 1.5]), np.ones((11, 3)))
+    with qtbot.waitSignal(stacked.tracesChanged):
+        stacked.set_map(fmap, 1.0)
+    with qtbot.waitSignal(stacked.tracesChanged):
+        stacked.set_trace_options(every=2)  # markers placed with trace_y must follow
+    assert stacked.trace_y(1, 150.0) is None
+    with qtbot.waitSignal(stacked.tracesChanged):
+        stacked.clear_map()
