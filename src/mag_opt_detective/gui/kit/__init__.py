@@ -6,15 +6,19 @@ Widgets that hold state implement the settings protocol used by ``gui.settings.P
 """
 
 from mag_opt_detective.gui.kit.collapsible import CollapsibleSection
+from mag_opt_detective.gui.kit.infobar import InfoBar
 from mag_opt_detective.gui.kit.range_control import RangeControl
 from mag_opt_detective.gui.kit.range_slider import RangeSlider
 from mag_opt_detective.gui.kit.segmented import SegmentedControl
 from mag_opt_detective.gui.kit.slide_panel import SlidePanel
+from mag_opt_detective.gui.kit.switch import Switch
 
 __all__ = [
     "CollapsibleSection",
+    "InfoBar",
     "RangeControl",
     "RangeSlider",
     "SegmentedControl",
     "SlidePanel",
+    "Switch",
 ]

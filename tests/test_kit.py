@@ -2,16 +2,18 @@ import json
 
 import pytest
 from PySide6.QtCore import QPoint, QSettings, Qt
-from PySide6.QtWidgets import QLabel, QSplitter, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QCheckBox, QLabel, QSplitter, QVBoxLayout, QWidget
 
 from mag_opt_detective.gui.kit import (
     CollapsibleSection,
+    InfoBar,
     RangeControl,
     RangeSlider,
     SegmentedControl,
     SlidePanel,
+    Switch,
 )
-from mag_opt_detective.gui.settings import Persistence
+from mag_opt_detective.gui.settings import PREFIX, Persistence
 
 
 def focused(qtbot, widget: QWidget) -> QWidget:
@@ -459,9 +461,141 @@ def test_collapsible_section_settings_protocol(qtbot):
     assert section.set_settings_value("maybe") is False
 
 
+# --- Switch, InfoBar -----------------------------------------------------------------------
+def test_switch_behaves_like_a_checkbox(qtbot):
+    switch = Switch("Smooth the reference")
+    qtbot.addWidget(switch)
+    assert isinstance(switch, QCheckBox)
+    assert switch.sizeHint().width() > 30 + switch.fontMetrics().horizontalAdvance("Smooth")
+    focused(qtbot, switch)
+    with qtbot.waitSignal(switch.toggled) as toggled:
+        qtbot.keyClick(switch, Qt.Key.Key_Space)
+    assert toggled.args == [True]
+    text_pos = QPoint(switch.width() - 5, switch.height() // 2)  # the label toggles too
+    qtbot.mouseClick(switch, Qt.MouseButton.LeftButton, pos=text_pos)
+    assert not switch.isChecked()
+    switch.grab()  # paints without errors
+
+
+def test_infobar_action_and_close(qtbot):
+    bar = InfoBar()
+    qtbot.addWidget(bar)
+    assert bar.isHidden()
+    calls = []
+    bar.show_message(
+        "error", "Can't process", "No reference files.", "Open Reference", lambda: calls.append(1)
+    )
+    assert bar.isVisible()
+    assert bar.level() == "error"
+    assert bar.property("level") == "error"
+    assert bar.title_label.text() == "Can't process"
+    assert bar.action_button.isVisible()
+    assert bar.accessibleName() == "Can't process"
+    with qtbot.waitSignal(bar.closed):
+        bar.action_button.click()
+    assert calls == [1]
+    assert bar.isHidden()
+
+    bar.show_message("info", "Saved.")
+    assert bar.property("level") == "info"
+    assert not bar.action_button.isVisible()
+    assert not bar.text_label.isVisible()
+    with qtbot.waitSignal(bar.closed):
+        bar.close_button.click()
+    assert bar.isHidden()
+    with qtbot.assertNotEmitted(bar.closed):
+        bar.dismiss()  # already hidden
+    bar.show_message("warning", "Uneven steps")
+    with qtbot.waitSignal(bar.closed):
+        qtbot.keyClick(bar, Qt.Key.Key_Escape)
+    with pytest.raises(ValueError):
+        bar.show_message("fatal", "?")
+
+
 # --- settings protocol through Persistence -------------------------------------------------
+class Kit(QWidget):
+    """One of each stateful kit widget, as a window would bind them."""
+
+    def __init__(self):
+        super().__init__()
+        self.segmented = SegmentedControl()
+        for value in ("cm-1", "meV", "THz"):
+            self.segmented.add_option(value, value)
+        self.range = RangeControl("Energy", "cm⁻¹")
+        self.range.set_extent(100, 4000)
+        self.range.set_range(100, 4000)
+        self.section = CollapsibleSection("View")
+        self.switch = Switch("Energy window")
+        self.splitter = QSplitter()
+        self.panel = SlidePanel(Content("panel"), 250)
+        self.splitter.addWidget(self.panel)
+        self.splitter.addWidget(QLabel("plot"))
+        layout = QVBoxLayout(self)
+        for widget in (self.segmented, self.range, self.section, self.switch, self.splitter):
+            layout.addWidget(widget)
+
+    def bind(self, persistence: Persistence) -> None:
+        persistence.bind("unit", self.segmented)
+        persistence.bind("view/energy", self.range)
+        persistence.bind("inspector/view", self.section)
+        persistence.bind("processing/window", self.switch)
+        persistence.bind("layout/left", self.panel)
+
+
 def ini_settings(tmp_path) -> QSettings:
     return QSettings(str(tmp_path / "settings.ini"), QSettings.Format.IniFormat)
+
+
+def test_settings_protocol_round_trip(qtbot, tmp_path):
+    first = Kit()
+    qtbot.addWidget(first)
+    persistence = Persistence(ini_settings(tmp_path))
+    first.bind(persistence)
+    first.segmented.set_value("meV")
+    first.range.set_auto(False)
+    first.range.set_range(400.5, 2200.25)
+    first.section.set_expanded(False, animate=False)
+    first.switch.setChecked(True)
+    first.panel.set_open(False, animate=False)
+    persistence.save()
+
+    second = Kit()
+    qtbot.addWidget(second)
+    restored = Persistence(ini_settings(tmp_path))
+    second.bind(restored)
+    restored.restore()
+    assert second.segmented.value() == "meV"
+    assert not second.range.is_auto()
+    assert second.range.range() == (400.5, 2200.25)
+    assert not second.section.is_expanded()
+    assert second.switch.isChecked()
+    assert not second.panel.is_open()
+    assert second.panel.open_size() == 250
+
+    restored.reset()  # back to the defaults read at bind time
+    assert second.segmented.value() == "cm-1"
+    assert second.range.is_auto()
+    assert second.section.is_expanded()
+    assert second.panel.is_open()
+
+
+def test_settings_protocol_ignores_invalid_values(qtbot, tmp_path):
+    raw = ini_settings(tmp_path)
+    raw.setValue(f"{PREFIX}/unit", "eV")
+    raw.setValue(f"{PREFIX}/view/energy", '{"auto": false, "lo": 9, "hi": 1}')
+    raw.setValue(f"{PREFIX}/inspector/view", "sometimes")
+    raw.setValue(f"{PREFIX}/layout/left", "[1, 2]")
+    raw.sync()
+    kit = Kit()
+    qtbot.addWidget(kit)
+    persistence = Persistence(ini_settings(tmp_path))
+    kit.bind(persistence)
+    persistence.restore()
+    assert kit.segmented.value() == "cm-1"
+    assert kit.range.is_auto()
+    assert kit.range.range() == (100.0, 4000.0)
+    assert kit.section.is_expanded()
+    assert kit.panel.is_open()
 
 
 class Duck(QWidget):
