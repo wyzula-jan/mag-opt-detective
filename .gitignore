@@ -1,0 +1,20 @@
+# Measurement data and old versioned copies (never committed)
+Data_to_test/
+archive/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# IDEs / OS
+.idea/
+.vscode/
+.DS_Store
