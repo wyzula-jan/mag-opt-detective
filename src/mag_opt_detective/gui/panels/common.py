@@ -174,6 +174,32 @@ class ElidedLabel(QLabel):
         painter.end()
 
 
+class _TokenText(QLabel):
+    """A wrapped label painted in a theme token's colour (read at paint time, so it follows
+    theme switches whatever order the palette and the style sheet are applied in)."""
+
+    def __init__(self, text: str = "", parent=None):
+        super().__init__(text, parent)
+        self.token = "muted"
+        self.setWordWrap(True)
+
+    def paintEvent(self, event) -> None:
+        palette = QPalette(self.palette())
+        palette.setColor(QPalette.ColorRole.WindowText, current_tokens()[self.token])
+        painter = QPainter(self)
+        flags = int(self.alignment()) | int(Qt.TextFlag.TextWordWrap)
+        self.style().drawItemText(
+            painter,
+            self.contentsRect(),
+            flags,
+            palette,
+            self.isEnabled(),
+            self.text(),
+            QPalette.ColorRole.WindowText,
+        )
+        painter.end()
+
+
 class Note(QWidget):
     """A line of text with a status icon; levels ``muted`` (no icon), ``info``, ``ok``,
     ``warn`` and ``err``."""
@@ -184,10 +210,8 @@ class Note(QWidget):
         self.icon_label = QLabel()
         self.icon_label.setFixedSize(14, 16)
         self.icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.text_label = QLabel(text)
-        self.text_label.setWordWrap(True)
+        self.text_label = _TokenText(text)
         self.text_label.setFont(scaled_font(self.text_label, 0.94))
-        self.text_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(5)
@@ -208,10 +232,8 @@ class Note(QWidget):
             self._apply()
 
     def _apply(self) -> None:
-        tokens = current_tokens()
-        palette = self.text_label.palette()
-        palette.setColor(QPalette.ColorRole.WindowText, tokens[LEVEL_COLOURS[self._level]])
-        self.text_label.setPalette(palette)
+        self.text_label.token = LEVEL_COLOURS[self._level]
+        self.text_label.update()
         name = LEVEL_ICONS.get(self._level)
         self.icon_label.setVisible(name is not None)
         if name is not None:
@@ -221,7 +243,7 @@ class Note(QWidget):
 
     def changeEvent(self, event) -> None:
         super().changeEvent(event)
-        if event.type() == QEvent.Type.PaletteChange:
+        if event.type() in (QEvent.Type.PaletteChange, QEvent.Type.StyleChange):
             self._apply()
 
 
