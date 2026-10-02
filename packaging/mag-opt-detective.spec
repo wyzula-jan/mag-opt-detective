@@ -62,6 +62,10 @@ a = Analysis(
         "PySide2",
         "IPython",
         "pytest",
+        # The export never uses pyplot. Bundled, it would be imported by pyqtgraph's colour
+        # map menu and rebuild matplotlib's font cache (in a temporary MPLCONFIGDIR) on
+        # every launch; without it pyqtgraph skips its matplotlib maps.
+        "matplotlib.pyplot",
         *MPL_GUI_BACKENDS,
     ],
     noarchive=False,
