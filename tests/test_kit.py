@@ -1,7 +1,7 @@
 import json
 
 import pytest
-from PySide6.QtCore import QPoint, QSettings, Qt
+from PySide6.QtCore import QPoint, QSettings, QSize, Qt
 from PySide6.QtWidgets import QCheckBox, QLabel, QLineEdit, QSplitter, QVBoxLayout, QWidget
 
 from mag_opt_detective.gui import icons
@@ -685,6 +685,19 @@ def test_infobar_action_and_close(qtbot):
         qtbot.keyClick(bar, Qt.Key.Key_Escape)
     with pytest.raises(ValueError):
         bar.show_message("fatal", "?")
+
+
+def test_infobar_icon_is_crisp_at_any_pixel_ratio(qtbot):
+    bar = InfoBar()
+    qtbot.addWidget(bar)
+    bar.show_message("warning", "Uneven steps")
+    view = bar.icon_view  # paints a QIcon, which picks the pixmap for the screen's ratio
+    assert view.icon().cacheKey() == icons.icon("triangle-alert", "warn").cacheKey()
+    hidpi = view.icon().pixmap(QSize(16, 16), 2.0)
+    assert hidpi.devicePixelRatio() == 2.0
+    assert hidpi.toImage() == icons.pixmap("triangle-alert", 16, "warn", 2.0).toImage()
+    shot = view.grab().toImage()
+    assert len({shot.pixel(x, y) for x in range(16) for y in range(16)}) > 1  # painted
 
 
 # --- settings protocol through Persistence -------------------------------------------------

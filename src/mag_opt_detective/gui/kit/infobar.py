@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from PySide6.QtCore import QEvent, Qt, Signal
-from PySide6.QtGui import QKeyEvent
+from PySide6.QtGui import QIcon, QKeyEvent, QPainter
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -26,6 +26,27 @@ LEVELS: dict[str, tuple[str, str]] = {  # level: (icon, colour token)
 }
 
 
+class _IconView(QWidget):
+    """A fixed-size icon, painted at the pixel ratio of whatever screen it is on."""
+
+    def __init__(self, size: int):
+        super().__init__()
+        self.setFixedSize(size, size)
+        self._icon = QIcon()
+
+    def icon(self) -> QIcon:
+        return self._icon
+
+    def set_icon(self, icon: QIcon) -> None:
+        self._icon = icon
+        self.update()
+
+    def paintEvent(self, event) -> None:
+        painter = QPainter(self)
+        self._icon.paint(painter, self.rect())
+        painter.end()
+
+
 class InfoBar(QFrame):
     """Icon, bold title, text, an optional action button and a close button.
 
@@ -43,8 +64,7 @@ class InfoBar(QFrame):
         self._level = "error"
         self._action: Callable[[], object] | None = None
 
-        self.icon_label = QLabel()
-        self.icon_label.setFixedSize(16, 16)
+        self.icon_view = _IconView(16)
         self.title_label = QLabel()
         self.title_label.setTextFormat(Qt.TextFormat.PlainText)
         self.title_label.setWordWrap(True)
@@ -74,7 +94,7 @@ class InfoBar(QFrame):
         layout.setContentsMargins(10, 8, 8, 8)
         layout.setSpacing(10)
         top = Qt.AlignmentFlag.AlignTop
-        layout.addWidget(self.icon_label, 0, top)
+        layout.addWidget(self.icon_view, 0, top)
         layout.addLayout(texts, 1)
         layout.addWidget(self.action_button, 0, top)
         layout.addWidget(self.close_button, 0, top)
@@ -122,7 +142,7 @@ class InfoBar(QFrame):
 
     def _update_icon(self) -> None:
         name, token = LEVELS[self._level]
-        self.icon_label.setPixmap(icons.pixmap(name, 16, token, self.devicePixelRatioF()))
+        self.icon_view.set_icon(icons.icon(name, token))
 
     def changeEvent(self, event: QEvent) -> None:
         if event.type() == QEvent.Type.PaletteChange:
