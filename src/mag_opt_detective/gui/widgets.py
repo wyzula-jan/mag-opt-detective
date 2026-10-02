@@ -27,6 +27,7 @@ from mag_opt_detective.core.readers import sort_paths
 
 SPECTRA_FILTER = "Spectra (*.txt *.dat *.[0-9] *.[0-9][0-9]);;All files (*)"
 TABLE_FILTER = "Tab-separated table (*.csv *.tsv *.txt);;All files (*)"
+IMAGE_FILTER = "PNG image (*.png);;SVG image (*.svg)"
 
 _last_dir = ""
 _ROOT = QModelIndex()

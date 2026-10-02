@@ -43,6 +43,11 @@ class PointMode(Enum):
     REMOVE = "remove"
 
 
+def level_key(kind: PlotKind | str, order: int = 0) -> str:
+    """Key of the intensity-limit row for a plot: derivatives share one row per order."""
+    return {1: "der1", 2: "der2"}.get(order, str(kind))
+
+
 @dataclass(frozen=True)
 class PlotLimits:
     field_range: Range | None = None
@@ -55,8 +60,7 @@ class PlotLimits:
     def levels_for(self, kind: PlotKind | str, order: int = 0) -> Range | None:
         if not self.custom_levels:
             return None
-        key = {1: "der1", 2: "der2"}.get(order, str(kind))
-        return self.levels.get(key)
+        return self.levels.get(level_key(kind, order))
 
     @property
     def energy_view(self) -> Range | None:
@@ -153,6 +157,19 @@ class PlotLimitsPage(QWidget):
 
         for group in (self.field_group, self.energy_group, self.level_group, self.stacked_group):
             group.buttonToggled.connect(lambda _b, checked: checked and self.changed.emit())
+
+    def set_levels(self, key: str, lo: float, hi: float) -> None:
+        """Store a colour range (e.g. dragged on the histogram) and switch to Custom."""
+        lo_edit, hi_edit = self.level_edits[key]
+        lo_edit.set_value(lo)
+        hi_edit.set_value(hi)
+        if self.level_custom.isChecked():
+            self.changed.emit()
+        else:
+            self.level_custom.setChecked(True)  # emits changed
+
+    def level_label(self, key: str) -> str:
+        return next(text for k, text, _lo, _hi in self._LEVEL_ROWS if k == key)
 
     def _range_row(self, grid: QGridLayout, row: int, text: str, lo: FloatEdit, hi: FloatEdit):
         grid.addWidget(QLabel(text), row, 0)

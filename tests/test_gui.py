@@ -211,3 +211,48 @@ def test_average_slots(window, sweep, errors):
     window.average_slots()
     assert not errors
     np.testing.assert_allclose(window.result.ratio.values, window.slots[0].values)
+
+
+def test_histogram_levels_update_tools(window, sweep, errors):
+    load_sweep(window, sweep)
+    page = window.limits_page
+    page.level_auto.setChecked(True)
+    window.process_data()
+    window.plot_panel.color_map.hist.region.setRegion((0.95, 1.05))  # as if dragged
+    lo, hi = page.level_edits["Ratio"]
+    assert (lo.value(), hi.value()) == pytest.approx((0.95, 1.05))
+    assert page.level_custom.isChecked()
+    assert window.plot_panel.color_map.image.levels == pytest.approx([0.95, 1.05])
+    assert not errors
+
+
+def test_colour_map_choice(window, sweep):
+    load_sweep(window, sweep)
+    window.process_data()
+    pp = window.plot_panel
+    assert pp.color_map._cmap == "magma"
+    pp.order_buttons[1].click()
+    assert pp.color_map._cmap == "grey"
+    pp.cmap_combo.setCurrentText("viridis")
+    assert pp.color_map._cmap == "viridis"
+
+
+def test_cursor_shows_value(window, sweep):
+    load_sweep(window, sweep)
+    window.process_data()
+    cmap = window.plot_panel.color_map
+    ratio = window.result.ratio
+    text = cmap._cursor_text(ratio.field[1], ratio.energy[3])
+    assert f"value = {ratio.values[3, 1]:.5g}" in text
+    assert "value" not in cmap._cursor_text(100.0, ratio.energy[3])
+
+
+@pytest.mark.parametrize("suffix", [".png", ".svg"])
+def test_save_image(window, sweep, tmp_path, monkeypatch, errors, suffix):
+    load_sweep(window, sweep)
+    window.process_data()
+    out = tmp_path / f"map{suffix}"
+    monkeypatch.setattr(QFileDialog, "getSaveFileName", lambda *a, **k: (str(out), ""))
+    window.save_image()
+    assert not errors
+    assert out.stat().st_size > 1000

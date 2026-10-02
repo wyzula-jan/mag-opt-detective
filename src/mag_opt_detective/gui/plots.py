@@ -2,14 +2,21 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 import pyqtgraph as pg
-from PySide6.QtCore import QRectF, Qt, Signal
+from pyqtgraph import exporters
+from PySide6.QtCore import QPointF, QRectF, Qt, Signal
+from PySide6.QtGui import QPainter
+from PySide6.QtSvg import QSvgGenerator
 
 from mag_opt_detective.core.spectra import FieldMap
 from mag_opt_detective.core.units import axis_label
 
 Range = tuple[float, float] | None
+
+IMAGE_SUFFIXES = (".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".svg")
 
 
 def robust_levels(values: np.ndarray) -> tuple[float, float]:
@@ -72,6 +79,44 @@ class _CrosshairMixin:
         self._hline.setPos(point.y())
         self._xh_label.setText(self._cursor_text(point.x(), point.y()))
 
+    def _export_svg(self, path: Path) -> None:
+        # pyqtgraph 0.14's SVGExporter cannot parse the path data Qt 6.11 writes,
+        # so render the scene through QSvgGenerator (lines stay vectors).
+        source = self.ci.sceneBoundingRect()
+        target = QRectF(0, 0, source.width(), source.height())
+        generator = QSvgGenerator()
+        generator.setFileName(str(path))
+        generator.setSize(target.size().toSize())
+        generator.setViewBox(target)
+        generator.setTitle("mag-opt-detective plot")
+        painter = QPainter(generator)
+        try:
+            self.scene().render(painter, target, source)
+        finally:
+            painter.end()
+
+    def export_image(self, path: str | Path, scale: float = 2.0) -> None:
+        """Save the whole view (plot, colour bar, labels) as PNG or SVG, without crosshair."""
+        suffix = Path(path).suffix.lower()
+        if suffix not in IMAGE_SUFFIXES:
+            raise ValueError(f"unsupported image type {suffix or '(none)'}: use .png or .svg")
+        label = self._xh_label.text
+        self._vline.hide()
+        self._hline.hide()
+        self._xh_label.setText("")
+        try:
+            if suffix == ".svg":
+                self._export_svg(Path(path))
+            else:
+                exporter = exporters.ImageExporter(self.ci)
+                width = int(self.ci.boundingRect().width() * scale)
+                exporter.parameters()["width"] = max(width, 100)
+                exporter.export(str(path))
+        finally:
+            self._vline.show()
+            self._hline.show()
+            self._xh_label.setText(label)
+
 
 class ColorMapPlot(_CrosshairMixin, pg.GraphicsLayoutWidget):
     """Intensity as a function of field (x) and energy (y) with a histogram/LUT.
@@ -80,11 +125,15 @@ class ColorMapPlot(_CrosshairMixin, pg.GraphicsLayoutWidget):
     """
 
     pointClicked = Signal(float, float)
+    levelsEdited = Signal(float, float)  # the user dragged the histogram levels
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._unit = ""
         self._cmap = ""
+        self._fmap: FieldMap | None = None
+        self._rect = QRectF()
+        self._updating = False
         self.label = self.addLabel("", row=0, col=0, colspan=2, justify="left")
         self.plot = self.addPlot(row=1, col=0)
         self.plot.setLabel("bottom", "Magnetic Field (T)")
@@ -93,6 +142,7 @@ class ColorMapPlot(_CrosshairMixin, pg.GraphicsLayoutWidget):
         self.plot.addItem(self.image)
         self.hist = pg.HistogramLUTItem()
         self.hist.setImageItem(self.image)
+        self.hist.sigLevelChangeFinished.connect(self._on_levels_changed)
         self.addItem(self.hist, row=1, col=1)
 
         self.current_points = pg.ScatterPlotItem(
@@ -105,8 +155,25 @@ class ColorMapPlot(_CrosshairMixin, pg.GraphicsLayoutWidget):
         self._init_crosshair(self.plot, self.label)
         self.plot.scene().sigMouseClicked.connect(self._on_click)
 
+    def value_at(self, b: float, energy: float) -> float | None:
+        """Map value of the pixel under (b, energy), or None outside the image."""
+        fmap = self._fmap
+        if fmap is None or not self._rect.contains(QPointF(b, energy)):
+            return None
+        row = int(np.abs(fmap.energy - energy).argmin())
+        col = int(np.abs(fmap.field - b).argmin())
+        return float(fmap.values[row, col])
+
     def _cursor_text(self, x: float, y: float) -> str:
-        return f"B = {x:.3f} T    E = {y:.3f} {self._unit}"
+        text = f"B = {x:.3f} T    E = {y:.3f} {self._unit}"
+        value = self.value_at(x, y)
+        return text if value is None else f"{text}    value = {value:.5g}"
+
+    def _on_levels_changed(self, *_args) -> None:
+        if self._updating or self._fmap is None:
+            return
+        lo, hi = self.hist.getLevels()
+        self.levelsEdited.emit(float(lo), float(hi))
 
     def set_map(
         self,
@@ -116,6 +183,17 @@ class ColorMapPlot(_CrosshairMixin, pg.GraphicsLayoutWidget):
         x_range: Range = None,
         y_range: Range = None,
     ) -> None:
+        self._updating = True
+        try:
+            self._show(fmap, levels, cmap)
+        finally:
+            self._updating = False
+        if x_range is None:
+            x_range = (float(fmap.field.min()), float(fmap.field.max()))
+        _set_range(self.plot, x_range, y_range)
+
+    def _show(self, fmap: FieldMap, levels: Range, cmap: str) -> None:
+        self._fmap = fmap
         self._unit = str(fmap.unit)
         self.plot.setLabel("left", axis_label(fmap.unit))
         if cmap != self._cmap:
@@ -124,18 +202,17 @@ class ColorMapPlot(_CrosshairMixin, pg.GraphicsLayoutWidget):
         auto = levels is None
         lo, hi = robust_levels(fmap.values) if auto else levels
         self.image.setImage(fmap.values, autoLevels=False, levels=(lo, hi))
-        self.image.setRect(pixel_rect(fmap.field, fmap.energy))
+        self._rect = pixel_rect(fmap.field, fmap.energy)
+        self.image.setRect(self._rect)
         self.hist.setLevels(lo, hi)
         if auto:
             self.hist.autoHistogramRange()
         else:
             pad = 0.1 * abs(hi - lo)
             self.hist.setHistogramRange(lo - pad, hi + pad)
-        if x_range is None:
-            x_range = (float(fmap.field.min()), float(fmap.field.max()))
-        _set_range(self.plot, x_range, y_range)
 
     def clear_map(self) -> None:
+        self._fmap = None
         self.image.clear()
         self.set_points(None)
 
