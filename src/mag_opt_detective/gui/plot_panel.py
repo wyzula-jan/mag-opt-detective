@@ -708,6 +708,12 @@ def install(window) -> None:
         )
     )
 
+    def follow_reference_kind() -> None:
+        data = c.selection.reference_kind is PlotKind.DATA
+        (area.ref_data if data else area.ref_ratio).setChecked(True)
+
+    c.selectionChanged.connect(follow_reference_kind)
+
     # drawing
     c.resultChanged.connect(lambda: redraw(window))
     c.selectionChanged.connect(lambda: redraw(window))

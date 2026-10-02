@@ -35,6 +35,7 @@ from PySide6.QtWidgets import (
 )
 
 from mag_opt_detective import __version__
+from mag_opt_detective.core.processing import Axis
 from mag_opt_detective.core.units import Unit
 from mag_opt_detective.gui import console, icons, plot_panel
 from mag_opt_detective.gui.controller import AppController
@@ -488,7 +489,11 @@ class MainWindow(QMainWindow):
 
     def _wire_frame(self) -> None:
         c, tb = self.controller, self.toolbar
+        # The toolbar sets the unit and the plot selection (plot_panel) and follows the
+        # controller back, so a change made through ``window.controller`` shows here too
+        # (set_value / setChecked with the current value emit nothing: no loop).
         tb.unit.valueChanged.connect(c.set_unit)
+        c.unitChanged.connect(lambda _old, new: tb.unit.set_value(new.value))
 
         for value, _text, shortcut in KINDS:
             self._shortcut(shortcut, lambda v=value: tb.kind.set_value(v))
@@ -501,7 +506,16 @@ class MainWindow(QMainWindow):
                 tb.axis.set_option_enabled(option, derivative)
             tb.per_unit.setEnabled(derivative)
 
+        def follow_selection() -> None:
+            s = c.selection
+            tb.kind.set_value(s.kind.value)
+            tb.order.set_value(str(s.order))
+            tb.axis.set_value("B" if s.axis == Axis.FIELD else "E")
+            tb.per_unit.setChecked(s.physical)
+            on_order(tb.order.value())
+
         tb.order.valueChanged.connect(on_order)
+        c.selectionChanged.connect(follow_selection)
         on_order(tb.order.value())
 
         c.changedSinceProcess.connect(self._sync_state)

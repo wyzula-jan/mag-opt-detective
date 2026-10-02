@@ -2,13 +2,17 @@
 
 import logging
 
+import numpy as np
 import pytest
 from PySide6.QtCore import QPoint, Qt
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtTest import QTest
 
 import gui_helpers
-from gui_helpers import load_sweep, process
+from gui_helpers import energy_label, load_sweep, process, shown_image
+from mag_opt_detective.core.pipeline import PlotKind
+from mag_opt_detective.core.processing import Axis
+from mag_opt_detective.core.units import Unit
 from mag_opt_detective.gui.kit import SlidePanel
 from mag_opt_detective.gui.plots import BarScale, HistogramScale
 
@@ -152,3 +156,27 @@ def test_plots_follow_the_theme(window):
     finally:
         window.set_appearance("system")
         QGuiApplication.styleHints().setColorScheme(Qt.ColorScheme.Unknown)
+
+
+def test_toolbar_follows_the_controller(window, sweep, errors):
+    load_sweep(window, sweep)
+    process(window)
+    c, tb = window.controller, window.toolbar
+    c.set_unit("meV")
+    assert tb.unit.value() == "meV" and energy_label(window) == "Energy (meV)"
+    tb.unit.button("cm-1").click()  # a later click in the toolbar still works
+    assert c.unit is Unit.CM1 and energy_label(window) == "Energy (cm-1)"
+
+    c.set_selection(kind=PlotKind.DATA, order=1)
+    assert (tb.kind.value(), tb.order.value()) == ("Data", "1")
+    assert tb.axis.button("B").isEnabled() and tb.per_unit.isEnabled()
+    c.set_selection(axis=Axis.FIELD, physical=True, reference_kind=PlotKind.DATA)
+    assert tb.axis.value() == "B" and tb.per_unit.isChecked()
+    assert window.plot_area.ref_data.isChecked()
+    tb.kind.button("Ratio").click()
+    assert c.selection.kind is PlotKind.RATIO and c.selection.axis is Axis.FIELD
+    expected = c.result.get(PlotKind.RATIO, 1, Axis.FIELD, physical=True)
+    np.testing.assert_allclose(shown_image(window), expected.values)
+    c.set_selection(order=0)
+    assert tb.order.value() == "0" and not tb.per_unit.isEnabled()
+    assert not errors
