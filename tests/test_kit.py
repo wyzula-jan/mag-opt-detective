@@ -4,6 +4,7 @@ import pytest
 from PySide6.QtCore import QPoint, QSettings, Qt
 from PySide6.QtWidgets import QCheckBox, QLabel, QLineEdit, QSplitter, QVBoxLayout, QWidget
 
+from mag_opt_detective.gui import icons
 from mag_opt_detective.gui.kit import (
     CollapsibleSection,
     InfoBar,
@@ -289,6 +290,10 @@ def test_segmented_values_and_signals(qtbot, segmented):
     icon_only = segmented.add_option("i", "", tooltip="With icon", icon="sigma")
     assert not icon_only.icon().isNull()
     assert icon_only.accessibleName() == "With icon"
+    given = icons.icon("pin", "#ff0000")
+    with_qicon = segmented.add_option("q", "Pinned", icon=given)
+    assert with_qicon.icon().cacheKey() == given.cacheKey()
+    assert with_qicon.toolButtonStyle() == Qt.ToolButtonStyle.ToolButtonTextBesideIcon
 
 
 def test_segmented_keyboard_and_roving_focus(qtbot, segmented):

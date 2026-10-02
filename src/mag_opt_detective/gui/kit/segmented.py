@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QEvent, QObject, Qt, Signal
-from PySide6.QtGui import QKeyEvent
+from PySide6.QtGui import QIcon, QKeyEvent
 from PySide6.QtWidgets import QButtonGroup, QHBoxLayout, QSizePolicy, QToolButton, QWidget
 
 from mag_opt_detective.gui import icons
@@ -41,9 +41,9 @@ class SegmentedControl(QWidget):
 
     # --- options -----------------------------------------------------------------------
     def add_option(
-        self, value: str, text: str, tooltip: str | None = None, icon: str | None = None
+        self, value: str, text: str, tooltip: str | None = None, icon: str | QIcon | None = None
     ) -> QToolButton:
-        """Append an option; *icon* is an icon name from ``gui.icons``."""
+        """Append an option; *icon* is a QIcon or an icon name from ``gui.icons`` (re-tinted)."""
         if value in self._buttons:
             raise ValueError(f"duplicate option {value!r}")
         button = QToolButton(self)
@@ -52,8 +52,11 @@ class SegmentedControl(QWidget):
         button.setText(text)
         if tooltip:
             button.setToolTip(tooltip)
-        if icon:
+        if isinstance(icon, QIcon) and not icon.isNull():
+            button.setIcon(icon)
+        elif isinstance(icon, str) and icon:
             icons.set_icon(button, icon)
+        if not button.icon().isNull():
             style = Qt.ToolButtonStyle.ToolButtonTextBesideIcon
             button.setToolButtonStyle(style if text else Qt.ToolButtonStyle.ToolButtonIconOnly)
         else:
