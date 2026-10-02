@@ -256,3 +256,16 @@ def test_save_image(window, sweep, tmp_path, monkeypatch, errors, suffix):
     window.save_image()
     assert not errors
     assert out.stat().st_size > 1000
+
+
+def test_step_ratio_plot_and_export(window, sweep, tmp_path, monkeypatch, errors):
+    load_sweep(window, sweep)
+    window.process_data()
+    window.plot_panel.kind_buttons[PlotKind.STEP].click()
+    np.testing.assert_allclose(shown_image(window), window.result.step.values)
+    assert window.limits_page.limits().levels_for(PlotKind.STEP) == (0.98, 1.02)
+    out = tmp_path / "S1.csv"
+    monkeypatch.setattr(QFileDialog, "getSaveFileName", lambda *a, **k: (str(out), ""))
+    window.export_current()
+    assert (tmp_path / "S1_Ratio_Step.csv").exists()
+    assert not errors
