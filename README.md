@@ -61,14 +61,17 @@ the workflow runs it on every bundle.
 | OPUS binary (`*.0`, `*.1`, …) | the single-channel sample spectrum (`ScSm`) is read |
 | text (`*.txt`, …) | two whitespace-separated columns: wavenumber (cm⁻¹), intensity |
 
-The file type is detected automatically. With **Field from file names** the field is
-taken from the name: `..._a01p250T.txt` → 1.25 T. Files are sorted by field.
-Otherwise select **Custom field range** and enter start / step / end.
+The file type is detected automatically. With field values **From file names** the field
+is taken from the name: `..._a01p250T.txt` → 1.25 T. Files are sorted by field, and the
+Sample panel reports missing fields. Otherwise choose **Custom range** and enter start /
+step / end.
 
 **Zero field.** Load one zero-field spectrum, or two: measured before and after the
 sweep, e.g. `..._a00p000T_a00p000T.txt` and `..._a00p000T_a16p000T.txt`. With two
 spectra the zero-field reference is interpolated linearly between the first and the
-last field point to compensate drift during the sweep.
+last field point to compensate drift during the sweep. Files dropped on the Sample or
+Reference panel (or a whole sweep folder) are sorted: names whose first field is 0 T go
+to the zero-field list.
 
 ## Exported files
 
@@ -82,17 +85,20 @@ Energy (meV)	0.25T	0.50T	...
 Picked points are stored as field (rows) × curve name (columns), empty cells for
 missing points.
 
-## Processed tab
+## Library
 
-Exported maps can be loaded into up to 16 slots. Tick the slots to combine in the
-*Use* column and give each an energy (E min / E max) and field (B min / B max) range;
-empty cells mean no cut.
+The Library panel keeps processed maps: **Save current map** adds the R(B)/R(0) map
+shown, **Load table…** adds exported tables. Tick the maps to combine and open a map's
+row to give it an energy (E min / E max, in the energy unit shown) and field (B min /
+B max) range; empty limits mean no cut.
 
-- **Merge by Energy** joins spectral ranges (e.g. FIR + MIR) and re-grids the energy
+- **Merge by energy** joins spectral ranges (e.g. FIR + MIR) and re-grids the energy
   axis to a uniform step.
-- **Merge by Field** joins field ranges (e.g. 0–8 T and 8–16 T sweeps); fields measured
+- **Merge by field** joins field ranges (e.g. 0–8 T and 8–16 T sweeps); fields measured
   twice are averaged.
 - **Average** averages repeated measurements with the same field values.
+
+They need at least two ticked maps.
 
 ## Development
 
