@@ -71,12 +71,12 @@ class DataPanel(QWidget):
         self.console = ConsoleWidget()
         console_layout.addWidget(self.console)
 
-        splitter = QSplitter(Qt.Orientation.Vertical)
-        splitter.addWidget(self.tabs)
-        splitter.addWidget(console_box)
-        splitter.setStretchFactor(0, 4)
-        splitter.setStretchFactor(1, 1)
-        layout.addWidget(splitter, stretch=1)
+        self.splitter = QSplitter(Qt.Orientation.Vertical)
+        self.splitter.addWidget(self.tabs)
+        self.splitter.addWidget(console_box)
+        self.splitter.setStretchFactor(0, 4)
+        self.splitter.setStretchFactor(1, 1)
+        layout.addWidget(self.splitter, stretch=1)
 
         self.field_source.currentIndexChanged.connect(self._on_field_source_changed)
         self._on_field_source_changed()

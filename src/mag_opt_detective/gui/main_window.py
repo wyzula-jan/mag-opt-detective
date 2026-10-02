@@ -11,7 +11,7 @@ import numpy as np
 import pyqtgraph as pg
 import scipy
 from PySide6 import __version__ as pyside_version
-from PySide6.QtCore import Qt, qVersion
+from PySide6.QtCore import QSettings, Qt, qVersion
 from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import QMainWindow, QMessageBox, QSplitter
 
@@ -38,8 +38,15 @@ from mag_opt_detective.gui.console import QtLogHandler
 from mag_opt_detective.gui.data_panel import DataPanel
 from mag_opt_detective.gui.measurement_tab import MeasurementTab
 from mag_opt_detective.gui.plot_panel import PlotPanel
+from mag_opt_detective.gui.settings import Persistence
 from mag_opt_detective.gui.tools_tab import PointMode, level_key
-from mag_opt_detective.gui.widgets import IMAGE_FILTER, open_file, save_file
+from mag_opt_detective.gui.widgets import (
+    IMAGE_FILTER,
+    last_dir,
+    open_file,
+    save_file,
+    set_last_dir,
+)
 
 logger = logging.getLogger("mag_opt_detective")
 
@@ -79,7 +86,13 @@ def user_action(title: str):
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, parent=None):
+    """The application window.
+
+    *settings*: where choices are remembered between sessions; None keeps nothing
+    (used by tests). The application passes the user's settings store.
+    """
+
+    def __init__(self, parent=None, settings: QSettings | None = None):
         super().__init__(parent)
         self.setWindowTitle(f"Magneto-Optical Detective {__version__}")
         self.resize(1400, 900)
@@ -90,13 +103,13 @@ class MainWindow(QMainWindow):
 
         self.data_panel = DataPanel()
         self.plot_panel = PlotPanel()
-        splitter = QSplitter(Qt.Orientation.Horizontal)
-        splitter.addWidget(self.data_panel)
-        splitter.addWidget(self.plot_panel)
-        splitter.setStretchFactor(0, 0)
-        splitter.setStretchFactor(1, 1)
-        splitter.setSizes([460, 940])
-        self.setCentralWidget(splitter)
+        self.main_splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.main_splitter.addWidget(self.data_panel)
+        self.main_splitter.addWidget(self.plot_panel)
+        self.main_splitter.setStretchFactor(0, 0)
+        self.main_splitter.setStretchFactor(1, 1)
+        self.main_splitter.setSizes([460, 940])
+        self.setCentralWidget(self.main_splitter)
         self.statusBar()
 
         self._log_handler = QtLogHandler(self.data_panel.console)
@@ -107,8 +120,13 @@ class MainWindow(QMainWindow):
         self.corrections = self.data_panel.tools.corrections_page
         self.point_model = self.corrections.model
 
+        self.persistence = Persistence(settings) if settings is not None else None
+        self.geometry_restored = False
         self._create_actions()
         self._connect()
+        if self.persistence is not None:
+            self._bind_settings()
+            self.restore_settings()
 
     # ------------------------------------------------------------------ setup
     def _action(self, text: str, slot, shortcut: str | QKeySequence | None = None) -> QAction:
@@ -146,6 +164,9 @@ class MainWindow(QMainWindow):
 
         view_menu = self.menuBar().addMenu("&View")
         view_menu.addAction(self._action("&Center Window", self.center_on_screen))
+        reset = self._action("&Reset Settings", self.reset_settings)
+        reset.setEnabled(self.persistence is not None)
+        view_menu.addAction(reset)
 
         help_menu = self.menuBar().addMenu("&Help")
         help_menu.addAction(self._action("&Shortcuts", self.show_shortcuts))
@@ -177,6 +198,85 @@ class MainWindow(QMainWindow):
         pt.mergeEnergyRequested.connect(self.merge_slots)
         pt.mergeFieldRequested.connect(self.merge_slots_by_field)
         pt.averageRequested.connect(self.average_slots)
+
+    # ------------------------------------------------------------------ settings
+    def _bind_settings(self) -> None:
+        bind = self.persistence.bind
+        dp, pp = self.data_panel, self.plot_panel
+        bind("data/field_source", dp.field_source)
+        bind("data/unit", dp.unit)
+        bind("data/export_type_suffix", dp.export_type_suffix)
+        for name, tab in (("sample", dp.sample), ("reference", dp.reference)):
+            box = tab.field_range
+            for part in ("start", "step", "end"):
+                bind(f"{name}/field_{part}", getattr(box, part))
+        ref = dp.reference
+        for attr in ("ref_none", "ref_separate", "ref_self", "smooth", "sg_window", "sg_poly"):
+            bind(f"reference/{attr}", getattr(ref, attr))
+
+        bind("tools/page", dp.tools.page_combo)
+        lp = self.limits_page
+        for attr in (
+            "field_auto", "field_custom", "field_min", "field_max",
+            "energy_auto", "energy_custom", "energy_cut", "energy_min", "energy_max",
+            "level_auto", "level_custom",
+            "stacked_auto", "stacked_custom", "stacked_min", "stacked_max",
+        ):  # fmt: skip
+            bind(f"limits/{attr}", getattr(lp, attr))
+        for key, (lo, hi) in lp.level_edits.items():
+            bind(f"limits/levels_{key}_min", lo)
+            bind(f"limits/levels_{key}_max", hi)
+        c = self.corrections
+        for attr in ("baseline_off", "baseline_on", "baseline_min", "baseline_max", "column_name"):
+            bind(f"corrections/{attr}", getattr(c, attr))
+        bind("processed/full_energy", dp.processed.full_energy)
+        bind("processed/auto_field", dp.processed.auto_field)
+
+        for kind, button in pp.kind_buttons.items():
+            bind(f"plot/kind_{kind}", button)
+        for order, button in pp.order_buttons.items():
+            bind(f"plot/order_{order}", button)
+        bind("plot/axis", pp.axis_combo)
+        bind("plot/per_unit", pp.per_unit)
+        bind("plot/colours", pp.cmap_combo)
+        bind("plot/stacked_enabled", pp.stacked_enabled)
+        bind("plot/offset", pp.offset)
+        bind("plot/reference_ratio", pp.ref_ratio)
+        bind("plot/reference_data", pp.ref_data)
+
+    def restore_settings(self) -> None:
+        p = self.persistence
+        p.restore()
+        if (geometry := p.bytes_value("window/geometry")) is not None:
+            self.geometry_restored = self.restoreGeometry(geometry)
+        for key, splitter in (
+            ("window/main_splitter", self.main_splitter),
+            ("window/data_splitter", self.data_panel.splitter),
+        ):
+            if (state := p.bytes_value(key)) is not None:
+                splitter.restoreState(state)
+        folder = p.value("files/last_dir")
+        if isinstance(folder, str) and Path(folder).is_dir():
+            set_last_dir(folder)
+
+    def save_settings(self) -> None:
+        p = self.persistence
+        if p is None:
+            return
+        p.set_value("window/geometry", self.saveGeometry())
+        p.set_value("window/main_splitter", self.main_splitter.saveState())
+        p.set_value("window/data_splitter", self.data_panel.splitter.saveState())
+        p.set_value("files/last_dir", last_dir())
+        p.save()
+
+    def reset_settings(self) -> None:
+        if self.persistence is None:
+            return
+        self.persistence.reset()
+        self.main_splitter.setSizes([460, 940])
+        self.resize(1400, 900)
+        self.center_on_screen()
+        logger.info("Settings reset to the defaults.")
 
     # ------------------------------------------------------------------ helpers
     def report_error(self, title: str, message: str) -> None:
@@ -531,5 +631,6 @@ class MainWindow(QMainWindow):
         )
 
     def closeEvent(self, event) -> None:
+        self.save_settings()
         logger.removeHandler(self._log_handler)
         super().closeEvent(event)
