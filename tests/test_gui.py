@@ -165,3 +165,19 @@ def test_real_macro_data(window, data_dir, errors):
     window.process_data()
     assert not errors
     assert shown_image(window).shape == (7726, 64)
+
+
+def test_per_unit_derivative(window, sweep, tmp_path, monkeypatch, errors):
+    load_sweep(window, sweep)
+    window.process_data()
+    pp = window.plot_panel
+    pp.order_buttons[1].click()
+    pp.per_unit.setChecked(True)
+    expected = window.result.get(PlotKind.RATIO, 1, Axis.ENERGY, physical=True)
+    np.testing.assert_allclose(shown_image(window), expected.values)
+
+    out = tmp_path / "S1.csv"
+    monkeypatch.setattr(QFileDialog, "getSaveFileName", lambda *a, **k: (str(out), ""))
+    window.export_current()
+    assert (tmp_path / "S1_Ratio_1stDer_perUnit.csv").exists()
+    assert not errors
