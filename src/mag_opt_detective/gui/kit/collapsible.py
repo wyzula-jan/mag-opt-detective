@@ -133,7 +133,7 @@ class CollapsibleSection(QWidget):
         self._body_layout.setContentsMargins(14, 0, 14, 14)
         self._body_layout.setSpacing(14)
         self._reveal = _Reveal(self.body, self)
-        self._reveal.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
+        self._reveal.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
         self._reveal.setVisible(self._expanded)
 
         layout = QVBoxLayout(self)

@@ -625,6 +625,24 @@ def test_collapsible_section(qtbot):
     assert not section.is_expanded()
 
 
+def test_collapsible_section_fits_wrapped_text(qtbot):
+    section = CollapsibleSection("Colour")
+    label = QLabel("Remembered for R(B)/R(0). Drag here or on the colour scale. " * 3)
+    label.setWordWrap(True)
+    section.body_layout().addWidget(label)
+    host = QWidget()
+    layout = QVBoxLayout(host)
+    layout.addWidget(section)
+    layout.addStretch(1)
+    qtbot.addWidget(host)
+    host.resize(220, 600)
+    host.show()
+    qtbot.waitExposed(host)
+    needed = label.heightForWidth(label.width())
+    assert needed > label.sizeHint().height()  # narrower than the label would like
+    assert label.visibleRegion().boundingRect().height() == needed  # nothing is clipped
+
+
 def test_collapsible_section_settings_protocol(qtbot):
     section = CollapsibleSection("View", expanded=False)
     qtbot.addWidget(section)
