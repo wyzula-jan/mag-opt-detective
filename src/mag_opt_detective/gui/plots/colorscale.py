@@ -214,6 +214,7 @@ class ColorBar(QWidget):
     PAD = 8  # vertical room for the end labels and handles
     BAR = 12
     LEFT = 7
+    GAP = 9  # bar to labels, clear of the handles
     GRAB = 7  # pixels around a handle that pick it up
     MARGIN = 0.25  # value axis = levels +- this fraction of their span
     WHEEL_DELAY_MS = 300
@@ -237,7 +238,7 @@ class ColorBar(QWidget):
     def preferred_width(self) -> int:
         metrics = self.fontMetrics()
         label = max(metrics.horizontalAdvance(s) for s in ("-0.00000", "-1.23e-05"))
-        return self.LEFT + self.BAR + 7 + label + 4
+        return self.LEFT + self.BAR + self.GAP + label + 4
 
     # ------------------------------------------------------------------ state
     def levels(self) -> Levels:
@@ -327,7 +328,7 @@ class ColorBar(QWidget):
             painter.setPen(QPen(frame, 1))
             painter.drawLine(QPointF(bar.right(), y), QPointF(bar.right() + 4, y))
             painter.setPen(QPen(fg))
-            painter.drawText(QPointF(bar.right() + 7, y + half), _tick_label(value, step))
+            painter.drawText(QPointF(bar.right() + self.GAP, y + half), _tick_label(value, step))
 
         painter.setPen(QPen(self._colors.q("accent"), 2))
         painter.setBrush(self._colors.q("background"))
