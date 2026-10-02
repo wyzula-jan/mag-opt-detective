@@ -10,7 +10,7 @@ import numpy as np
 import pyqtgraph as pg
 from pyqtgraph import exporters
 from PySide6.QtCore import QRectF, Signal
-from PySide6.QtGui import QImage, QPainter
+from PySide6.QtGui import QImage, QPainter, QPicture
 from PySide6.QtSvg import QSvgGenerator
 from PySide6.QtWidgets import QHBoxLayout, QWidget
 
@@ -191,11 +191,13 @@ class PlotView(OverlayMixin, QWidget):
         # pyqtgraph 0.14's SVGExporter cannot parse the path data Qt 6.11 writes,
         # so render through QSvgGenerator (lines stay vectors).
         target = QRectF(0, 0, width, height)
-        generator = QSvgGenerator()
+        generator = QSvgGenerator(QSvgGenerator.SvgVersion.Svg11)  # 1.1 keeps clipping
         generator.setFileName(str(path))
         generator.setSize(target.size().toSize())
         generator.setViewBox(target)
         generator.setTitle("mag-opt-detective plot")
+        # pyqtgraph caches axes as QPictures, which QPainter rescales to the device DPI
+        generator.setResolution(QPicture().logicalDpiX())
         painter = QPainter(generator)
         try:
             self._paint_parts(painter, parts, width, height, 1.0)
