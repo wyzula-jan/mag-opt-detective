@@ -8,7 +8,7 @@ import shiboken6
 from PySide6.QtCore import QPoint, Qt
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QTableWidget
+from PySide6.QtWidgets import QComboBox
 
 import gui_helpers
 from gui_helpers import energy_label, load_sweep, process, shown_image
@@ -186,18 +186,20 @@ def test_toolbar_follows_the_controller(window, sweep, errors):
     assert not errors
 
 
-def test_typed_letters_stay_in_tables_and_combo_boxes(shown):
+def test_typed_letters_stay_in_tables_and_combo_boxes(shown, sweep):
     w, tools = shown, shown.tools
-    w.show_panel("library")
-    table = w.panels["library"].findChild(QTableWidget)
+    load_sweep(w, sweep)
+    w.show_panel("sample")
+    table = w.panels["sample"].measurement.field_list
     table.setFocus()
     QTest.keyClick(table, Qt.Key.Key_Z)  # keyboard search, not the Box zoom tool
     assert tools.active() == "navigate"
     w.plots.map.view.setFocus()
     QTest.keyClick(w.plots.map.view, Qt.Key.Key_Z)
     assert tools.active() == "zoom"
-    w.show_panel("sample")
-    combo = w.panels["sample"].field_source
+    combo = QComboBox(w.panels["sample"])
+    combo.addItems(["Venus", "Mars"])
+    combo.show()
     combo.setFocus()
     QTest.keyClick(combo, Qt.Key.Key_V)
     assert tools.active() == "zoom"

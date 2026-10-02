@@ -46,10 +46,10 @@ def test_settings_round_trip(qtbot, ini):
     w = make_window(qtbot, ini, show=True)
     w.toolbar.unit.set_value("meV")
     sample = w.panels["sample"]
-    sample.field_source.setCurrentIndex(1)
-    sample.measurement.field_range.start.setText("0.5")
+    sample.field_source.set_value("custom")
+    sample.field_range.start.setText("0.5")
     reference = w.panels["reference"]
-    reference.ref_separate.setChecked(True)
+    reference.set_reference_mode(ReferenceMode.SEPARATE)
     reference.sg_window.setValue(15)
     w.controller.set_ranges(energy_range=(0.0, 120.0))  # as if zoomed (meV)
     colour_page(w).fields.lo.setValue(0.95)
@@ -73,10 +73,10 @@ def test_settings_round_trip(qtbot, ini):
     c = w2.controller
     assert c.unit is Unit.MEV and w2.toolbar.unit.value() == "meV"
     assert w2.panels["sample"].custom_field()
-    assert w2.panels["sample"].measurement.field_range.isEnabled()
-    assert w2.panels["sample"].measurement.field_range.start.text() == "0.5"
-    assert w2.panels["reference"].ref_separate.isChecked()
-    assert not w2.panels["reference"].ref_none.isChecked()
+    assert not w2.panels["sample"].field_range.isHidden()
+    assert w2.panels["sample"].field_range.start.text() == "0.5"
+    assert w2.panels["reference"].reference_mode() is ReferenceMode.SEPARATE
+    assert c.processing.reference_mode is ReferenceMode.SEPARATE
     assert w2.panels["reference"].sg_window.value() == 15
     assert c.view.energy_range == pytest.approx((0.0, 120.0))  # meV
     assert view_page(w2).energy.range() == pytest.approx((0.0, 120.0))

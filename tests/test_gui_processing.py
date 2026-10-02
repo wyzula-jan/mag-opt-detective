@@ -123,20 +123,20 @@ def test_unexpected_errors_open_a_dialog(window, sweep, monkeypatch):
 def test_custom_field_and_reference(window, sweep, errors):
     load_sweep(window, sweep)
     sample = window.panels["sample"]
-    sample.field_source.setCurrentIndex(1)
-    box = sample.measurement.field_range
-    assert box.isEnabled()
+    sample.field_source.set_value("custom")
+    box = sample.field_range
+    assert not box.isHidden()
     box.start.setText("1")
     box.step.setText("1")
     box.end.setText("4")
     reference = window.panels["reference"]
-    assert reference.field_range.isEnabled()
+    reference.set_reference_mode(ReferenceMode.SEPARATE)
+    assert reference.field_range.isVisibleTo(reference)
     reference.zero_list.set_paths(sweep["zero"])
     reference.field_list.set_paths(sweep["field"])
     reference.field_range.start.setText("1")
     reference.field_range.step.setText("1")
     reference.field_range.end.setText("4")
-    reference.set_reference_mode(ReferenceMode.SEPARATE)
     process(window)
     assert not errors
     result = window.controller.result
@@ -376,13 +376,13 @@ def test_panels_follow_the_processing_state(window, sweep):
     assert processing.cut_on.isChecked() and processing.baseline_on.isChecked()
     assert processing.cut_lo.text() == "24.7967" and processing.baseline_hi.text() == ""
     reference = window.panels["reference"]
-    assert reference.ref_self.isChecked() and reference.smooth.isChecked()
+    assert reference.mode.value() == "self" and reference.smooth.isChecked()
     assert reference.sg_window.value() == 15
-    assert window.panel_pages["reference"].subtitle.text().startswith("Uses the (smoothed)")
+    assert window.panel_pages["reference"].subtitle.text().startswith("Corrects the sample with")
     sample = window.panels["sample"]
-    assert sample.custom_field() and sample.measurement.field_range.isEnabled()
-    box = sample.measurement.field_range
-    assert (box.start.text(), box.step.text(), box.end.text()) == ("1.0", "0.5", "3.0")
+    assert sample.custom_field() and not sample.field_range.isHidden()
+    box = sample.field_range
+    assert (box.start.text(), box.step.text(), box.end.text()) == ("1", "0.5", "3")
 
     processing.baseline_on.setChecked(False)  # an unrelated edit keeps the rest
     assert c.processing.energy_cut == (200.0, 800.0) and c.processing.baseline is None
