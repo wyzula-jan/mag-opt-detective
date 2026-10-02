@@ -125,17 +125,19 @@ def build_palette(t: dict[str, QColor]) -> QPalette:
         QPalette.ColorRole.Button: "surface",
         QPalette.ColorRole.ButtonText: "fg",
         QPalette.ColorRole.BrightText: "accent-fg",
-        QPalette.ColorRole.Light: "surface",
-        QPalette.ColorRole.Midlight: "line",
+        QPalette.ColorRole.Midlight: "line",  # the kit widgets draw lines with these two
         QPalette.ColorRole.Mid: "line-strong",
-        QPalette.ColorRole.Dark: "faint",
-        QPalette.ColorRole.Shadow: "fg",
         QPalette.ColorRole.Highlight: "accent",
         QPalette.ColorRole.HighlightedText: "accent-fg",
         QPalette.ColorRole.Link: "accent",
         QPalette.ColorRole.LinkVisited: "accent",
         QPalette.ColorRole.Accent: "accent",
     }
+    dark = t["bg"].lightness() < t["fg"].lightness()
+    # bevels (qDrawShade* frames): Light above Button, Dark and Shadow below it
+    roles[QPalette.ColorRole.Light] = "line-strong" if dark else "surface"
+    roles[QPalette.ColorRole.Dark] = "sunken" if dark else "faint"
+    roles[QPalette.ColorRole.Shadow] = "bg" if dark else "fg"
     for role, name in roles.items():
         p.setColor(role, t[name])
     disabled = QPalette.ColorGroup.Disabled
@@ -249,7 +251,9 @@ class Theme(QObject):
     """The application look: ``system`` (follows the OS), ``light`` or ``dark``.
 
     ``changed`` fires whenever the effective colours may differ (scheme switched, OS scheme
-    changed while following it, or :meth:`apply`); cached icons are re-tinted first.
+    changed while following it, or :meth:`apply`); cached icons are re-tinted first. Use one
+    Theme per application: only the theme applied last carries an OS scheme change into the
+    application palette.
     """
 
     changed = Signal()
@@ -260,6 +264,7 @@ class Theme(QObject):
             raise ValueError(f"unknown scheme {scheme!r}; use one of {SCHEMES}")
         self._scheme = scheme
         self._app: QApplication | None = None
+        self._requesting = False
         self.changed.connect(icons.refresh)  # first slot, so later slots see fresh icons
         QGuiApplication.styleHints().colorSchemeChanged.connect(self._on_system_scheme)
 
@@ -284,18 +289,22 @@ class Theme(QObject):
         return system_is_dark()
 
     def _on_system_scheme(self, _scheme=None) -> None:
-        if self._scheme != "system":
+        if self._scheme != "system" or self._requesting:
             return
-        if self._app is not None:
+        if self._app is not None and _active is self:
             self._apply_to(self._app)
         self.changed.emit()
 
     def _request_platform_scheme(self) -> None:
         """Ask the platform for matching window frames (ignored where unsupported)."""
         wanted = {"light": Qt.ColorScheme.Light, "dark": Qt.ColorScheme.Dark}
-        QGuiApplication.styleHints().setColorScheme(
-            wanted.get(self._scheme, Qt.ColorScheme.Unknown)
-        )
+        self._requesting = True  # the hint may emit colorSchemeChanged now; we apply anyway
+        try:
+            QGuiApplication.styleHints().setColorScheme(
+                wanted.get(self._scheme, Qt.ColorScheme.Unknown)
+            )
+        finally:
+            self._requesting = False
 
     # --- colours -----------------------------------------------------------------------
     def tokens(self) -> dict[str, QColor]:

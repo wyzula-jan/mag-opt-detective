@@ -1,5 +1,6 @@
 import re
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from PySide6.QtCore import Qt
@@ -78,6 +79,36 @@ def test_light_and_dark_palettes(app, qtbot):
     assert theme.current_tokens()["accent"].name() == DARK["accent"]
     app.setStyleSheet("")  # under a stylesheet, style() is the stylesheet wrapper
     assert app.style().name().lower() == "fusion"
+
+
+@pytest.mark.parametrize("dark", [False, True])
+def test_palette_bevel_roles_are_ordered(dark):
+    p = theme.build_palette(theme.tokens_for(dark))
+    roles = (QPalette.ColorRole.Light, QPalette.ColorRole.Button, QPalette.ColorRole.Dark)
+    light, button, darker = (p.color(role).lightness() for role in roles)
+    shadow = p.color(QPalette.ColorRole.Shadow).lightness()
+    assert light >= button > darker >= shadow
+
+
+def test_switching_to_system_applies_once(app, monkeypatch):
+    t = Theme("dark")
+    t.apply(app)
+    hints = QGuiApplication.styleHints()
+
+    class Gui:  # a platform that reports a requested scheme at once, as macOS does
+        @staticmethod
+        def styleHints():
+            return SimpleNamespace(
+                setColorScheme=hints.colorSchemeChanged.emit, colorScheme=hints.colorScheme
+            )
+
+    monkeypatch.setattr(theme, "QGuiApplication", Gui)
+    applied, emitted = [], []
+    monkeypatch.setattr(t, "_apply_to", applied.append)
+    t.changed.connect(lambda: emitted.append(True))
+    t.set_scheme("system")
+    t.apply(app)
+    assert len(applied) == len(emitted) == 2
 
 
 def test_stylesheet_only_matches_kit_properties():
