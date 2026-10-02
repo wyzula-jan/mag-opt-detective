@@ -15,6 +15,7 @@ import dataclasses
 import functools
 import logging
 import math
+import os
 import re
 from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass, field
@@ -972,6 +973,18 @@ def _mirrored(
     if old is not None and abs(lo - old[0]) <= tol and hi > centre:
         return 2 * centre - hi, hi
     return None
+
+
+SEPARATORS = "_- "
+
+
+def common_prefix(names: list[str]) -> str:
+    """The start all *names* share, cut after its last separator (``_``, ``-`` or space)."""
+    if not names:
+        return ""
+    prefix = os.path.commonprefix(names)
+    cut = max(prefix.rfind(s) for s in SEPARATORS)
+    return prefix[: cut + 1] if cut >= 0 else ""
 
 
 def _sorted_files(files: SweepFiles) -> SweepFiles:
