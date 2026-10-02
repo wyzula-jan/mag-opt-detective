@@ -1,15 +1,18 @@
 """The application controller on its own (no window)."""
 
+import dataclasses
+
 import numpy as np
 import pytest
 
-from mag_opt_detective.core.pipeline import PlotKind
+from mag_opt_detective.core.pipeline import PlotKind, ReferenceMode
 from mag_opt_detective.core.processing import Axis
 from mag_opt_detective.core.units import Unit
 from mag_opt_detective.gui.controller import (
     AppController,
     FieldRange,
     PlotSelection,
+    ProcessingState,
     SweepFiles,
     ViewState,
     level_key,
@@ -109,9 +112,45 @@ def test_changed_since_process_compares_with_the_options_used(controller, sweep)
     assert controller.processing.sample_files.field == tuple(map(str, sweep["field"]))  # sorted
     assert not controller.changed_since_process()  # nothing processed yet
     controller.process()
-    controller.set_processing(smooth=True)
-    controller.set_processing(smooth=False)
+    controller.set_processing(smooth=True)  # no reference: smoothing changes nothing
+    assert not controller.changed_since_process()
+    controller.set_processing(reference_mode=ReferenceMode.SELF)
+    controller.set_processing(reference_mode=ReferenceMode.NONE)
     assert flags == [True, False]
+
+
+def test_effective_processing_state_drops_unused_options():
+    plain = ProcessingState()
+    unused = dict(
+        smooth=True,
+        sg_window=21,
+        sample_field=FieldRange(1.0, 1.0, 2.0),
+        reference_field=FieldRange(1.0, 1.0, 2.0),
+        reference_files=SweepFiles(("zero",), ("field",)),
+    )
+    assert dataclasses.replace(plain, **unused).effective() == plain.effective()
+    separate = ProcessingState(reference_mode=ReferenceMode.SEPARATE, custom_field=True)
+    for name, value in unused.items():
+        if name != "sg_window":  # used only with smoothing
+            changed = dataclasses.replace(separate, **{name: value})
+            assert changed.effective() != separate.effective(), name
+    smoothed = ProcessingState(reference_mode=ReferenceMode.SELF, smooth=True)
+    assert dataclasses.replace(smoothed, sg_window=21).effective() != smoothed.effective()
+    files = dataclasses.replace(smoothed, reference_files=SweepFiles(("zero",), ("field",)))
+    assert files.effective() == smoothed.effective()
+
+
+def test_library_maps_do_not_count_as_processed(controller, sweep):
+    controller.set_processing(sample_files=SweepFiles(tuple(sweep["zero"]), tuple(sweep["field"])))
+    result = controller.process()
+    processed_at = controller.processed_at
+    controller.set_processing(energy_cut=(200.0, 800.0))
+    assert controller.changed_since_process()
+    controller.from_map(result.ratio)
+    assert controller.result_source == "library" and controller.processed_at == processed_at
+    assert controller.changed_since_process()  # the sweep still needs processing
+    controller.process()
+    assert controller.result_source == "process" and not controller.changed_since_process()
 
 
 def test_points_are_kept_in_cm1(controller, sweep):

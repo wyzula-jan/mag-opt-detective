@@ -267,6 +267,24 @@ class ProcessingState:
     energy_cut: Range | None = None  # None: keep every energy
     baseline: Range | None = None  # None: no baseline correction
 
+    def effective(self) -> ProcessingState:
+        """The same state with the options that cannot change the result reset (smoothing
+        without a reference, the reference sweep in another mode, an unused field range)."""
+        default = ProcessingState()
+        separate = self.reference_mode is ReferenceMode.SEPARATE
+        changes: dict[str, object] = {}
+        if not self.custom_field:
+            changes["sample_field"] = default.sample_field
+        if not separate:
+            changes["reference_files"] = default.reference_files
+        if not (separate and self.custom_field):
+            changes["reference_field"] = default.reference_field
+        if self.reference_mode is ReferenceMode.NONE:
+            changes["smooth"] = default.smooth
+        if self.reference_mode is ReferenceMode.NONE or not self.smooth:
+            changes["sg_window"], changes["sg_poly"] = default.sg_window, default.sg_poly
+        return dataclasses.replace(self, **changes)
+
 
 @dataclass(frozen=True)
 class FigureState:
@@ -305,7 +323,8 @@ class AppController(QObject):
         self.result: ProcessResult | None = None
         self.points: PointTable | None = None
         self.slots: dict[int, FieldMap] = {}
-        self.processed_at: datetime | None = None
+        self.processed_at: datetime | None = None  # of the last Process
+        self.result_source = ""  # "process" or "library": where the shown result comes from
         self._unit = Unit.CM1
         self._view = ViewState()
         self._selection = PlotSelection()
@@ -420,7 +439,8 @@ class AppController(QObject):
         return self._changed
 
     def _update_changed(self) -> None:
-        changed = self._processed_with is not None and self._processed_with != self._processing
+        used = self._processed_with
+        changed = used is not None and used.effective() != self._processing.effective()
         if changed != self._changed:
             self._changed = changed
             self.changedSinceProcess.emit(changed)
@@ -523,11 +543,17 @@ class AppController(QObject):
         self.set_result(result)
         return result
 
-    def set_result(self, result: ProcessResult) -> None:
-        """Show *result* (cm^-1); the current processing options count as applied."""
+    def set_result(self, result: ProcessResult, processed: bool = True) -> None:
+        """Show *result* (cm^-1).
+
+        *processed*: made by :meth:`process` from the current options, which then count as
+        applied; False for library maps, which leave the Process state as it was.
+        """
         self.result = result
-        self.processed_at = datetime.now()
-        self._processed_with = self._processing
+        self.result_source = "process" if processed else "library"
+        if processed:
+            self.processed_at = datetime.now()
+            self._processed_with = self._processing
         self._init_points_if_requested(result.ratio.field)
         self.resultChanged.emit()
         self._update_changed()
@@ -538,7 +564,7 @@ class AppController(QObject):
         if baseline is not None:
             self.check_energy_range("baseline region", baseline, fmap.energy, "processing")
         result = ProcessResult.from_map(fmap, baseline)
-        self.set_result(result)
+        self.set_result(result, processed=False)
         return result
 
     # --- figure ------------------------------------------------------------------------

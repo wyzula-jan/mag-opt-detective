@@ -624,6 +624,8 @@ class MainWindow(QMainWindow):
             color, text = tokens["faint"], "Not processed yet"
         elif changed:
             color, text = tokens["warn"], "Settings changed - process again"
+        elif c.result_source == "library":
+            color, text = tokens["accent"], "Showing a library map"
         else:
             stamp = c.processed_at.strftime("%H:%M") if c.processed_at else ""
             color, text = tokens["ok"], f"Processed {stamp}"
