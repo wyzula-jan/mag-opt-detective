@@ -1,7 +1,9 @@
+"""The Points panel, the Pick tool on the map and the stacked plot, the markers and undo."""
+
 import numpy as np
 import pyqtgraph as pg
 import pytest
-from PySide6.QtCore import QPoint, Qt
+from PySide6.QtCore import QPoint, QSettings, Qt
 from PySide6.QtTest import QTest
 
 import gui_helpers
@@ -14,92 +16,238 @@ from gui_helpers import (
     save_to,
     set_unit,
 )
+from mag_opt_detective.core.spectra import FieldMap
+from mag_opt_detective.core.units import from_cm1
+from mag_opt_detective.gui.controller import AppController, SweepFiles
+from mag_opt_detective.gui.main_window import MainWindow
+from mag_opt_detective.gui.plots import StackedPlot
+from mag_opt_detective.gui.points_view import CURVE_COLORS, PickHint
 
 window, errors = gui_helpers.window, gui_helpers.errors  # shared fixtures
 
 ALT = Qt.KeyboardModifier.AltModifier
+CTRL = Qt.KeyboardModifier.ControlModifier
 MEV = 8.0656
 
 
-def test_points_record_remove_export(window, sweep, tmp_path, monkeypatch, errors):
+@pytest.fixture
+def processed(window, sweep):
     load_sweep(window, sweep)
-    set_unit(window, "meV")
     process(window)
-    c, panel = window.controller, window.panels["points"]
-    model = panel.model
-    panel.point_record.setChecked(True)
-    assert window.tools.active() == "pick"
-    click_map(window, 1.04, 37.2)  # meV, as shown
-    click_map(window, 1.96, 38.5)
-    assert model.rowCount() == 4
-    assert model.data(model.index(1, 0)) == "37.2"
-    np.testing.assert_allclose(c.points.points("LL 1")[1], [37.2 * 8.0656, 38.5 * 8.0656])
-    np.testing.assert_allclose(current_marker_energies(window), [37.2, 38.5])  # markers in meV
-    panel.point_remove.setChecked(True)
-    click_map(window, 2.0, 0.0)
-    b, _ = c.points.points("LL 1")
-    np.testing.assert_allclose(b, [1.0])
+    return window
 
+
+@pytest.fixture
+def shown(processed, qtbot):
+    processed.resize(1400, 900)
+    processed.show()
+    qtbot.waitExposed(processed)
+    processed.show_panel("points", open=True)
+    return processed
+
+
+def chips(window) -> list[tuple[str, str, bool]]:
+    """(name, count, current) of the curve chips."""
+    return [
+        (chip.text(), chip.count, chip.current) for chip in window.panels["points"].chips.chips()
+    ]
+
+
+def rows(window) -> list[tuple[str, str]]:
+    """(B, E) as shown in the points table."""
+    model = window.panels["points"].model
+    return [
+        (model.data(model.index(r, 0)), model.data(model.index(r, 1))) for r in range(len(model))
+    ]
+
+
+def scatters(layer) -> list[pg.ScatterPlotItem]:
+    return [
+        item for item in layer.items() if isinstance(item, pg.ScatterPlotItem) and item.isVisible()
+    ]
+
+
+# ---------------------------------------------------------------------- panel
+def test_curves_as_chips_new_rename_and_delete(processed, errors):
+    w = processed
+    c, panel = w.controller, w.panels["points"]
+    w.tools.set_active("pick")
+    click_map(w, 1.0, 300.0)
+    click_map(w, 1.5, 400.0)
+    assert chips(w) == [("LL 1", "2", True)]
+    panel.chips.new_chip.click()
+    assert c.curve == "LL 2" and panel.column_name.text() == "LL 2"
+    assert chips(w) == [("LL 1", "2", False), ("LL 2", "0", True)]
+    click_map(w, 2.0, 500.0)
+    assert [chip.color.name() for chip in panel.chips.chips()] == list(CURVE_COLORS[:2])
+
+    panel.column_name.setText("CR")  # typing renames the current curve
+    assert c.points.names == ["LL 1", "CR"] and chips(w)[1] == ("CR", "1", True)
+    panel.column_name.setText("LL 1")  # taken: said, not applied
+    assert not panel.name_note.isHidden() and "exists already" in panel.name_note.text()
+    assert c.curve == "CR"
+    panel.column_name.editingFinished.emit()
+    assert panel.column_name.text() == "CR" and panel.name_note.isHidden()
+
+    panel.chips.chips()[0].click()
+    assert c.curve == "LL 1" and panel.column_name.text() == "LL 1"
+    panel.delete_button.click()
+    assert c.points.names == ["CR"] and chips(w) == [("CR", "1", True)]
+    assert not errors
+
+
+def test_points_table_in_the_display_unit_with_a_remove_button_per_row(shown, errors, qtbot):
+    w = shown
+    c, panel = w.controller, w.panels["points"]
+    set_unit(w, "meV")
+    w.tools.set_active("pick")
+    for b, e in ((2.0, 41.0), (0.5, 37.2), (1.5, 40.0)):
+        click_map(w, b, e)
+    assert rows(w) == [("0.5", "37.2"), ("1.5", "40"), ("2", "41")]  # sorted by B
+    assert panel.count_label.text() == "3 of 4 fields"
+    assert panel.model.headerData(1, Qt.Orientation.Horizontal) == "E (meV)"
+
+    table = panel.table
+    qtbot.waitUntil(table.isVisible)
+    cell = table.visualRect(panel.model.index(1, panel.model.REMOVE)).center()
+    QTest.mouseClick(table.viewport(), Qt.MouseButton.LeftButton, pos=cell)
+    assert rows(w) == [("0.5", "37.2"), ("2", "41")]
+    np.testing.assert_allclose(c.points.points("LL 1")[0], [0.5, 2.0])
+    table.setFocus()
+    table.selectAll()
+    QTest.keyClick(table, Qt.Key.Key_Delete)
+    assert rows(w) == [] and panel.table_stack.currentWidget() is panel.empty_label
+    assert w.points_undo.undoText() == "Remove 2 points from LL 1"
+    assert panel.count_label.text() == "0 of 4 fields"
+    assert not errors
+
+
+def test_a_unit_switch_changes_the_table_but_not_the_points(processed):
+    w = processed
+    c, panel = w.controller, w.panels["points"]
+    w.tools.set_active("pick")
+    click_map(w, 1.0, 300.0)
+    stored = c.points.column("LL 1").copy()
+    for unit in ("meV", "THz", "cm-1"):
+        set_unit(w, unit)
+        shown = float(from_cm1(300.0, unit))
+        assert rows(w) == [("1", f"{shown:.5g}")]
+        assert panel.model.headerData(1, Qt.Orientation.Horizontal) == f"E ({unit})"
+        np.testing.assert_allclose(current_marker_energies(w), [shown])
+        np.testing.assert_array_equal(c.points.column("LL 1"), stored)
+
+
+def test_new_table_on_the_next_process(shown):
+    w = shown
+    c, panel = w.controller, w.panels["points"]
+    assert not panel.new_table.isChecked() and not c.new_table
+    c.record_point(1.0, 300.0)
+    c.add_curve("CR")
+    process(w)
+    assert len(c.points.points("LL 1")[0]) == 1  # kept
+    row = panel.new_table_row
+    QTest.mouseClick(row, Qt.MouseButton.LeftButton, pos=QPoint(5, 5))  # the text toggles too
+    assert panel.new_table.isChecked() and c.new_table
+    process(w)
+    assert c.points.names == ["LL 1", "CR"] and c.curve == "CR"  # the curves stay, empty
+    assert all(np.isnan(c.points.column(name)).all() for name in c.points.names)
+    assert not panel.new_table.isChecked()
+    assert w.points_undo.undoText() == "New point table"
+    w.commands["undo"].trigger()
+    np.testing.assert_allclose(c.points.points("LL 1")[1], [300.0])
+
+
+def test_import_export_round_trip_and_legacy_files(processed, tmp_path, monkeypatch, errors):
+    w = processed
+    c, panel = w.controller, w.panels["points"]
+    set_unit(w, "meV")
+    w.tools.set_active("pick")
+    click_map(w, 1.04, 37.2)  # meV, as shown
+    click_map(w, 1.96, 38.5)
     path = tmp_path / "points.csv"
     save_to(monkeypatch, path)
     panel.export_button.click()
     assert path.read_text().splitlines()[:3] == ["Energy (meV)\tLL 1", "0.5\t", "1.0\t37.2"]
+    c.drop_curve()
+    assert len(c.points.points("LL 1")[0]) == 0
     open_from(monkeypatch, path)
-    c.points = None
-    panel.load_button.click()
-    assert c.points.names == ["LL 1"]
-    np.testing.assert_allclose(c.points.points("LL 1")[1], [37.2 * 8.0656])
+    panel.import_button.click()
+    np.testing.assert_allclose(c.points.points("LL 1")[1], [37.2 * MEV, 38.5 * MEV])
+    assert w.points_undo.undoText() == "Import points.csv"
 
     legacy = tmp_path / "Points_V1.csv"  # no unit in the header: read in the display unit
-    legacy.write_text("\tLL 2\n0.5\t40\n1.0\t\n1.5\t\n2.0\t41\n")
+    legacy.write_text("\tLL 2\tCR\n0.5\t40\t\n1.0\t\t\n1.5\t\t44\n2.0\t41\t\n")
     open_from(monkeypatch, legacy)
-    panel.load_button.click()
-    np.testing.assert_allclose(c.points.points("LL 2")[1], [40 * 8.0656, 41 * 8.0656])
+    panel.import_button.click()
+    assert chips(w) == [("LL 2", "2", True), ("CR", "1", False)]
     assert panel.column_name.text() == "LL 2"
-    assert model.data(model.index(3, 0)) == "41"
-    np.testing.assert_allclose(current_marker_energies(window), [40, 41])
+    assert rows(w) == [("0.5", "40"), ("2", "41")]
+    np.testing.assert_allclose(c.points.points("LL 2")[1], [40 * MEV, 41 * MEV])
+    np.testing.assert_allclose(current_marker_energies(w), [40, 41])
+    w.commands["undo"].trigger()
+    assert c.points.names == ["LL 1"] and len(c.points.points("LL 1")[0]) == 2
     assert not errors
 
 
-def test_show_all_and_drop_curve(window, sweep, errors):
-    load_sweep(window, sweep)
-    process(window)
-    c, panel = window.controller, window.panels["points"]
-    window.tools.set_active("pick")
-    assert panel.point_record.isChecked()
-    click_map(window, 0.5, 300.0)
-    panel.column_name.setText("LL 2")
-    click_map(window, 1.0, 400.0)
-    click_map(window, 1.5, 500.0)
-    assert c.points.names == ["LL 1", "LL 2"]
-    layer = window.plots.map.layer("points")
-    assert len(layer.point_data()) == 1  # the current curve only
-    panel.show_all_button.setChecked(True)
-    assert [len(x) for x, _y in layer.point_data()] == [3, 2]
-    panel.drop_button.click()
-    assert c.points.names == ["LL 1"]
+def test_markers_and_curve_name_are_remembered(qtbot, tmp_path):
+    ini = str(tmp_path / "settings.ini")
+    first = MainWindow(settings=QSettings(ini, QSettings.Format.IniFormat))
+    qtbot.addWidget(first)
+    first.panels["points"].markers.set_value("current")
+    first.panels["points"].column_name.setText("CR1")
+    first.close()
+    second = MainWindow(settings=QSettings(ini, QSettings.Format.IniFormat))
+    qtbot.addWidget(second)
+    panel = second.panels["points"]
+    assert panel.markers.value() == "current"
+    assert second.controller.curve == "CR1" and panel.column_name.text() == "CR1"
+
+
+# ---------------------------------------------------------------------- pick tool
+def test_pick_on_the_map(processed, errors):
+    w = processed
+    c, tools = w.controller, w.tools
+    w.panels["points"].pick_button.click()
+    assert tools.active() == "pick"
+    click_map(w, 1.04, 300.0)  # the nearest field
+    click_map(w, 1.5, 400.0)
+    click_map(w, 1.47, 0.0, ALT)  # far from the point: the clicked field's point goes
+    np.testing.assert_allclose(c.points.points("LL 1")[0], [1.0])
+    click_map(w, 2.0, 500.0, ALT)  # nothing there
+    np.testing.assert_allclose(c.points.points("LL 1")[0], [1.0])
     assert not errors
 
 
-def test_new_table_on_next_process(window, sweep):
-    load_sweep(window, sweep)
-    process(window)
-    c, panel = window.controller, window.panels["points"]
-    assert not panel.init_table.isChecked()  # a table was started
-    window.tools.set_active("pick")
-    click_map(window, 1.0, 300.0)
-    process(window)
-    assert len(c.points.points("LL 1")[0]) == 1  # kept
-    panel.init_table.setChecked(True)
-    process(window)
-    assert len(c.points.points("LL 1")[0]) == 0
-    assert not panel.init_table.isChecked()
+def test_pick_toggle_follows_the_tool_and_shows_a_hint(shown):
+    w = shown
+    tools, panel, area = w.tools, w.panels["points"], w.plot_area
+    hint = w.findChild(PickHint)
+    assert hint.isHidden()
+    area.set_current_view("reference")
+    panel.pick_button.click()  # shows the map first
+    assert area.current_view() == "map" and tools.active() == "pick"
+    assert panel.pick_button.isChecked() and tools.tool("pick").button.isChecked()
+    assert hint.isVisible() and hint.text().startswith("Picking LL 1 · click to record")
+    view = w.plots.map.view
+    view.setFocus()
+    QTest.keyClick(view, Qt.Key.Key_Escape)
+    assert tools.active() == "navigate" and not panel.pick_button.isChecked()
+    assert hint.isHidden()
+    QTest.keyClick(view, Qt.Key.Key_P)
+    assert tools.active() == "pick" and panel.pick_button.isChecked()
+    w.controller.add_curve()
+    assert hint.text().startswith("Picking LL 2")
+    w.report_error("Pick point", "something went wrong", panel="points")
+    assert hint.geometry().top() > w.infobar.geometry().bottom()  # below the error bar
+    panel.pick_button.click()
+    assert tools.active() == "navigate" and hint.isHidden()
+    area.set_current_view("reference")
+    assert not tools.tool("pick").button.isEnabled()
 
 
-def test_tool_registry_routes_clicks_with_modifiers(window, sweep):
-    load_sweep(window, sweep)
-    process(window)
-    tools, clicks = window.tools, []
+def test_tool_registry_routes_clicks_with_modifiers(processed):
+    w = processed
+    tools, clicks = w.tools, []
     events = []
     tools.register(
         "probe",
@@ -122,75 +270,68 @@ def test_tool_registry_routes_clicks_with_modifiers(window, sweep):
         ("stacked", 300.0, 1.5, ALT),
         ("map", 1.0, 2.0, Qt.KeyboardModifier.NoModifier),
     ]
-    window.plot_area.tabs.setCurrentIndex(2)  # Reference: the probe does not work there
+    w.plot_area.tabs.setCurrentIndex(2)  # Reference: the probe does not work there
     assert tools.active() == "navigate" and events == ["on", "off"]
     assert not tools.tool("probe").button.isEnabled()
 
 
-def test_alt_click_removes_a_picked_point(window, sweep, errors):
-    load_sweep(window, sweep)
-    process(window)
-    c = window.controller
-    window.tools.set_active("pick")
-    click_map(window, 1.0, 300.0)
-    click_map(window, 1.5, 400.0)
-    click_map(window, 1.04, 0.0, ALT)
-    np.testing.assert_allclose(c.points.points("LL 1")[0], [1.5])
-    assert not errors
-
-
-def test_tool_modes_and_shortcuts(window, sweep):
-    load_sweep(window, sweep)
-    process(window)
-    tools, vb = window.tools, window.plots.map.plot.vb
+def test_tool_modes_and_shortcuts(processed):
+    w = processed
+    tools, vb = w.tools, w.plots.map.plot.vb
     tools.set_active("zoom")
     assert vb.state["mouseMode"] == pg.ViewBox.RectMode
     tools.toggle("zoom")  # the shortcut again: back to pan and zoom
     assert tools.active() == "navigate"
     assert vb.state["mouseMode"] == pg.ViewBox.PanMode
     tools.toggle("pick")
-    assert window.panels["points"].point_record.isChecked()
-    window.panels["points"].point_off.setChecked(True)
+    assert w.panels["points"].pick_button.isChecked()
+    w.panels["points"].pick_button.click()
     assert tools.active() == "navigate"
 
 
-def test_a_real_click_on_the_map_picks_a_point(window, sweep, qtbot):
-    window.resize(1400, 900)
-    window.show()
-    qtbot.waitExposed(window)
-    load_sweep(window, sweep)
-    process(window)
-    window.tools.set_active("pick")
-    plot = window.plots.map
+def test_real_clicks_on_the_map_pick_and_alt_remove(shown):
+    w = shown
+    c, plot = w.controller, w.plots.map
+    w.tools.set_active("pick")
     vb = plot.plot.vb
-    target = vb.mapViewToScene(pg.Point(1.5, 550.0))
-    pos = plot.view.mapFromScene(target)
-    QTest.mouseClick(plot.view.viewport(), Qt.MouseButton.LeftButton, pos=QPoint(pos.x(), pos.y()))
-    b, e = window.controller.points.points("LL 1")
-    np.testing.assert_allclose(b, [1.5])
-    assert abs(e[0] - 550.0) < 20
+
+    def click(b, e, modifier=Qt.KeyboardModifier.NoModifier, dx=0):
+        target = plot.view.mapFromScene(vb.mapViewToScene(pg.Point(b, e)))
+        pos = QPoint(int(target.x()) + dx, int(target.y()))
+        QTest.mouseClick(plot.view.viewport(), Qt.MouseButton.LeftButton, modifier, pos)
+
+    click(1.5, 550.0)
+    click(1.0, 300.0)
+    b, e = c.points.points("LL 1")
+    np.testing.assert_allclose(b, [1.0, 1.5])
+    assert abs(e[1] - 550.0) < 20
+    click(1.5, e[1], ALT, dx=6)  # a few pixels off the marker
+    np.testing.assert_allclose(c.points.points("LL 1")[0], [1.0])
 
 
-def test_pick_works_on_the_map_only(window, sweep):
-    load_sweep(window, sweep)
-    process(window)
-    tools, panel, area = window.tools, window.panels["points"], window.plot_area
-    area.set_current_view("stacked")
-    assert not tools.set_active("pick")  # refused: the stacked plot takes no picks
-    assert tools.active() == "navigate"
-    pick = tools.tool("pick").button
-    assert not pick.isChecked() and not pick.isEnabled()
-    panel.point_record.setChecked(True)  # Record shows the map, where the tool works
-    assert area.current_view() == "map" and tools.active() == "pick"
-    assert pick.isChecked() and pick.isEnabled()
-    area.set_current_view("stacked")
-    assert tools.active() == "navigate" and panel.point_off.isChecked()
+# ---------------------------------------------------------------------- markers
+def test_map_markers_current_filled_others_open_in_curve_colours(processed):
+    w = processed
+    c, panel = w.controller, w.panels["points"]
+    c.record_point(1.0, 300.0)
+    c.add_curve()
+    c.record_points([1.5, 2.0], [400.0, 500.0], unit="cm-1")
+    layer = w.plots.map.layer("points")
+    assert [len(x) for x, _y in layer.point_data()] == [1, 1, 2]  # outline, LL 1, current LL 2
+    _outline, ring, current = scatters(layer)
+    assert ring.points()[0].pen().color().name() == CURVE_COLORS[0]
+    assert ring.points()[0].brush().style() == Qt.BrushStyle.NoBrush
+    assert current.points()[0].brush().color().name() == CURVE_COLORS[1]
+    np.testing.assert_allclose(current_marker_energies(w), [400.0, 500.0])
+    panel.markers.set_value("current")
+    assert [len(x) for x, _y in layer.point_data()] == [2]
+    panel.markers.set_value("hidden")
+    assert layer.point_data() == []
+    panel.markers.set_value("all")
+    assert [len(x) for x, _y in layer.point_data()] == [1, 1, 2]
 
 
 def test_stacked_plot_signals_redrawn_traces(qtbot):
-    from mag_opt_detective.core.spectra import FieldMap
-    from mag_opt_detective.gui.plots import StackedPlot
-
     stacked = StackedPlot()
     qtbot.addWidget(stacked)
     fmap = FieldMap(np.linspace(100.0, 200.0, 11), np.array([0.5, 1.0, 1.5]), np.ones((11, 3)))
@@ -203,11 +344,37 @@ def test_stacked_plot_signals_redrawn_traces(qtbot):
         stacked.clear_map()
 
 
+# ---------------------------------------------------------------------- undo (window)
+def test_undo_and_redo_in_the_window_leave_text_fields_alone(shown):
+    w = shown
+    c, stack = w.controller, w.points_undo
+    undo, redo = w.commands["undo"], w.commands["redo"]
+    assert undo in w.edit_menu.actions() and redo in w.edit_menu.actions()
+    assert not undo.isEnabled() and not redo.isEnabled()
+    w.tools.set_active("pick")
+    click_map(w, 1.0, 300.0)
+    assert undo.isEnabled() and undo.text().endswith("Record point on LL 1")
+    view = w.plots.map.view
+    view.setFocus()
+    QTest.keyClick(view, Qt.Key.Key_Z, CTRL)
+    assert len(c.points.points("LL 1")[0]) == 0 and redo.isEnabled()
+    QTest.keyClick(view, Qt.Key.Key_Z, CTRL | Qt.KeyboardModifier.ShiftModifier)
+    assert len(c.points.points("LL 1")[0]) == 1
+
+    name = w.panels["points"].column_name
+    name.setFocus()
+    name.end(False)
+    QTest.keyClicks(name, "x")
+    assert c.curve == "LL 1x" and stack.undoText() == "Rename curve LL 1"
+    QTest.keyClick(name, Qt.Key.Key_Z, CTRL)  # the field's own undo, not the points'
+    assert name.text() == "LL 1" and c.curve == "LL 1"
+    assert stack.count() == 1 and stack.undoText() == "Record point on LL 1"  # typed back
+    assert len(c.points.points("LL 1")[0]) == 1
+
+
 # ---------------------------------------------------------------------- undo (controller)
 @pytest.fixture
 def ctl(qapp, sweep):
-    from mag_opt_detective.gui.controller import AppController, SweepFiles
-
     c = AppController()
     c.set_processing(sample_files=SweepFiles(tuple(sweep["zero"]), tuple(sweep["field"])))
     c.process()

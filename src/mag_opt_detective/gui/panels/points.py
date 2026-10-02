@@ -1,134 +1,558 @@
-"""Points panel: the point extractor, its markers on the map and the Pick tool.
+"""Points panel: the curves of picked points, their table, the Pick tool and Undo/Redo.
 
 Picked energies are kept in cm^-1 by the controller; the table, the markers and the files use
-the display unit.
+the display unit. The Pick tool (P) works on the map: a click records the current curve's point
+at the nearest field and Alt-click removes the nearest point. Every point edit is a step of
+``controller.points_undo``, undone with Edit > Undo (Ctrl+Z) and redone with Ctrl+Shift+Z.
 """
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
-import pyqtgraph as pg
-from PySide6.QtCore import QRegularExpression, QSignalBlocker, Qt
-from PySide6.QtGui import QRegularExpressionValidator
+import numpy as np
+from PySide6.QtCore import QRect, QRectF, QRegularExpression, QSignalBlocker, QSize, Qt, Signal
+from PySide6.QtGui import (
+    QColor,
+    QFont,
+    QFontDatabase,
+    QFontMetrics,
+    QIcon,
+    QKeySequence,
+    QPainter,
+    QPen,
+    QRegularExpressionValidator,
+)
 from PySide6.QtWidgets import (
-    QButtonGroup,
-    QCheckBox,
-    QGridLayout,
+    QAbstractButton,
+    QAbstractItemView,
     QHBoxLayout,
     QHeaderView,
     QLabel,
     QLineEdit,
     QPushButton,
-    QRadioButton,
+    QStackedWidget,
+    QStyle,
+    QStyledItemDelegate,
+    QStyleOptionButton,
+    QStylePainter,
     QTableView,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
 
 from mag_opt_detective.core.units import from_cm1
-from mag_opt_detective.gui.controller import user_action
+from mag_opt_detective.gui import icons
+from mag_opt_detective.gui.controller import CURVE_NAME, user_action
+from mag_opt_detective.gui.kit import SegmentedControl, Switch
+from mag_opt_detective.gui.kit._common import set_style_property
 from mag_opt_detective.gui.plot_panel import PlotClick
-from mag_opt_detective.gui.widgets import PointTableModel, open_file, save_file
+from mag_opt_detective.gui.points_model import CurvePointsModel
+from mag_opt_detective.gui.points_view import (
+    MAP_SIZE,
+    SHOW_ALL,
+    SHOW_MODES,
+    PickHint,
+    curve_color,
+    draw_markers,
+    map_markers,
+)
+from mag_opt_detective.gui.theme import current_tokens
+from mag_opt_detective.gui.widgets import FlowLayout, open_file, save_file
 
 PICK = "pick"
+ALT = Qt.KeyboardModifier.AltModifier
+ALT_TEXT = "⌥" if sys.platform == "darwin" else "Alt"
+REMOVE_RADIUS = 12.0  # px: Alt-click removes the current curve's point this close to it
+EMPTY = "No points yet. Turn on picking and click the map."
+NO_TABLE = "No point table yet. Process a sweep (or import points), then pick."
 
 
-class PointsPanel(QWidget):
-    """Curve name, click mode, the curve actions and the table of picked points."""
+def _hint(text: str) -> QLabel:
+    label = QLabel(text)
+    label.setProperty("kit", "muted")
+    label.setWordWrap(True)
+    return label
+
+
+def _title(text: str) -> QLabel:
+    """A small upper-case block title."""
+    label = QLabel(text.upper())
+    label.setProperty("kit", "muted")
+    font = QFont(label.font())
+    font.setBold(True)
+    if font.pointSizeF() > 0:
+        font.setPointSizeF(font.pointSizeF() * 0.85)
+    font.setLetterSpacing(QFont.SpacingType.PercentageSpacing, 106)
+    label.setFont(font)
+    return label
+
+
+def _keys(standard: QKeySequence.StandardKey, *extra: str) -> list[QKeySequence]:
+    keys = list(QKeySequence.keyBindings(standard))
+    for text in extra:
+        if QKeySequence(text) not in keys:
+            keys.append(QKeySequence(text))
+    return keys
+
+
+# ---------------------------------------------------------------------- widgets
+class PickButton(QPushButton):
+    """A full-width toggle showing its shortcut key; filled with the accent colour while on."""
+
+    ICON, GAP = 16, 6
+
+    def __init__(self, text: str, key: str, parent=None):
+        super().__init__(text, parent)
+        self._key = key
+        self.setCheckable(True)
+        self.setMinimumHeight(30)
+        icons.set_icon(self, "crosshair", None, on_color="accent-fg")
+        self.toggled.connect(lambda on: set_style_property(self, "kit", "primary" if on else None))
+
+    def _key_size(self) -> QSize:
+        metrics = self.fontMetrics()
+        return QSize(metrics.horizontalAdvance(self._key) + 10, metrics.height() + 2)
+
+    def _content_width(self) -> int:
+        """Icon, text and key cap side by side."""
+        text = self.fontMetrics().horizontalAdvance(self.text())
+        return self.ICON + self.GAP + text + 2 * self.GAP + self._key_size().width()
+
+    def sizeHint(self) -> QSize:
+        hint = super().sizeHint()
+        return QSize(max(hint.width(), self._content_width() + 24), max(hint.height(), 30))
+
+    def paintEvent(self, event) -> None:
+        option = QStyleOptionButton()
+        self.initStyleOption(option)
+        option.text = ""
+        option.icon = QIcon()
+        painter = QStylePainter(self)
+        painter.drawControl(QStyle.ControlElement.CE_PushButton, option)
+        tokens = current_tokens()
+        on = self.isChecked()
+        color = tokens["faint"] if not self.isEnabled() else tokens["accent-fg" if on else "fg"]
+        x = (self.width() - self._content_width()) // 2
+        middle = self.height() // 2
+        mode = QIcon.Mode.Normal if self.isEnabled() else QIcon.Mode.Disabled
+        state = QIcon.State.On if on else QIcon.State.Off
+        icon_rect = QRect(x, middle - self.ICON // 2, self.ICON, self.ICON)
+        self.icon().paint(painter, icon_rect, Qt.AlignmentFlag.AlignCenter, mode, state)
+        x += self.ICON + self.GAP
+        text_width = self.fontMetrics().horizontalAdvance(self.text())
+        painter.setPen(color)
+        flags = Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft
+        painter.drawText(QRect(x, 0, text_width + 2, self.height()), flags, self.text())
+        key = self._key_size()
+        left = x + text_width + 2 * self.GAP
+        cap = QRectF(left, middle - key.height() / 2, key.width(), key.height())
+        border = QColor(color)
+        border.setAlphaF(0.45)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(QPen(border, 1))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawRoundedRect(cap.adjusted(0.5, 0.5, -0.5, -0.5), 4, 4)
+        painter.setPen(color)
+        painter.drawText(cap, Qt.AlignmentFlag.AlignCenter, self._key)
+
+
+class CurveChip(QAbstractButton):
+    """A pill with a colour dot (or an icon), a name and a count; outlined when current."""
+
+    HEIGHT = 26
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        grid = QGridLayout()
-        self.column_name = QLineEdit("LL 1")
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.color: QColor | None = None
+        self.icon_name: str | None = None
+        self.count = ""
+        self.current = False
+
+    def set_curve(self, name: str, count: int, color: QColor, current: bool) -> None:
+        self.setText(name)
+        self.count, self.color, self.current = str(count), QColor(color), current
+        state = ", current curve" if current else ""
+        self.setAccessibleName(f"{name}, {count} point{'s' * (count != 1)}{state}")
+        self.setToolTip(f"{name}: {count} point{'s' * (count != 1)}")
+        self.updateGeometry()
+        self.update()
+
+    def set_label(self, text: str, icon: str) -> None:
+        self.setText(text)
+        self.setAccessibleName(text)
+        self.icon_name = icon
+        self.updateGeometry()
+
+    def _fonts(self) -> tuple[QFont, QFont]:
+        name = QFont(self.font())
+        name.setWeight(QFont.Weight.DemiBold if self.current else QFont.Weight.Medium)
+        small = QFont(self.font())
+        if small.pointSizeF() > 0:
+            small.setPointSizeF(small.pointSizeF() * 0.9)
+        return name, small
+
+    def sizeHint(self) -> QSize:
+        name, small = self._fonts()
+        width = 10 + 16 + QFontMetrics(name).horizontalAdvance(self.text()) + 10
+        if self.count:
+            width += 6 + QFontMetrics(small).horizontalAdvance(self.count)
+        return QSize(width, self.HEIGHT)
+
+    def minimumSizeHint(self) -> QSize:
+        return self.sizeHint()
+
+    def enterEvent(self, event) -> None:
+        self.update()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event) -> None:
+        self.update()
+        super().leaveEvent(event)
+
+    def paintEvent(self, event) -> None:
+        tokens = current_tokens()
+        name_font, small_font = self._fonts()
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        if not self.isEnabled():
+            painter.setOpacity(0.45)
+        width = 2.0 if self.current else 1.0
+        rect = QRectF(self.rect()).adjusted(width / 2, width / 2, -width / 2, -width / 2)
+        accent = self.current or self.hasFocus()
+        painter.setPen(QPen(tokens["accent" if accent else "line-strong"], width))
+        hover = self.underMouse() and self.isEnabled()
+        painter.setBrush(tokens["hover" if hover else "surface"])
+        painter.drawRoundedRect(rect, rect.height() / 2, rect.height() / 2)
+        x, middle = 10, self.height() / 2
+        if self.color is not None:
+            painter.setPen(QPen(QColor(0, 0, 0, 115), 1))
+            painter.setBrush(self.color)
+            painter.drawEllipse(QRectF(x, middle - 5, 10, 10))
+        elif self.icon_name:
+            icon = icons.icon(self.icon_name, "muted")
+            icon.paint(painter, QRect(x - 1, int(middle) - 7, 14, 14))
+        x += 16
+        painter.setFont(name_font)
+        painter.setPen(tokens["fg"])
+        text_width = QFontMetrics(name_font).horizontalAdvance(self.text())
+        flags = Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft
+        painter.drawText(QRectF(x, 0, text_width + 2, self.height()), flags, self.text())
+        if self.count:
+            painter.setFont(small_font)
+            painter.setPen(tokens["muted"])
+            painter.drawText(QRectF(x + text_width + 6, 0, 40, self.height()), flags, self.count)
+        painter.end()
+
+
+class CurveChips(QWidget):
+    """The curves as chips, then a "New" chip; a click selects a curve or adds one."""
+
+    curveClicked = Signal(str)
+    newClicked = Signal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._flow = FlowLayout(self, spacing=6, row_spacing=6)
+        self._chips: list[CurveChip] = []
+        self.new_chip = CurveChip()
+        self.new_chip.set_label("New", "plus")
+        self.new_chip.setToolTip("Start a new curve")
+        self.new_chip.clicked.connect(self.newClicked)
+        self._flow.addWidget(self.new_chip)
+
+    def chips(self) -> list[CurveChip]:
+        """The chips of the curves shown (without "New")."""
+        return [chip for chip in self._chips if not chip.isHidden()]
+
+    def set_curves(self, curves: list[tuple[str, int, QColor]], current: str) -> None:
+        """Show ``(name, count, colour)`` per curve; *current* is outlined."""
+        while len(self._chips) < len(curves):
+            chip = CurveChip(self)
+            chip.clicked.connect(lambda _checked=False, c=chip: self.curveClicked.emit(c.text()))
+            self._flow.removeWidget(self.new_chip)
+            self._flow.addWidget(chip)
+            self._flow.addWidget(self.new_chip)
+            self._chips.append(chip)
+        for i, chip in enumerate(self._chips):
+            if i < len(curves):
+                name, count, color = curves[i]
+                chip.set_curve(name, count, color, name == current)
+            chip.setVisible(i < len(curves))
+        self._flow.invalidate()
+
+
+class _RemoveDelegate(QStyledItemDelegate):
+    """The remove button of a row: an x, red under the mouse."""
+
+    def paint(self, painter, option, index) -> None:
+        super().paint(painter, option, index)
+        hovered = bool(option.state & QStyle.StateFlag.State_MouseOver)
+        center = option.rect.center()
+        icon = icons.icon("x", "err" if hovered else "faint")
+        icon.paint(painter, QRect(center.x() - 6, center.y() - 6, 13, 13))
+
+
+class PointsView(QTableView):
+    """The points of the current curve; the x of a row, or Delete, removes points."""
+
+    removeRequested = Signal(list)  # fields (T) of the points to remove
+
+    def __init__(self, model: CurvePointsModel, parent=None):
+        super().__init__(parent)
+        self.setModel(model)
+        self.setItemDelegateForColumn(model.REMOVE, _RemoveDelegate(self))
+        self.setShowGrid(False)
+        self.setAlternatingRowColors(True)
+        self.setMouseTracking(True)
+        self.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        font = QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont)
+        if self.font().pointSizeF() > 0:
+            font.setPointSizeF(self.font().pointSizeF() * 0.95)
+        self.setFont(font)
+        self.verticalHeader().hide()
+        self.verticalHeader().setDefaultSectionSize(QFontMetrics(font).height() + 6)
+        header = self.horizontalHeader()
+        header.setHighlightSections(False)
+        header.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(model.REMOVE, QHeaderView.ResizeMode.Fixed)
+        header.resizeSection(model.REMOVE, 30)
+        self.clicked.connect(self._on_click)
+
+    def _on_click(self, index) -> None:
+        if index.column() == CurvePointsModel.REMOVE:
+            self.removeRequested.emit([self.model().field_at(index.row())])
+
+    def keyPressEvent(self, event) -> None:
+        if event.key() in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace):
+            rows = sorted({index.row() for index in self.selectionModel().selectedRows()})
+            if rows:
+                self.removeRequested.emit([self.model().field_at(row) for row in rows])
+                return
+        super().keyPressEvent(event)
+
+
+class SwitchRow(QWidget):
+    """A title and a hint (both wrapped) left of a :class:`Switch`; a click on them toggles."""
+
+    def __init__(self, title: str, hint: str, parent=None):
+        super().__init__(parent)
+        self.switch = Switch()
+        self.switch.setAccessibleName(title)
+        label = QLabel(title)
+        label.setWordWrap(True)
+        font = QFont(label.font())
+        font.setBold(True)
+        label.setFont(font)
+        text = QVBoxLayout()
+        text.setSpacing(1)
+        text.addWidget(label)
+        text.addWidget(_hint(hint))
+        row = QHBoxLayout(self)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(10)
+        row.addLayout(text, stretch=1)
+        row.addWidget(self.switch, 0, Qt.AlignmentFlag.AlignTop)
+
+    def mousePressEvent(self, event) -> None:
+        if event.button() == Qt.MouseButton.LeftButton and self.switch.isEnabled():
+            self.switch.click()
+        super().mousePressEvent(event)
+
+
+class PointsPanel(QWidget):
+    """Pick toggle, curve chips and name, the current curve's points, markers and files."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.pick_button = PickButton("Pick on the map", "P")
+        self.pick_button.setToolTip("Pick points: a click records, Alt-click removes (P)")
+        self.pick_button.setAccessibleName("Pick on the map")
+
+        self.chips = CurveChips()
+        self.column_name = QLineEdit()
         self.column_name.setValidator(
-            QRegularExpressionValidator(QRegularExpression(r"[A-Za-z0-9_ .+-]{1,32}"), self)
+            QRegularExpressionValidator(QRegularExpression(CURVE_NAME.pattern), self)
         )
-        self.column_name.setToolTip("Name of the curve the clicked points are stored in")
-        self.init_table = QCheckBox("New table on next Process")
-        self.init_table.setChecked(True)
-        grid.addWidget(QLabel("Curve"), 0, 0)
-        grid.addWidget(self.column_name, 0, 1, 1, 2)
-        grid.addWidget(self.init_table, 1, 0, 1, 3)
+        self.column_name.setMaxLength(32)
+        self.column_name.setAccessibleName("Curve name")
+        self.column_name.setToolTip("Name of the current curve; type to rename it")
+        self.delete_button = QToolButton()
+        self.delete_button.setProperty("kit", "tool")
+        self.delete_button.setToolTip("Delete curve")
+        self.delete_button.setAccessibleName("Delete curve")
+        icons.set_icon(self.delete_button, "trash-2", "muted")
+        self.name_note = QLabel()
+        self.name_note.setProperty("kit", "note")
+        self.name_note.setProperty("error", True)
+        self.name_note.setWordWrap(True)
+        self.name_note.hide()
 
-        self.point_group = QButtonGroup(self)
-        self.point_off = QRadioButton("Off")
-        self.point_record = QRadioButton("Record")
-        self.point_remove = QRadioButton("Remove")
-        for i, button in enumerate((self.point_off, self.point_record, self.point_remove)):
-            self.point_group.addButton(button, i)
-        self.point_off.setChecked(True)
-        self.point_record.setToolTip("A click on the map records a point (Pick tool, P)")
-        self.point_remove.setToolTip("A click on the map removes a point (or Alt-click)")
-        mode_row = QHBoxLayout()
-        mode_row.addWidget(QLabel("Click mode:"))
-        for button in (self.point_off, self.point_record, self.point_remove):
-            mode_row.addWidget(button)
-        mode_row.addStretch(1)
-        grid.addLayout(mode_row, 2, 0, 1, 3)
+        self.count_label = QLabel()
+        self.count_label.setProperty("kit", "muted")
+        self.model = CurvePointsModel(self)
+        self.table = PointsView(self.model)
+        self.table.setMinimumHeight(130)
+        self.empty_label = _hint(NO_TABLE)
+        self.empty_label.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
+        self.table_stack = QStackedWidget()
+        self.table_stack.addWidget(self.table)
+        self.table_stack.addWidget(self.empty_label)
+        self.table_stack.setCurrentWidget(self.empty_label)
 
-        self.show_all_button = QPushButton("Show All Points")
-        self.show_all_button.setCheckable(True)
-        self.drop_button = QPushButton("Drop Curve")
-        self.load_button = QPushButton("Load Points…")
-        self.export_button = QPushButton("Export Points…")
-        buttons = QGridLayout()
-        for i, button in enumerate(
-            (self.show_all_button, self.drop_button, self.load_button, self.export_button)
-        ):
-            buttons.addWidget(button, i // 2, i % 2)
-        grid.addLayout(buttons, 3, 0, 1, 3)
-        grid.setColumnStretch(1, 1)
+        self.markers = SegmentedControl(size="sm", expand=True)
+        for value, text, tooltip in SHOW_MODES:
+            self.markers.add_option(value, text, tooltip)
+        self.markers.set_value(SHOW_ALL)
+        self.markers.setAccessibleName("Markers on the plots")
 
-        self.model = PointTableModel(self)
-        self.table = QTableView()
-        self.table.setModel(self.model)
-        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.new_table_row = SwitchRow(
+            "Start a new table on the next Process", "Off keeps the picked points across runs."
+        )
+        self.new_table = self.new_table_row.switch
+        self.import_button = QPushButton("Import…")
+        self.import_button.setToolTip("Read a point table (replaces the curves; undo restores)")
+        icons.set_icon(self.import_button, "upload")
+        self.export_button = QPushButton("Export…")
+        self.export_button.setToolTip("Save the table: one column per curve, one row per field")
+        icons.set_icon(self.export_button, "download")
+
         layout = QVBoxLayout(self)
-        layout.addLayout(grid)
-        layout.addWidget(self.table, stretch=1)
+        layout.setContentsMargins(14, 12, 14, 16)
+        layout.setSpacing(16)
+        layout.addWidget(self.pick_button)
+
+        curves = QVBoxLayout()
+        curves.setSpacing(7)
+        curves.addWidget(_title("Curves"))
+        curves.addWidget(self.chips)
+        name_row = QHBoxLayout()
+        name_row.setSpacing(6)
+        name_row.addWidget(self.column_name, stretch=1)
+        name_row.addWidget(self.delete_button)
+        curves.addLayout(name_row)
+        curves.addWidget(self.name_note)
+        layout.addLayout(curves)
+
+        points = QVBoxLayout()
+        points.setSpacing(7)
+        head = QHBoxLayout()
+        head.addWidget(_title("Points"))
+        head.addWidget(self.count_label, stretch=1)
+        points.addLayout(head)
+        points.addWidget(self.table_stack, stretch=1)
+        layout.addLayout(points, stretch=1)
+
+        shown = QVBoxLayout()
+        shown.setSpacing(7)
+        shown.addWidget(_title("Markers on the plots"))
+        shown.addWidget(self.markers)
+        layout.addLayout(shown)
+
+        layout.addWidget(self.new_table_row)
+
+        files = QHBoxLayout()
+        files.setSpacing(8)
+        files.addWidget(self.import_button)
+        files.addWidget(self.export_button)
+        files.addStretch(1)
+        layout.addLayout(files)
+
+    def show_name_problem(self, problem: str | None) -> None:
+        self.name_note.setText(problem[:1].upper() + problem[1:] + "." if problem else "")
+        self.name_note.setVisible(bool(problem))
+        set_style_property(self.column_name, "invalid", bool(problem))
 
 
-def draw_markers(window) -> None:
-    """Mark the current curve (crosses) and, with Show All, every curve (circles)."""
-    c, panel = window.controller, window.panels["points"]
-    plot = window.plots.map
-    if c.points is None:
-        plot.set_points(None)
-        return
+class CurveSetting:
+    """Settings protocol for the current curve's name (used for the first table)."""
 
-    def shown(curve: str):
-        b, e = c.points.points(curve)
-        return b, from_cm1(e, c.unit)
+    def __init__(self, controller):
+        self.controller = controller
 
-    current = shown(c.curve) if c.curve in c.points.names else None
-    others = []
-    if panel.show_all_button.isChecked():
-        names = c.points.names
-        for i, name in enumerate(names):
-            others.append((*shown(name), pg.intColor(i, hues=max(len(names), 1))))
-    plot.set_points(current, others)
+    def settings_value(self) -> str:
+        return self.controller.curve
+
+    def set_settings_value(self, value) -> bool:
+        c = self.controller
+        if not isinstance(value, str) or not CURVE_NAME.fullmatch(value.strip()):
+            return False
+        if c.points is None or value.strip() in c.points.names:
+            c.set_curve(value)
+        return True
+
+
+# ---------------------------------------------------------------------- picking
+def nearest_point(window, b: float, energy: float) -> float | None:
+    """Field of the current curve's point an Alt-click on the map at (*b*, *energy*) removes.
+
+    That is the point nearest to the click within :data:`REMOVE_RADIUS` pixels, else the one
+    in the clicked field row (None if there is neither).
+    """
+    c = window.controller
+    table = c.points
+    if table is None or c.curve not in table.names:
+        return None
+    fields, energies = table.points(c.curve)
+    if fields.size == 0:
+        return None
+    pixel_w, pixel_h = (abs(v) for v in window.plots.map.plot.vb.viewPixelSize())
+    if pixel_w > 0 and pixel_h > 0:
+        distance = np.hypot((fields - b) / pixel_w, (from_cm1(energies, c.unit) - energy) / pixel_h)
+        k = int(distance.argmin())
+        if distance[k] <= REMOVE_RADIUS:
+            return float(fields[k])
+    row_field = table.field[table.nearest_row(b)]
+    return float(row_field) if np.any(fields == row_field) else None
 
 
 @user_action("Pick point")
 def on_pick(window, click: PlotClick) -> None:
-    """Record the clicked point; Alt-click (or the Remove mode) removes it."""
-    panel = window.panels["points"]
-    alt = bool(click.modifiers & Qt.KeyboardModifier.AltModifier)
-    if alt or panel.point_remove.isChecked():
-        window.controller.remove_point(click.x)
+    """Record the clicked point of the current curve; Alt-click removes one."""
+    c = window.controller
+    remove = bool(click.modifiers & ALT)
+    if remove:
+        b = nearest_point(window, click.x, click.y)
+        if b is not None:
+            c.remove_point(b)
     else:
-        window.controller.record_point(click.x, click.y)
+        c.record_point(click.x, click.y)
 
 
-@user_action("Drop curve")
+# ---------------------------------------------------------------------- actions
+@user_action("New curve")
+def add_curve(window) -> None:
+    window.controller.add_curve()
+
+
+@user_action("Rename curve")
+def rename_curve(window, name: str, session: int) -> None:
+    window.controller.rename_curve(name, merge=("rename", session))
+
+
+@user_action("Delete curve")
 def drop_curve(window) -> None:
     window.controller.drop_curve()
 
 
-@user_action("Load points")
+@user_action("Remove points")
+def remove_points(window, fields: list[float]) -> None:
+    c = window.controller
+    many = f"Remove {len(fields)} points from {c.curve}"
+    with c.point_edit(many if len(fields) > 1 else f"Remove point from {c.curve}"):
+        for b in fields:
+            c.remove_point(b)
+
+
+@user_action("Import points")
 def load_points(window) -> None:
-    path = open_file(window, "Load points")
+    path = open_file(window, "Import points")
     if path:
         window.controller.load_points(path)
 
@@ -144,14 +568,33 @@ def export_points(window) -> None:
     window.controller.save_points(out)
 
 
+def install_undo(window) -> None:
+    """Undo and Redo of the point edits in the Edit menu (Ctrl+Z, Ctrl+Shift+Z).
+
+    Text fields keep these keys for their own undo while they have the focus.
+    """
+    stack = window.controller.points_undo
+    undo = stack.createUndoAction(window, "Undo")
+    redo = stack.createRedoAction(window, "Redo")
+    undo.setShortcuts(_keys(QKeySequence.StandardKey.Undo, "Ctrl+Z"))
+    redo.setShortcuts(_keys(QKeySequence.StandardKey.Redo, "Ctrl+Shift+Z"))
+    icons.set_icon(undo, "undo-2")
+    icons.set_icon(redo, "redo-2")
+    for name, action in (("undo", undo), ("redo", redo)):
+        window.addAction(action)
+        window.edit_menu.addAction(action)
+        window.commands[name] = action
+    window.points_undo = stack
+
+
+# ---------------------------------------------------------------------- install
 def install(window) -> None:
-    c = window.controller
+    c, tools = window.controller, window.tools
     panel = PointsPanel()
     window.add_panel(
         "points", "Points", "chart-scatter", "Picked points", panel,
         "Transition energies picked on the map, one per field and curve.",
     )  # fmt: skip
-    tools = window.tools
     tools.register(
         PICK,
         "crosshair",
@@ -160,62 +603,108 @@ def install(window) -> None:
         views=("map",),
         on_click=lambda click: on_pick(window, click),
     )
+    install_undo(window)
+    hint = PickHint(window.plot_area.plot_box, window.infobar)
 
-    # click mode <-> pick tool (Record or Remove shows the map, where the tool works)
-    def on_mode(_button, checked: bool) -> None:
-        if not checked:
-            return
-        if panel.point_off.isChecked():
-            if tools.active() == PICK:
-                tools.set_active(tools.default())
-            return
-        if tools.view() not in tools.tool(PICK).views:
-            window.plot_area.set_current_view("map")
-        if not tools.set_active(PICK):
-            on_tool(tools.active())
+    # the pick toggle <-> the tool (it shows the map first)
+    def on_pick_button(checked: bool) -> None:
+        if checked:
+            if tools.view() not in tools.tool(PICK).views:
+                window.plot_area.set_current_view("map")
+            tools.set_active(PICK)
+        elif tools.active() == PICK:
+            tools.set_active(tools.default())
+        sync_tool()
 
-    def on_tool(name: str) -> None:
-        with QSignalBlocker(panel.point_group):
-            if name != PICK:
-                panel.point_off.setChecked(True)
-            elif panel.point_off.isChecked():
-                panel.point_record.setChecked(True)
+    def sync_tool(*_args) -> None:
+        picking = tools.active() == PICK
+        panel.pick_button.setChecked(picking)
+        if picking:
+            curve = c.curve or "(no curve)"
+            hint.set_text(
+                f"Picking {curve} · click to record · {ALT_TEXT}-click to remove · Esc to stop"
+            )
+        hint.setVisible(picking)
 
-    panel.point_group.buttonToggled.connect(on_mode)
-    tools.toolChanged.connect(on_tool)
+    panel.pick_button.clicked.connect(on_pick_button)
+    tools.toolChanged.connect(sync_tool)
+    window.plot_area.tabs.currentChanged.connect(sync_tool)
 
-    # state <-> widgets
+    # markers
+    def draw_map() -> None:
+        sets = map_markers(c, panel.markers.value())
+        draw_markers(window.plots.map.layer("points"), sets, MAP_SIZE)
+
+    panel.markers.valueChanged.connect(lambda _value: draw_map())
+
+    # state -> widgets
+    def points_of(name: str) -> tuple[np.ndarray, np.ndarray]:
+        table = c.points
+        if table is None or name not in table.names:
+            return np.array([]), np.array([])
+        return table.points(name)
+
     def sync() -> None:
-        model = panel.model
-        if model.table() is not c.points:
-            model.set_table(c.points)
-        else:
-            model.refresh()
-        with QSignalBlocker(panel.init_table):
-            panel.init_table.setChecked(c.new_table)
+        table = c.points
+        curves = [
+            (name, points_of(name)[0].size, curve_color(i))
+            for i, name in enumerate(c.curve_names())
+        ]
+        panel.chips.set_curves(curves, c.curve)
+        panel.chips.new_chip.setEnabled(table is not None)
+        panel.delete_button.setEnabled(table is not None)
+        name = panel.column_name
+        if not name.hasFocus() and name.text() != c.curve:
+            with QSignalBlocker(name):
+                name.setText(c.curve)
+            panel.show_name_problem(None)
+        b, e = points_of(c.curve)
+        panel.model.set_points(b, e)
+        panel.count_label.setText("" if table is None else f"{b.size} of {table.field.size} fields")
+        panel.empty_label.setText(NO_TABLE if table is None else EMPTY)
+        panel.table_stack.setCurrentWidget(panel.table if b.size else panel.empty_label)
+        with QSignalBlocker(panel.new_table):
+            panel.new_table.setChecked(c.new_table)
+        draw_map()
+        sync_tool()
+
+    # widgets -> state
+    session = 0
+
+    def on_name(text: str) -> None:
+        problem = c.curve_name_problem(text, c.curve)
+        panel.show_name_problem(problem)
+        if problem is None and text.strip() != c.curve:
+            rename_curve(window, text, session)
+
+    def on_name_done() -> None:
+        nonlocal session
+        session += 1  # the next typed name is a new undo step
         if panel.column_name.text().strip() != c.curve:
             with QSignalBlocker(panel.column_name):
                 panel.column_name.setText(c.curve)
-        draw_markers(window)
+        panel.show_name_problem(None)
 
-    panel.column_name.textChanged.connect(lambda text: c.set_curve(text))
-    panel.init_table.toggled.connect(c.set_new_table)
-    panel.show_all_button.toggled.connect(lambda: draw_markers(window))
-    panel.drop_button.clicked.connect(lambda: drop_curve(window))
-    panel.load_button.clicked.connect(lambda: load_points(window))
+    panel.column_name.textChanged.connect(on_name)
+    panel.column_name.editingFinished.connect(on_name_done)
+    panel.chips.curveClicked.connect(c.set_curve)
+    panel.chips.newClicked.connect(lambda: add_curve(window))
+    panel.delete_button.clicked.connect(lambda: drop_curve(window))
+    panel.table.removeRequested.connect(lambda fields: remove_points(window, fields))
+    panel.new_table.toggled.connect(c.set_new_table)
+    panel.import_button.clicked.connect(lambda: load_points(window))
     panel.export_button.clicked.connect(lambda: export_points(window))
     c.pointsChanged.connect(sync)
-    c.resultChanged.connect(lambda: draw_markers(window))
 
     def on_unit(_old, new) -> None:
         panel.model.set_unit(new)
-        draw_markers(window)
+        draw_map()
 
     c.unitChanged.connect(on_unit)
     panel.model.set_unit(c.unit)
-    c.set_curve(panel.column_name.text())
-    c.set_new_table(panel.init_table.isChecked())
+    sync()
 
     p = window.persistence
     if p is not None:
-        p.bind("points/column_name", panel.column_name)
+        p.bind("points/column_name", CurveSetting(c))
+        p.bind("points/markers", panel.markers)

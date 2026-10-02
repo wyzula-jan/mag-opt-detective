@@ -72,7 +72,7 @@ def test_live_unit_switch(window, sweep, errors):
     assert c.view.levels["Ratio"] == ratio_levels  # other levels do not depend on the unit
     np.testing.assert_allclose(current_marker_energies(window), [300 / MEV])
     model = window.panels["points"].model
-    assert model.data(model.index(1, 0)) == f"{300 / MEV:.5g}"
+    assert model.data(model.index(0, 1)) == f"{300 / MEV:.5g}"  # the point's E
     field, energy = window.plots.map.model_curve_data()[1]
     np.testing.assert_allclose(energy, dirac_interband(field, 5.0, 10.0, 2)[1])  # meV
     assert window.summary_text().endswith("E 12.4 – 124 meV")

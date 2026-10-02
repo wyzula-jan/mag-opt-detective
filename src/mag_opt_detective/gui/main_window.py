@@ -62,6 +62,7 @@ SHORTCUTS = [
     ("Ctrl+1 / 2 / 3 / 4", "Plot R(B)/R(0) / Data / R(B)/R(B-AVR) / R(B)/R(B-ΔB)"),
     ("Alt+1 / 2 / 3", "No / 1st / 2nd derivative"),
     ("V / Z / P", "Pan and zoom / box zoom / pick points"),
+    ("Ctrl+Z / Ctrl+Shift+Z", "Undo / redo a point edit (Alt-click removes a point)"),
     ("A", "Fit the plot to the data"),
 ]
 KINDS = (
@@ -484,6 +485,7 @@ class MainWindow(QMainWindow):
         file_menu.addAction(self.commands["export_image"])
         file_menu.addSeparator()
         file_menu.addAction(self.commands["quit"])
+        self.edit_menu = self.menuBar().addMenu("&Edit")  # filled by the area modules
 
         view_menu = self.menuBar().addMenu("&View")
         appearance = view_menu.addMenu("&Appearance")
