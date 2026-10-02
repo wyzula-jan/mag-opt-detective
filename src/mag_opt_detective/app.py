@@ -5,7 +5,9 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
+from importlib.resources import files
 
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication
 
 from mag_opt_detective import __version__
@@ -28,6 +30,12 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     return args
 
 
+def app_icon() -> QIcon:
+    """Window and Dock icon; on macOS the version with the icon-grid margin and shadow."""
+    name = "icon-macos.png" if sys.platform == "darwin" else "icon.png"
+    return QIcon(str(files("mag_opt_detective") / "resources" / name))
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv if argv is None else argv
     args = parse_args(argv)
@@ -36,6 +44,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     app = QApplication.instance() or QApplication(argv)
     app.setApplicationName("Magneto-Optical Detective")
+    app.setWindowIcon(app_icon())
 
     if args.smoke_test:
         from mag_opt_detective import smoke
