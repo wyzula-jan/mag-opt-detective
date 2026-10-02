@@ -13,6 +13,7 @@ from PySide6.QtWidgets import QApplication
 from mag_opt_detective import __version__
 from mag_opt_detective.gui.main_window import MainWindow
 from mag_opt_detective.gui.settings import default_settings
+from mag_opt_detective.gui.theme import Theme
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
@@ -44,12 +45,14 @@ def main(argv: list[str] | None = None) -> int:
     )
     app = QApplication.instance() or QApplication(argv)
     app.setApplicationName("Magneto-Optical Detective")
+    theme = Theme("system")  # the window restores the user's choice
+    theme.apply(app)
     app.setWindowIcon(app_icon())
 
     if args.smoke_test:
         from mag_opt_detective import smoke
 
-        window = MainWindow()  # no settings: the test must not touch the user's
+        window = MainWindow(theme=theme)  # no settings: the test must not touch the user's
         try:
             smoke.run(window)
         except Exception:
@@ -59,7 +62,7 @@ def main(argv: list[str] | None = None) -> int:
             window.close()
         return 0
 
-    window = MainWindow(settings=default_settings())
+    window = MainWindow(settings=default_settings(), theme=theme)
     window.show()
     if not window.geometry_restored:
         window.center_on_screen()
