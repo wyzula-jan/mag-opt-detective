@@ -112,18 +112,20 @@ class StackedPlot(PlotView):
         fmap = self._fmap
         if fmap is None or fmap.energy.size == 0 or self._shown.size == 0:
             return None
-        axis = fmap.energy
-        values = fmap.values[:, self._shown]
-        if axis[0] > axis[-1]:
-            axis, values = axis[::-1], values[::-1]
+        n = fmap.energy.size
+        descending = fmap.energy[0] > fmap.energy[-1]
+        axis = fmap.energy[::-1] if descending else fmap.energy
         if not axis[0] <= energy <= axis[-1]:
             return None
-        i = int(np.clip(np.searchsorted(axis, energy, side="right") - 1, 0, axis.size - 1))
-        if i == axis.size - 1 or axis[i + 1] == axis[i]:
-            row = values[i]
+        i = int(np.clip(np.searchsorted(axis, energy, side="right") - 1, 0, n - 1))
+        rows = [i] if i == n - 1 or axis[i + 1] == axis[i] else [i, i + 1]
+        # only the bracketing rows of the shown traces: copying the whole map is slow
+        values = fmap.values[[n - 1 - r for r in rows] if descending else rows][:, self._shown]
+        if len(rows) == 1:
+            row = values[0]
         else:
             w = (energy - axis[i]) / (axis[i + 1] - axis[i])
-            row = (1 - w) * values[i] + w * values[i + 1]
+            row = (1 - w) * values[0] + w * values[1]
         return row + np.arange(self._shown.size) * self._offset
 
     def trace_y(self, j: int, energy: float) -> float | None:

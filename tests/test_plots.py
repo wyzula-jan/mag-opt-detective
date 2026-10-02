@@ -462,6 +462,22 @@ def test_trace_y_with_descending_energy_and_nan(qtbot):
     assert stacked.trace_at(flipped.energy[5], fmap.values[-6, 1]) in (0, 2)
 
 
+@pytest.mark.parametrize("descending", [False, True])
+def test_trace_y_interpolates_between_the_bracketing_energies(qtbot, descending):
+    energy = np.linspace(100.0, 500.0, 40)
+    values = np.sin(np.add.outer(energy / 37.0, np.arange(4.0)))
+    fmap = FieldMap(energy, np.arange(4.0), values)
+    if descending:
+        fmap = FieldMap(energy[::-1], fmap.field, values[::-1].copy())
+    stacked = stacked_with(qtbot, fmap, 1.0)
+    stacked.set_trace_options(every=2)  # traces 0 and 2
+    e = 0.75 * energy[3] + 0.25 * energy[4]
+    assert stacked.trace_y(2, e) == pytest.approx(0.75 * values[3, 2] + 0.25 * values[4, 2] + 1)
+    for k in (0, -1):  # the ends of the axis
+        assert stacked.trace_y(0, energy[k]) == pytest.approx(values[k, 0])
+        assert stacked.trace_y(2, energy[k]) == pytest.approx(values[k, 2] + 1)
+
+
 @pytest.mark.parametrize("style", SCALE_STYLES)
 def test_export_png_contains_the_scale(make_plot, tmp_path, style):
     plot = make_plot(style)
