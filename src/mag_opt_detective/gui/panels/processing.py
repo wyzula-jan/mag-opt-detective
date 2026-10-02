@@ -71,6 +71,7 @@ class ProcessingPanel(QWidget):
         )
         self.cut_note = Note()
         self.baseline_note = Note()
+        self.guides: MapGuides | None = None  # set when installed in a window
 
         layout = panel_layout(self)
         layout.addWidget(

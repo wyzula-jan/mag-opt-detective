@@ -177,7 +177,7 @@ def install(window) -> None:
 
     window.toolbar.open_button.clicked.connect(lambda: open_sweep(window))
     for text, slot, shortcut in (
-        ("Open Sweep (Sample)…", window.panels["sample"].measurement.open_sweep_dialog, "Ctrl+L"),
+        ("Open Sweep (Sample)…", box.open_sweep_dialog, "Ctrl+L"),
         ("Load Sample Zero Field…", box.load_zero_dialog, "Ctrl+Shift+L"),
     ):
         action = QAction(text, window)
