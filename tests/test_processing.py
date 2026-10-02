@@ -1,6 +1,7 @@
 import numpy as np
 import pytest
 
+import golden
 from mag_opt_detective.core import processing as proc
 from mag_opt_detective.core.pipeline import (
     PlotKind,
@@ -9,9 +10,11 @@ from mag_opt_detective.core.pipeline import (
     ReferenceMode,
     process,
 )
+from mag_opt_detective.core.points import PointTable
 from mag_opt_detective.core.processing import Axis
 from mag_opt_detective.core.readers import load_measurement, sort_paths
-from mag_opt_detective.core.spectra import FieldMap
+from mag_opt_detective.core.spectra import FieldMap, load_tsv
+from mag_opt_detective.core.units import Unit
 
 
 def make_map(energy=None, field=None, values=None, unit="cm-1"):
@@ -245,3 +248,33 @@ def test_process_step_ratio(sweep):
     with pytest.raises(ValueError, match="two field"):
         ProcessResult.from_map(single).get(PlotKind.STEP)
     np.testing.assert_allclose(ProcessResult.from_map(make_map()).step.field, [2.0, 3.0])
+
+
+def assert_same_map(got: FieldMap, expected: FieldMap) -> None:
+    """Equal within the 12 digits of the exported tables (derivatives may be near zero)."""
+    assert got.unit is expected.unit
+    np.testing.assert_allclose(got.field, expected.field)
+    np.testing.assert_allclose(got.energy, expected.energy, rtol=1e-11)
+    atol = 1e-9 * np.abs(expected.values).max()
+    np.testing.assert_allclose(got.values, expected.values, rtol=1e-9, atol=atol)
+
+
+@pytest.fixture(scope="module")
+def golden_maps(tmp_path_factory) -> dict[str, FieldMap]:
+    return golden.exports(tmp_path_factory.mktemp("golden"))
+
+
+@pytest.mark.parametrize("name", golden.MAPS)
+def test_golden_exports(golden_maps, name):
+    expected = load_tsv(golden.map_path(name))
+    assert expected.unit is Unit.MEV
+    assert_same_map(golden_maps[name], expected)
+
+
+def test_golden_points(golden_maps):
+    expected = PointTable.load_tsv(golden.GOLDEN_DIR / golden.POINTS)
+    table = golden.points(golden_maps["Ratio"])
+    assert table.names == expected.names == ["peak", "single"]
+    np.testing.assert_allclose(table.field, expected.field)
+    for name in table.names:
+        np.testing.assert_allclose(table.column(name), expected.column(name), rtol=1e-9)
