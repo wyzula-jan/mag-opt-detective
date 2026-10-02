@@ -1,7 +1,16 @@
 import numpy as np
 
 import gui_helpers
-from gui_helpers import energy_label, load_sweep, open_from, process, save_to, set_unit, shown_image
+from gui_helpers import (
+    energy_label,
+    infobar_text,
+    load_sweep,
+    open_from,
+    process,
+    save_to,
+    set_unit,
+    shown_image,
+)
 from mag_opt_detective.core.pipeline import PlotKind
 from mag_opt_detective.core.spectra import load_tsv
 from mag_opt_detective.core.units import Unit, to_cm1
@@ -142,3 +151,17 @@ def test_average_slots(window, sweep, errors):
     np.testing.assert_allclose(
         window.controller.result.ratio.values, window.controller.slots[0].values
     )
+
+
+def test_a_new_result_closes_the_error_bar(window, sweep, errors):
+    load_sweep(window, sweep)
+    process(window)
+    tab = window.panels["library"]
+    library.save_slot(window, 0)
+    tab.set_used(0, False)
+    library.average(window)
+    assert "Use column" in infobar_text(window)
+    tab.set_used(0, True)
+    library.average(window)
+    assert window.infobar.isHidden()
+    assert len(errors) == 1

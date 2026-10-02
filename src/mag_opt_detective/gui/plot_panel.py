@@ -714,7 +714,8 @@ def install(window) -> None:
 
     c.selectionChanged.connect(follow_reference_kind)
 
-    # drawing
+    # drawing (a new result also closes an old error bar; before drawing, which may report)
+    c.resultChanged.connect(window.infobar.dismiss)
     c.resultChanged.connect(lambda: redraw(window))
     c.selectionChanged.connect(lambda: redraw(window))
     c.viewChanged.connect(lambda: redraw(window))
