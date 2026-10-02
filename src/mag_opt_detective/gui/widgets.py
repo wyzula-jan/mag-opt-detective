@@ -33,6 +33,16 @@ _last_dir = ""
 _ROOT = QModelIndex()
 
 
+def last_dir() -> str:
+    """Folder of the last file opened or saved (start folder of the next dialog)."""
+    return _last_dir
+
+
+def set_last_dir(path: str) -> None:
+    global _last_dir
+    _last_dir = str(path or "")
+
+
 def _remember(path: str) -> None:
     global _last_dir
     if path:

@@ -8,6 +8,7 @@ import sys
 from PySide6.QtWidgets import QApplication
 
 from mag_opt_detective.gui.main_window import MainWindow
+from mag_opt_detective.gui.settings import default_settings
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -16,9 +17,10 @@ def main(argv: list[str] | None = None) -> int:
     )
     app = QApplication.instance() or QApplication(sys.argv if argv is None else argv)
     app.setApplicationName("Magneto-Optical Detective")
-    window = MainWindow()
+    window = MainWindow(settings=default_settings())
     window.show()
-    window.center_on_screen()
+    if not window.geometry_restored:
+        window.center_on_screen()
     return app.exec()
 
 
