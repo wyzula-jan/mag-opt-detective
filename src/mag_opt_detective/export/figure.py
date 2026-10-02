@@ -206,9 +206,10 @@ def render(
             _draw_stacked(fig, ax, state, fs, lw)
         if state.title:
             ax.set_title(state.title)
-        if panel_label:
+        label = preset.panel_label(panel_label) if panel_label else ""
+        if label:
             fig.suptitle(
-                preset.panel_label(panel_label),
+                label,
                 x=_PAD_IN / fig.get_figwidth(),
                 ha="left",
                 fontsize=preset.label_size_pt,

@@ -92,6 +92,14 @@ def test_nature_preset():
     assert any("editable" in note for note in NATURE.notes)
 
 
+def test_preset_widths_are_read_only():
+    with pytest.raises(TypeError):
+        NATURE.widths_mm["single"] = 100.0  # type: ignore[index]
+    custom = dataclasses.replace(CUSTOM, widths_mm={"single": 80.0}, default_width="single")
+    assert custom.default_width_mm == 80.0
+    assert CUSTOM.widths_mm == {}
+
+
 def test_aps_preset():
     assert APS.widths_mm == {"single": 86, "double": 178}
     assert APS.font_size_pt == 8
@@ -139,6 +147,7 @@ def test_panel_label_styles():
     assert NATURE.panel_label("(b)") == "b"
     assert APS.panel_label("c") == "(c)"
     assert APS.panel_label("(d)") == "(d)"
+    assert APS.panel_label("  ") == NATURE.panel_label("()") == ""
 
 
 def test_preset_check():
@@ -347,6 +356,8 @@ def test_panel_label(map_state):
     fig = render(map_state, preset=APS, width_mm=86, height_mm=60, panel_label="b")
     assert fig.get_suptitle() == "(b)"
     assert nature_single(map_state).get_suptitle() == ""
+    blank = render(map_state, preset=APS, width_mm=86, height_mm=60, panel_label=" ")
+    assert blank.get_suptitle() == ""
 
 
 def test_render_rejects_bad_input(map_state):

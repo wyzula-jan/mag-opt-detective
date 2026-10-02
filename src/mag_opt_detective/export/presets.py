@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
+from types import MappingProxyType
 
 PANEL_LABEL_STYLES: tuple[str, ...] = ("a", "(a)")
 
@@ -11,14 +13,14 @@ PANEL_LABEL_STYLES: tuple[str, ...] = ("a", "(a)")
 class JournalPreset:
     """Sizes in mm, fonts and lines in pt, resolution in dpi.
 
-    *widths_mm* names the column widths; *font_family* lists the fonts in fallback
-    order. *panel_label_style* is "a" (bold lowercase letter) or "(a)". Limits that a
+    *widths_mm* names the column widths (read-only); *font_family* lists the fonts in
+    fallback order. *panel_label_style* is "a" (bold lowercase letter) or "(a)". Limits that a
     journal does not give are None. *notes* are shown to the user next to the preset.
     """
 
     key: str
     name: str
-    widths_mm: dict[str, float]
+    widths_mm: Mapping[str, float]
     default_width: str | None
     default_height_mm: float
     max_height_mm: float | None
@@ -39,6 +41,8 @@ class JournalPreset:
     free_size: bool = False
 
     def __post_init__(self) -> None:
+        # a read-only copy: the presets are shared module-level objects
+        object.__setattr__(self, "widths_mm", MappingProxyType(dict(self.widths_mm)))
         if self.panel_label_style not in PANEL_LABEL_STYLES:
             raise ValueError(f"unknown panel label style {self.panel_label_style!r}")
         if self.default_width is not None and self.default_width not in self.widths_mm:
@@ -52,9 +56,11 @@ class JournalPreset:
         return self.widths_mm[self.default_width]
 
     def panel_label(self, label: str) -> str:
-        """*label* (``"b"``, ``"B"`` or ``"(b)"``) in this preset's style."""
+        """*label* (``"b"``, ``"B"`` or ``"(b)"``) in this preset's style; "" if it is blank."""
         letter = label.strip().strip("()").strip().lower()
-        return letter if self.panel_label_style == "a" else f"({letter})"
+        if not letter or self.panel_label_style == "a":
+            return letter
+        return f"({letter})"
 
     def check(
         self,
