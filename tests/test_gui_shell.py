@@ -4,6 +4,7 @@ import logging
 
 import numpy as np
 import pytest
+import shiboken6
 from PySide6.QtCore import QPoint, Qt
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtTest import QTest
@@ -15,7 +16,9 @@ from mag_opt_detective.core.pipeline import PlotKind
 from mag_opt_detective.core.processing import Axis
 from mag_opt_detective.core.units import Unit
 from mag_opt_detective.gui.kit import SlidePanel
+from mag_opt_detective.gui.main_window import MainWindow
 from mag_opt_detective.gui.plots import BarScale, HistogramScale
+from mag_opt_detective.gui.theme import Theme
 
 window, errors = gui_helpers.window, gui_helpers.errors  # shared fixtures
 
@@ -198,3 +201,18 @@ def test_typed_letters_stay_in_tables_and_combo_boxes(shown):
     combo.setFocus()
     QTest.keyClick(combo, Qt.Key.Key_V)
     assert tools.active() == "zoom"
+
+
+def test_theme_connections_end_with_the_window(qtbot):
+    theme = Theme("light")
+    try:
+        first = MainWindow(theme=theme)
+        first.close()
+        shiboken6.delete(first)
+        second = MainWindow(theme=theme)
+        qtbot.addWidget(second)
+        theme.set_scheme("dark")  # must not reach the deleted window
+        assert second.plots.map.colors().background == "#121015"
+    finally:
+        theme.set_scheme("system")
+        QGuiApplication.styleHints().setColorScheme(Qt.ColorScheme.Unknown)

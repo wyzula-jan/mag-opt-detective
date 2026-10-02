@@ -748,7 +748,7 @@ def install(window) -> None:
 
     # theme
     apply_theme(window)
-    window.theme.changed.connect(lambda: apply_theme(window))
+    window.themeChanged.connect(lambda: apply_theme(window))
 
     # settings
     p = window.persistence

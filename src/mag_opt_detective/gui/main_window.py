@@ -15,7 +15,7 @@ import numpy as np
 import pyqtgraph as pg
 import scipy
 from PySide6 import __version__ as pyside_version
-from PySide6.QtCore import QEvent, QRectF, QSettings, QSize, Qt, qVersion
+from PySide6.QtCore import QEvent, QRectF, QSettings, QSize, Qt, Signal, qVersion
 from PySide6.QtGui import QAction, QActionGroup, QKeySequence, QPainter
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -301,7 +301,12 @@ class MainWindow(QMainWindow):
     ``panels`` (name -> panel widget), ``inspector`` (name -> section), ``plots`` (map,
     stacked, reference), ``infobar``, ``commands`` (name -> QAction), ``toolbar``, ``rail``
     and the slide panels ``side_panel``, ``inspector_panel`` and ``log_panel``.
+
+    ``themeChanged`` relays ``theme.changed``: area modules connect to it instead of the
+    (application-wide) theme, so their connections end with the window.
     """
+
+    themeChanged = Signal()
 
     def __init__(self, parent=None, settings: QSettings | None = None, theme: Theme | None = None):
         super().__init__(parent)
@@ -310,6 +315,7 @@ class MainWindow(QMainWindow):
         self.controller = AppController(self)
         self.persistence = Persistence(settings) if settings is not None else None
         self.theme = theme or current_theme() or Theme("system", self)
+        self.theme.changed.connect(self.themeChanged)
         self.geometry_restored = False
         self._shown = False
         self.commands: dict[str, QAction] = {}
@@ -533,8 +539,8 @@ class MainWindow(QMainWindow):
         c.changedSinceProcess.connect(self._sync_state)
         c.resultChanged.connect(self._sync_state)
         c.unitChanged.connect(lambda _old, _new: self._sync_state())
-        self.theme.changed.connect(self._sync_state)
-        self.theme.changed.connect(self._sync_appearance)
+        self.themeChanged.connect(self._sync_state)
+        self.themeChanged.connect(self._sync_appearance)
         self._sync_state()
         self.side_panel.openChanged.connect(lambda _open: self._sync_rail())
 
