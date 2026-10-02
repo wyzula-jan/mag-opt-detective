@@ -1,0 +1,149 @@
+import numpy as np
+import pytest
+
+from mag_opt_detective.core import processing as proc
+from mag_opt_detective.core.pipeline import (
+    PlotKind,
+    ProcessOptions,
+    ProcessResult,
+    ReferenceMode,
+    process,
+)
+from mag_opt_detective.core.processing import Axis
+from mag_opt_detective.core.readers import load_measurement, sort_paths
+from mag_opt_detective.core.spectra import FieldMap
+
+
+def make_map(energy=None, field=None, values=None, unit="cm-1"):
+    energy = np.linspace(0, 10, 11) if energy is None else energy
+    field = np.array([1.0, 2.0, 3.0]) if field is None else field
+    if values is None:
+        values = np.add.outer(energy, field)
+    return FieldMap(energy=energy, field=field, values=values, unit=unit)
+
+
+def test_fieldmap_validates_shape():
+    with pytest.raises(ValueError, match="does not match"):
+        FieldMap(energy=np.arange(3), field=np.arange(2), values=np.zeros((2, 3)))
+
+
+def test_zero_reference_single_and_drift():
+    zero = np.array([[1.0], [2.0]])
+    field = np.array([1.0, 2.0, 3.0])
+    np.testing.assert_allclose(proc.zero_reference(zero, field), [[1, 1, 1], [2, 2, 2]])
+    zero2 = np.array([[1.0, 3.0]])
+    np.testing.assert_allclose(proc.zero_reference(zero2, field), [[1.0, 2.0, 3.0]])
+
+
+def test_ratio_to_zero_removes_drift(sweep):
+    m = load_measurement(sweep["zero"], sweep["field"])
+    ratio = proc.ratio_to_zero(m)
+    # sample = (1 + 0.1 B) base, zero drifts from base (B=0.5) to 2 base (B=2.0)
+    t = (sweep["fields"] - 0.5) / 1.5
+    expected = (1 + 0.1 * sweep["fields"]) / (1 + t)
+    np.testing.assert_allclose(ratio.values, np.broadcast_to(expected, ratio.values.shape), 1e-6)
+
+
+def test_interpolate_field_extrapolates_linearly():
+    fmap = make_map(field=np.array([1.0, 2.0]))
+    out = proc.interpolate_field(fmap, np.array([0.0, 1.5, 3.0]))
+    np.testing.assert_allclose(out.values, np.add.outer(fmap.energy, [0.0, 1.5, 3.0]))
+
+
+def test_divide_aligns_energy_and_field():
+    num = make_map(values=np.full((11, 3), 6.0))
+    den = make_map(energy=np.linspace(0, 10, 21), field=np.array([1.0, 3.0]))
+    den = den.with_values(np.full(den.values.shape, 2.0))
+    np.testing.assert_allclose(proc.divide(num, den).values, 3.0)
+
+
+def test_ratio_to_average():
+    fmap = make_map(values=np.array([[1.0, 3.0]] * 11), field=np.array([1.0, 2.0]))
+    np.testing.assert_allclose(proc.ratio_to_average(fmap).values, [[0.5, 1.5]] * 11)
+
+
+def test_baseline_normalize_inclusive_region():
+    fmap = make_map()
+    out = proc.baseline_normalize(fmap, (2, 4))
+    np.testing.assert_allclose(out.values[2:5].mean(axis=0), 1.0)
+    with pytest.raises(ValueError, match="no data"):
+        proc.baseline_normalize(fmap, (20, 30))
+
+
+def test_derivative_axes():
+    fmap = make_map(values=np.outer(np.arange(11.0) ** 2, [1.0, 1.0, 1.0]))
+    d_energy = proc.derivative(fmap, Axis.ENERGY).values
+    np.testing.assert_allclose(d_energy[1:-1, 0], 2 * np.arange(1, 10))
+    np.testing.assert_allclose(proc.derivative(fmap, Axis.FIELD).values, 0)
+
+
+def test_savgol_validation_and_identity_on_polynomial():
+    fmap = make_map()
+    np.testing.assert_allclose(proc.savgol(fmap, 5, 2).values, fmap.values, atol=1e-12)
+    with pytest.raises(ValueError, match="odd"):
+        proc.savgol(fmap, 4, 2)
+    with pytest.raises(ValueError, match="longer"):
+        proc.savgol(fmap, 31, 2)
+
+
+def test_crop_and_merge_energy():
+    low = make_map(energy=np.linspace(0, 10, 11))
+    high = make_map(energy=np.linspace(8, 20, 7))
+    merged = proc.merge_energy([(low, 0, 10), (high, 10, 20)])
+    assert merged.energy[0] == 0 and merged.energy[-1] == 20
+    np.testing.assert_allclose(np.diff(merged.energy), np.diff(merged.energy)[0])
+    np.testing.assert_allclose(merged.values, np.add.outer(merged.energy, low.field))
+    other_field = make_map(field=np.array([5.0, 6.0, 7.0]))
+    with pytest.raises(ValueError, match="same field"):
+        proc.merge_energy([(low, None, None), (other_field, None, None)])
+
+
+def test_process_reference_modes(sweep):
+    m = load_measurement(sweep["zero"], sweep["field"])
+    plain = process(m)
+    np.testing.assert_allclose(plain.data.values, m.spectra.values)
+    assert plain.reference_data is None
+
+    separate = process(m, m, ProcessOptions(reference_mode=ReferenceMode.SEPARATE))
+    np.testing.assert_allclose(separate.data.values, 1.0)
+    np.testing.assert_allclose(separate.ratio.values, 1.0)
+
+    self_ref = process(m, options=ProcessOptions(reference_mode=ReferenceMode.SELF))
+    np.testing.assert_allclose(self_ref.ratio.values, 1.0)
+
+    with pytest.raises(ValueError, match="no reference"):
+        process(m, None, ProcessOptions(reference_mode=ReferenceMode.SEPARATE))
+
+
+def test_process_baseline_and_derivatives(sweep):
+    m = load_measurement(sweep["zero"], sweep["field"])
+    res = process(m, options=ProcessOptions(baseline_region=(100, 1000)))
+    np.testing.assert_allclose(res.ratio.values.mean(axis=0), 1.0)
+    np.testing.assert_allclose(res.average.values.mean(axis=0), 1.0)
+    second = res.get(PlotKind.RATIO, order=2, axis=Axis.FIELD)
+    expected = proc.derivative(proc.derivative(res.ratio, Axis.FIELD), Axis.FIELD)
+    np.testing.assert_allclose(second.values, expected.values)
+
+
+def test_result_from_map():
+    fmap = make_map()
+    res = ProcessResult.from_map(fmap, baseline_region=(0, 2))
+    assert res.data is fmap
+    np.testing.assert_allclose(res.ratio.values[:3].mean(axis=0), 1.0)
+
+
+def test_real_reference_correction(data_dir):
+    """Sample and reference measured on different field grids (0.25 T vs 0.5 T steps)."""
+
+    def split(folder):
+        files = sort_paths(folder.glob("*.txt"))
+        zero = [f for f in files if "_a00p000T_a" in f]
+        return zero, [f for f in files if f not in zero]
+
+    sam = load_measurement(*split(data_dir / "TR" / "Sam1" / "txt_files"), unit="meV")
+    ref = load_measurement(*split(data_dir / "TR" / "Ref1" / "txt_files"), unit="meV")
+    assert sam.spectra.field.size == 2 * ref.spectra.field.size
+    opts = ProcessOptions(reference_mode=ReferenceMode.SEPARATE, smooth_reference=True)
+    res = process(sam, ref, opts)
+    np.testing.assert_allclose(res.reference_ratio.field, sam.spectra.field)
+    assert res.ratio.values.shape == sam.spectra.values.shape
