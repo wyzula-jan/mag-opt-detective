@@ -28,6 +28,12 @@ def default_settings() -> QSettings:
 
 
 def _read(widget: QWidget):
+    reader = getattr(widget, "settings_value", None)
+    if callable(reader):  # settings protocol (kit widgets)
+        value = reader()
+        if not isinstance(value, str | int | float | bool):
+            raise TypeError(f"{type(widget).__name__}.settings_value() returned {value!r}")
+        return value
     if isinstance(widget, QAbstractButton):
         return widget.isChecked()
     if isinstance(widget, QComboBox):
@@ -41,6 +47,12 @@ def _read(widget: QWidget):
 
 def _apply(widget: QWidget, value) -> bool:
     """Set *value* on *widget*; returns False (and changes nothing) if it is not valid."""
+    writer = getattr(widget, "set_settings_value", None)
+    if callable(writer):  # settings protocol: a False return means invalid
+        try:
+            return writer(value) is not False
+        except (TypeError, ValueError):
+            return False
     if isinstance(widget, QAbstractButton):
         if isinstance(value, str):
             value = value.lower() == "true"
@@ -87,7 +99,13 @@ def _apply(widget: QWidget, value) -> bool:
 
 
 class Persistence:
-    """Saves and restores registered widgets under ``v1/<key>``."""
+    """Saves and restores registered widgets under ``v1/<key>``.
+
+    Besides buttons, combo boxes, spin boxes and line edits, any widget with the settings
+    protocol can be bound: ``settings_value()`` returns a str, int, float or bool (JSON text
+    for compound state) and ``set_settings_value(value)`` restores it, returning False if the
+    stored value is invalid. Stored values may come back as strings (ini files).
+    """
 
     def __init__(self, settings: QSettings):
         self.settings = settings
