@@ -28,6 +28,7 @@ from PySide6.QtWidgets import (
 
 from mag_opt_detective.core.points import PointTable
 from mag_opt_detective.core.readers import sort_paths
+from mag_opt_detective.core.units import Unit, from_cm1
 
 SPECTRA_FILTER = "Spectra (*.txt *.dat *.[0-9] *.[0-9][0-9]);;All files (*)"
 TABLE_FILTER = "Tab-separated table (*.csv *.tsv *.txt);;All files (*)"
@@ -221,14 +222,28 @@ class SliderSpin(QWidget):
 
 
 class PointTableModel(QAbstractTableModel):
-    """Read-only view of a :class:`PointTable` (rows = field, columns = curves)."""
+    """Read-only view of a :class:`PointTable` (rows = field, columns = curves).
+
+    The table keeps cm^-1; the energies are shown in :meth:`unit`.
+    """
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._table: PointTable | None = None
+        self._unit = Unit.CM1
 
     def table(self) -> PointTable | None:
         return self._table
+
+    def unit(self) -> Unit:
+        return self._unit
+
+    def set_unit(self, unit: Unit | str) -> None:
+        unit = Unit(unit)
+        if unit is not self._unit:
+            self.beginResetModel()
+            self._unit = unit
+            self.endResetModel()
 
     def set_table(self, table: PointTable | None) -> None:
         self.beginResetModel()
@@ -254,7 +269,7 @@ class PointTableModel(QAbstractTableModel):
             return None
         if role in (Qt.ItemDataRole.DisplayRole, Qt.ItemDataRole.ToolTipRole):
             value = self._table.column(self._table.names[index.column()])[index.row()]
-            return "" if math.isnan(value) else f"{value:.5g}"
+            return "" if math.isnan(value) else f"{from_cm1(value, self._unit):.5g}"
         if role == Qt.ItemDataRole.TextAlignmentRole:
             return int(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         return None

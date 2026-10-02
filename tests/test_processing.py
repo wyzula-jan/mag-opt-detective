@@ -312,13 +312,25 @@ def test_golden_exports(golden_maps, name):
     golden.assert_matches(golden_maps[name], name)
 
 
-def test_golden_points(golden_maps):
-    expected = PointTable.load_tsv(golden.GOLDEN_DIR / golden.POINTS)
-    table = golden.points(golden_maps["Ratio"])
+def test_golden_points(golden_maps, tmp_path):
+    """The golden points file is a legacy one (meV, no unit in the header)."""
+    path = golden.GOLDEN_DIR / golden.POINTS
+    expected = PointTable.load_tsv(path, default_unit=Unit.MEV)
+    table = golden.points(golden_maps["Ratio"])  # cm-1
     assert table.names == expected.names == ["peak", "single"]
     np.testing.assert_allclose(table.field, expected.field)
     for name in table.names:
         np.testing.assert_allclose(table.column(name), expected.column(name), rtol=1e-9)
+
+    out = tmp_path / "points.tsv"
+    table.save_tsv(out, unit=Unit.MEV)
+    assert out.read_text().splitlines()[0] == "Energy (meV)\tpeak\tsingle"
+    assert path.read_text().splitlines()[0] == "\tpeak\tsingle"
+
+    def cells(p):
+        return np.genfromtxt(p, delimiter="\t", skip_header=1)
+
+    np.testing.assert_allclose(cells(out), cells(path), rtol=1e-9)
 
 
 def test_common_energy_keeps_samples_of_rounded_tables():

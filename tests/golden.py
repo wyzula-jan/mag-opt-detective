@@ -84,7 +84,8 @@ def exports(folder: Path) -> dict[str, FieldMap]:
 
 
 def points(ratio: FieldMap) -> PointTable:
-    """The maximum of every spectrum of *ratio*, and a curve with one point."""
+    """The maximum of every spectrum of *ratio*, and a curve with one point (cm-1)."""
+    ratio = ratio.to_unit(Unit.CM1)
     table = PointTable(ratio.field)
     for j, b in enumerate(ratio.field):
         table.set_nearest("peak", b, ratio.energy[ratio.values[:, j].argmax()])
@@ -98,7 +99,7 @@ def write(folder: Path = GOLDEN_DIR) -> None:
         maps = exports(Path(tmp))
     for name in MAPS:
         save_tsv(maps[name], map_path(name, folder))
-    points(maps["Ratio"]).save_tsv(folder / POINTS)
+    points(maps["Ratio"]).save_tsv(folder / POINTS, unit=UNIT)
 
 
 if __name__ == "__main__":

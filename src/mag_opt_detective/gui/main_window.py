@@ -34,7 +34,7 @@ from mag_opt_detective.core.processing import (
 )
 from mag_opt_detective.core.readers import Measurement, load_measurement
 from mag_opt_detective.core.spectra import FieldMap, load_tsv, save_tsv
-from mag_opt_detective.core.units import Range, Unit, convert, convert_range, from_cm1
+from mag_opt_detective.core.units import Range, Unit, convert, convert_range, from_cm1, to_cm1
 from mag_opt_detective.gui.console import QtLogHandler
 from mag_opt_detective.gui.data_panel import DataPanel
 from mag_opt_detective.gui.measurement_tab import MeasurementTab
@@ -324,6 +324,7 @@ class MainWindow(QMainWindow):
         """Show *result* (cm^-1) in energy *unit*."""
         self.result = result
         self.shown_unit = unit
+        self.point_model.set_unit(unit)
         self._init_points_if_requested(result.ratio.field)
         self.replot_all()
 
@@ -503,13 +504,15 @@ class MainWindow(QMainWindow):
 
     @user_action("Pick point")
     def on_point_clicked(self, b: float, energy: float) -> None:
+        """Record or remove a point clicked at *energy* in the shown unit (kept in cm^-1)."""
         mode = self.corrections.point_mode()
         if mode is PointMode.OFF or self.points is None:
             return
         name = self.corrections.curve_name()
         if mode is PointMode.RECORD:
-            row = self.points.set_nearest(name, b, energy)
-            logger.info("%s: B = %g T -> E = %.4g", name, self.points.field[row], energy)
+            unit = self.display_unit()
+            row = self.points.set_nearest(name, b, float(to_cm1(energy, unit)))
+            logger.info("%s: B = %g T -> E = %.4g %s", name, self.points.field[row], energy, unit)
         else:
             row = self.points.clear_nearest(name, b)
             logger.info("%s: point at B = %g T removed", name, self.points.field[row])
@@ -521,14 +524,19 @@ class MainWindow(QMainWindow):
         if self.points is None:
             cmap.set_points(None)
             return
+        unit = self.display_unit()
+
+        def shown(curve: str) -> tuple[np.ndarray, np.ndarray]:
+            b, e = self.points.points(curve)
+            return b, from_cm1(e, unit)
+
         name = self.corrections.column_name.text().strip()
-        current = self.points.points(name) if name in self.points.names else None
+        current = shown(name) if name in self.points.names else None
         others = []
         if self.corrections.show_all_button.isChecked():
             names = self.points.names
             for i, other in enumerate(names):
-                b, e = self.points.points(other)
-                others.append((b, e, pg.intColor(i, hues=max(len(names), 1))))
+                others.append((*shown(other), pg.intColor(i, hues=max(len(names), 1))))
         cmap.set_points(current, others)
 
     @user_action("Drop curve")
@@ -546,7 +554,9 @@ class MainWindow(QMainWindow):
         path = open_file(self, "Load points")
         if not path:
             return
-        self.points = PointTable.load_tsv(path)
+        unit = self.display_unit()  # of tables without a unit in the header
+        self.points = PointTable.load_tsv(path, default_unit=unit)
+        self.point_model.set_unit(unit)
         self.point_model.set_table(self.points)
         self.corrections.init_table.setChecked(False)
         if self.points.names:
@@ -562,7 +572,7 @@ class MainWindow(QMainWindow):
         if not path:
             return
         out = Path(path) if Path(path).suffix else Path(path).with_suffix(".csv")
-        self.points.save_tsv(out)
+        self.points.save_tsv(out, unit=self.display_unit())
         logger.info("Exported points to %s", out)
 
     # ------------------------------------------------------------------ processed slots

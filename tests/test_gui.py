@@ -118,26 +118,62 @@ def test_custom_field_and_reference(window, sweep, errors):
 
 def test_points_record_remove_export(window, sweep, tmp_path, monkeypatch, errors):
     load_sweep(window, sweep)
+    window.data_panel.unit.setCurrentText("meV")
     window.process_data()
     c = window.corrections
+    cmap = window.plot_panel.color_map
     c.point_record.setChecked(True)
-    window.plot_panel.color_map.pointClicked.emit(1.04, 300.0)
-    window.plot_panel.color_map.pointClicked.emit(1.96, 310.0)
+    cmap.pointClicked.emit(1.04, 37.2)  # meV, as shown
+    cmap.pointClicked.emit(1.96, 38.5)
     assert window.point_model.rowCount() == 4
-    assert window.point_model.data(window.point_model.index(1, 0)) == "300"
+    assert window.point_model.data(window.point_model.index(1, 0)) == "37.2"
+    np.testing.assert_allclose(window.points.points("LL 1")[1], [37.2 * 8.0656, 38.5 * 8.0656])
+    np.testing.assert_allclose(cmap.current_points.getData()[1], [37.2, 38.5])  # markers in meV
     c.point_remove.setChecked(True)
-    window.plot_panel.color_map.pointClicked.emit(2.0, 0.0)
+    cmap.pointClicked.emit(2.0, 0.0)
     b, _ = window.points.points("LL 1")
     np.testing.assert_allclose(b, [1.0])
 
     path = tmp_path / "points.csv"
-    monkeypatch.setattr(QFileDialog, "getSaveFileName", lambda *a, **k: (str(path), ""))
+    save_to(monkeypatch, path)
     window.export_points()
-    monkeypatch.setattr(QFileDialog, "getOpenFileName", lambda *a, **k: (str(path), ""))
+    assert path.read_text().splitlines()[:3] == ["Energy (meV)\tLL 1", "0.5\t", "1.0\t37.2"]
+    open_from(monkeypatch, path)
     window.points = None
     window.load_points()
     assert window.points.names == ["LL 1"]
+    np.testing.assert_allclose(window.points.points("LL 1")[1], [37.2 * 8.0656])
+
+    legacy = tmp_path / "Points_V1.csv"  # no unit in the header: read in the shown unit
+    legacy.write_text("\tLL 2\n0.5\t40\n1.0\t\n1.5\t\n2.0\t41\n")
+    open_from(monkeypatch, legacy)
+    window.load_points()
+    np.testing.assert_allclose(window.points.points("LL 2")[1], [40 * 8.0656, 41 * 8.0656])
+    assert window.point_model.data(window.point_model.index(3, 0)) == "41"
+    np.testing.assert_allclose(cmap.current_points.getData()[1], [40, 41])
     assert not errors
+
+
+def test_points_keep_cm1_when_the_unit_changes(window, sweep, errors):
+    load_sweep(window, sweep)
+    dp, pp = window.data_panel, window.plot_panel
+    dp.unit.setCurrentText("meV")
+    window.process_data()
+    window.corrections.point_record.setChecked(True)
+    pp.color_map.pointClicked.emit(1.0, 40.0)
+
+    dp.unit.setCurrentText("THz")  # applies from the next Process on (no live switch yet)
+    pp.order_buttons[1].click()
+    assert energy_label(window) == "Energy (meV)"
+    np.testing.assert_allclose(pp.color_map.current_points.getData()[1], [40.0])
+
+    window.process_data()  # keeps the table: "New table on next Process" is off now
+    assert not errors
+    assert energy_label(window) == "Energy (THz)"
+    thz = 40.0 * 8.0656 / 33.35641
+    np.testing.assert_allclose(window.points.points("LL 1")[1], [40.0 * 8.0656])
+    np.testing.assert_allclose(pp.color_map.current_points.getData()[1], [thz])
+    assert window.point_model.data(window.point_model.index(1, 0)) == f"{thz:.5g}"
 
 
 def test_export_slots_and_merge(window, sweep, tmp_path, monkeypatch, errors):

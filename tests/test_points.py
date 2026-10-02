@@ -1,6 +1,8 @@
 import numpy as np
+import pytest
 
 from mag_opt_detective.core.points import PointTable
+from mag_opt_detective.core.units import Unit
 
 
 def test_set_and_clear_nearest():
@@ -22,11 +24,26 @@ def test_round_trip(tmp_path):
     table.set_nearest("LL 2", 0.5, 3.25)
     path = tmp_path / "points.csv"
     table.save_tsv(path)
-    assert path.read_text().splitlines() == ["\tLL 1\tLL 2", "0.25\t\t", "0.5\t\t3.25"]
-    back = PointTable.load_tsv(path)
+    lines = ["Energy (cm-1)\tLL 1\tLL 2", "0.25\t\t", "0.5\t\t3.25"]
+    assert path.read_text().splitlines() == lines
+    back = PointTable.load_tsv(path, default_unit=Unit.MEV)  # the header wins
     assert back.names == ["LL 1", "LL 2"]
     np.testing.assert_allclose(back.field, table.field)
     np.testing.assert_allclose(back.column("LL 2"), [np.nan, 3.25])
+
+
+@pytest.mark.parametrize("unit", [Unit.MEV, Unit.THZ])
+def test_round_trip_in_unit(tmp_path, unit):
+    table = PointTable(np.array([0.25, 0.5, 0.75]))  # energies in cm-1
+    table.set_nearest("LL 1", 0.25, 806.56)
+    table.set_nearest("LL 1", 0.75, 333.5641)
+    path = tmp_path / "points.csv"
+    table.save_tsv(path, unit=unit)
+    header, first, *_ = path.read_text().splitlines()
+    assert header == f"Energy ({unit})\tLL 1"
+    assert first == ("0.25\t100" if unit is Unit.MEV else "0.25\t24.18006014")
+    back = PointTable.load_tsv(path)
+    np.testing.assert_allclose(back.column("LL 1"), table.column("LL 1"), rtol=1e-9)
 
 
 def test_load_legacy_points_with_empty_column_name(tmp_path):
@@ -35,3 +52,13 @@ def test_load_legacy_points_with_empty_column_name(tmp_path):
     table = PointTable.load_tsv(path)
     assert table.names == ["unnamed_1", "LL 1"]
     np.testing.assert_allclose(table.column("LL 1"), [40.1, np.nan])
+
+
+@pytest.mark.parametrize(("unit", "factor"), [(Unit.MEV, 8.0656), (Unit.THZ, 33.35641)])
+def test_legacy_points_are_read_in_the_default_unit(tmp_path, unit, factor):
+    """Files without a unit in the header (first cell empty) use *default_unit*."""
+    path = tmp_path / "Points_V1.csv"
+    path.write_bytes(b"\tLL 1\tLL 2\r\n0.25\t40.1\t\r\n0.5\t\t2\r\n")
+    table = PointTable.load_tsv(path, default_unit=unit)
+    np.testing.assert_allclose(table.column("LL 1"), [40.1 * factor, np.nan])
+    np.testing.assert_allclose(table.column("LL 2"), [np.nan, 2 * factor])
