@@ -2,7 +2,18 @@ import numpy as np
 import pytest
 
 from mag_opt_detective.core.spectra import FieldMap, field_label, load_tsv, save_tsv
-from mag_opt_detective.core.units import Unit, axis_label, convert, parse_axis_label
+from mag_opt_detective.core.units import (
+    CM1_PER_UNIT,
+    Unit,
+    axis_label,
+    convert,
+    convert_levels,
+    convert_range,
+    derivative_scale,
+    from_cm1,
+    parse_axis_label,
+    to_cm1,
+)
 
 
 def test_units():
@@ -11,6 +22,62 @@ def test_units():
     assert parse_axis_label(axis_label(Unit.MEV)) is Unit.MEV
     assert parse_axis_label("") is None
     assert parse_axis_label("Energy (eV)") is None
+
+
+def test_to_and_from_cm1():
+    x = np.array([100.0, 806.56, 3335.641])
+    np.testing.assert_allclose(from_cm1(x, Unit.MEV), [100 / 8.0656, 100.0, 3335.641 / 8.0656])
+    np.testing.assert_allclose(from_cm1(x, "THz"), x / 33.35641)
+    np.testing.assert_allclose(to_cm1([1.0, 2.0], Unit.MEV), [8.0656, 16.1312])
+    np.testing.assert_allclose(to_cm1(1.0, Unit.THZ), 33.35641)
+    for unit in Unit:
+        np.testing.assert_allclose(to_cm1(from_cm1(x, unit), unit), x, rtol=1e-15)
+    # the same unit keeps values bit for bit and returns a copy
+    same = convert(x, Unit.MEV, Unit.MEV)
+    assert same is not x
+    np.testing.assert_array_equal(same, x)
+
+
+def test_convert_range():
+    assert convert_range(None, Unit.MEV, Unit.CM1) is None
+    lo, hi = convert_range((10.0, 20.0), Unit.MEV, Unit.CM1)
+    assert (lo, hi) == pytest.approx((80.656, 161.312))
+    assert isinstance(lo, float)
+    assert convert_range((None, 20.0), Unit.MEV, Unit.CM1) == pytest.approx((None, 161.312))
+    assert convert_range((None, None), Unit.THZ, Unit.MEV) == (None, None)
+    assert convert_range((3.0, 1.0), Unit.CM1, Unit.THZ) == pytest.approx(
+        (3 / 33.35641, 1 / 33.35641)
+    )  # the order is kept, not sorted
+    assert convert_range((0.5, 7.25), Unit.THZ, Unit.THZ) == (0.5, 7.25)
+    back = convert_range(convert_range((61.25, 99.0), Unit.MEV, Unit.THZ), Unit.THZ, Unit.MEV)
+    assert back == pytest.approx((61.25, 99.0), rel=1e-14)
+
+
+@pytest.mark.parametrize("unit", list(Unit))
+def test_derivative_scale(unit):
+    k = CM1_PER_UNIT[unit]
+    assert derivative_scale(unit, 1, True, True) == pytest.approx(k)
+    assert derivative_scale(unit, 2, True, True) == pytest.approx(k**2)
+    assert derivative_scale(unit, 0, True, True) == 1.0
+    assert derivative_scale(unit, 2, True, False) == 1.0  # per data point
+    assert derivative_scale(unit, 2, False, True) == 1.0  # along B
+
+
+def test_convert_levels():
+    k = CM1_PER_UNIT[Unit.THZ] / CM1_PER_UNIT[Unit.MEV]  # meV per THz
+    assert convert_levels(None, Unit.MEV, Unit.THZ, 1, True, True) is None
+    assert convert_levels((-1.0, 2.0), Unit.MEV, Unit.THZ, 1, True, True) == pytest.approx(
+        (-k, 2 * k)
+    )
+    assert convert_levels((-1.0, 2.0), Unit.MEV, Unit.THZ, 2, True, True) == pytest.approx(
+        (-(k**2), 2 * k**2)
+    )
+    assert convert_levels((-1.0, 2.0), Unit.CM1, Unit.MEV, 1, True, True) == pytest.approx(
+        (-8.0656, 16.1312)
+    )
+    for args in ((0, True, True), (1, True, False), (2, False, True)):
+        assert convert_levels((0.9, 1.1), Unit.MEV, Unit.THZ, *args) == (0.9, 1.1)
+    assert convert_levels((0.9, 1.1), Unit.THZ, Unit.THZ, 2, True, True) == (0.9, 1.1)
 
 
 def test_tsv_round_trip(tmp_path):
