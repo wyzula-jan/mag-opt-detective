@@ -1,0 +1,148 @@
+"""Loading of measured spectra (OPUS binary or OPUS-macro text files)."""
+
+from __future__ import annotations
+
+import re
+from collections.abc import Iterable, Sequence
+from dataclasses import dataclass
+from pathlib import Path
+
+import numpy as np
+
+from mag_opt_detective.core.opus import is_opus_file, read_opus
+from mag_opt_detective.core.spectra import FieldMap
+from mag_opt_detective.core.units import Unit, from_cm1
+
+# Field encoded in file names, e.g. ``..._Sam2_a01p250T.txt`` -> 1.25 T.
+# Zero-field references look like ``..._a00p000T_a16p000T`` -> the last match wins (16 T).
+FIELD_PATTERN = re.compile(r"_a(\d+)p(\d+)T")
+
+
+def parse_field(path: str | Path) -> float | None:
+    """Magnetic field (T) encoded in the file name, or None if there is none."""
+    matches = FIELD_PATTERN.findall(Path(path).name)
+    if not matches:
+        return None
+    whole, frac = matches[-1]
+    return float(f"{int(whole)}.{frac}")
+
+
+def _natural_key(name: str) -> list[int | str]:
+    return [int(tok) if tok.isdigit() else tok.lower() for tok in re.split(r"(\d+)", name)]
+
+
+def sort_paths(paths: Iterable[str | Path]) -> list[str]:
+    """Sort by the field in the file name, falling back to natural name order."""
+
+    def key(p: str) -> tuple[bool, float, list[int | str]]:
+        b = parse_field(p)
+        return (b is None, b if b is not None else 0.0, _natural_key(Path(p).name))
+
+    return sorted((str(p) for p in paths), key=key)
+
+
+def read_text(path: str | Path) -> tuple[np.ndarray, np.ndarray]:
+    """Two-column text file (x, y), any whitespace delimiter, CRLF safe."""
+    data = np.loadtxt(path, ndmin=2)
+    if data.shape[1] < 2:
+        raise ValueError(f"{Path(path).name}: expected two columns (energy, intensity)")
+    x, y = data[:, 0], data[:, 1]
+    if x.size > 1 and x[0] > x[-1]:
+        x, y = x[::-1], y[::-1]
+    return x, y
+
+
+def read_spectrum(path: str | Path) -> tuple[np.ndarray, np.ndarray]:
+    """Read one spectrum, auto-detecting OPUS binary vs. text. x is in cm^-1."""
+    if is_opus_file(path):
+        return read_opus(path)
+    return read_text(path)
+
+
+@dataclass(frozen=True, eq=False)
+class Measurement:
+    """Field sweep of one sample: spectra in field plus one or two zero-field spectra.
+
+    ``zero`` has shape ``(n_energy, n_zero)``. With two zero-field spectra (measured
+    before and after the sweep) the zero reference drifts linearly over the sweep.
+    """
+
+    spectra: FieldMap
+    zero: np.ndarray
+
+
+def _read_stack(paths: Sequence[str]) -> tuple[np.ndarray, np.ndarray]:
+    x0: np.ndarray | None = None
+    columns = []
+    for p in paths:
+        x, y = read_spectrum(p)
+        if x0 is None:
+            x0 = x
+        elif x.shape != x0.shape or not np.allclose(x, x0, rtol=0, atol=1e-6):
+            raise ValueError(
+                f"{Path(p).name}: energy axis differs from {Path(paths[0]).name}; "
+                "all files of one measurement must share the same axis"
+            )
+        columns.append(y)
+    assert x0 is not None
+    return x0, np.column_stack(columns)
+
+
+def load_measurement(
+    zero_paths: Sequence[str | Path],
+    field_paths: Sequence[str | Path],
+    field: np.ndarray | None = None,
+    unit: Unit | str = Unit.CM1,
+    energy_limits: tuple[float | None, float | None] = (None, None),
+) -> Measurement:
+    """Load a field sweep.
+
+    Args:
+        zero_paths: one or two zero-field spectra (before / after the sweep).
+        field_paths: spectra measured in field, sorted with :func:`sort_paths`.
+        field: field values; if None they are parsed from the file names.
+        unit: energy unit of the result.
+        energy_limits: optional inclusive energy cut (in *unit*).
+    """
+    if not field_paths:
+        raise ValueError("no field files loaded")
+    if not zero_paths:
+        raise ValueError("no zero-field files loaded")
+    if len(zero_paths) > 2:
+        raise ValueError("load one or two zero-field files (before and after the sweep)")
+
+    field_paths = [str(p) for p in field_paths]
+    if field is None:
+        parsed = [parse_field(p) for p in field_paths]
+        missing = [Path(p).name for p, b in zip(field_paths, parsed, strict=True) if b is None]
+        if missing:
+            raise ValueError(
+                f"cannot read the field from file name(s) {missing[:3]}; "
+                "use a custom field range instead"
+            )
+        field = np.array(parsed, dtype=float)
+    else:
+        field = np.asarray(field, dtype=float)
+        if field.size != len(field_paths):
+            raise ValueError(
+                f"custom field range has {field.size} values "
+                f"but {len(field_paths)} files are loaded"
+            )
+
+    x, values = _read_stack(field_paths)
+    x_zero, zero = _read_stack([str(p) for p in zero_paths])
+    if x_zero.shape != x.shape or not np.allclose(x_zero, x, rtol=0, atol=1e-6):
+        raise ValueError("zero-field and field spectra have different energy axes")
+
+    energy = from_cm1(x, unit)
+    lo, hi = energy_limits
+    mask = np.ones(energy.size, dtype=bool)
+    if lo is not None:
+        mask &= energy >= lo
+    if hi is not None:
+        mask &= energy <= hi
+    if not mask.any():
+        raise ValueError(f"energy cut {lo} to {hi} {Unit(unit)} leaves no data")
+
+    spectra = FieldMap(energy=energy[mask], field=field, values=values[mask], unit=unit)
+    return Measurement(spectra=spectra, zero=zero[mask])
