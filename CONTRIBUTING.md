@@ -18,6 +18,10 @@ uv run ruff format .
 uv run pytest
 ```
 
+GitHub Actions runs the same checks on every push to `main` and on pull requests
+(Linux with Python 3.12–3.15, macOS and Windows with 3.14). Results:
+<https://github.com/wyzula-jan/mag-opt-detective/actions>.
+
 - `src/mag_opt_detective/core` holds the numerical code and must not import Qt.
   Every change there needs a test in `tests/`.
 - `src/mag_opt_detective/gui` is the PySide6 interface, written in code (no `.ui` files).

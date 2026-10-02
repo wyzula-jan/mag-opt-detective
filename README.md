@@ -1,5 +1,7 @@
 # Magneto-Optical Detective
 
+[![CI](https://github.com/wyzula-jan/mag-opt-detective/actions/workflows/ci.yml/badge.svg)](https://github.com/wyzula-jan/mag-opt-detective/actions/workflows/ci.yml)
+
 Desktop tool to plot and analyse magneto-optical FTIR measurements: field sweeps
 recorded with Bruker OPUS, either as OPUS binary files (`*.0`, `*.1`, …) or as
 two-column text files written by the OPUS export macro.
