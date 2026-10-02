@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QPushButton,
     QRadioButton,
+    QSpinBox,
     QStackedWidget,
     QTableView,
     QVBoxLayout,
@@ -26,7 +27,7 @@ from PySide6.QtWidgets import (
 )
 
 from mag_opt_detective.core.pipeline import PlotKind
-from mag_opt_detective.gui.widgets import FloatEdit, PointTableModel
+from mag_opt_detective.gui.widgets import FloatEdit, PointTableModel, SliderSpin
 
 Range = tuple[float, float]
 
@@ -301,8 +302,57 @@ class CorrectionsPage(QWidget):
         return name
 
 
+@dataclass(frozen=True)
+class DiracModel:
+    velocity: float  # 10^5 m/s
+    delta: float  # half-gap, meV
+    n_lines: int
+
+
+class ModelsPage(QWidget):
+    """Massive Dirac Landau-level transitions drawn over the colour map."""
+
+    changed = Signal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        layout = QVBoxLayout(self)
+        box = QGroupBox("Massive Dirac model: L(-n) → L(n+1)")
+        grid = QGridLayout(box)
+        self.show_dirac = QCheckBox("Show on the colour map")
+        self.velocity = SliderSpin(0.1, 30.0, 0.05, 5.0, " ×10⁵ m/s")
+        self.delta = SliderSpin(0.0, 500.0, 0.5, 0.0, " meV")
+        self.n_lines = QSpinBox()
+        self.n_lines.setRange(1, 40)
+        self.n_lines.setValue(5)
+        formula = QLabel("E = √(2eħv²Bn + Δ²) + √(2eħv²B(n+1) + Δ²),  n = 0 … N-1")
+        formula.setWordWrap(True)
+        formula.setEnabled(False)
+        grid.addWidget(self.show_dirac, 0, 0, 1, 2)
+        grid.addWidget(QLabel("Fermi velocity v"), 1, 0)
+        grid.addWidget(self.velocity, 1, 1)
+        grid.addWidget(QLabel("Half-gap Δ"), 2, 0)
+        grid.addWidget(self.delta, 2, 1)
+        grid.addWidget(QLabel("Lines N"), 3, 0)
+        grid.addWidget(self.n_lines, 3, 1)
+        grid.addWidget(formula, 4, 0, 1, 2)
+        grid.setColumnStretch(1, 1)
+        layout.addWidget(box)
+        layout.addStretch(1)
+
+        self.show_dirac.toggled.connect(self.changed)
+        self.velocity.valueChanged.connect(self.changed)
+        self.delta.valueChanged.connect(self.changed)
+        self.n_lines.valueChanged.connect(self.changed)
+
+    def dirac(self) -> DiracModel | None:
+        if not self.show_dirac.isChecked():
+            return None
+        return DiracModel(self.velocity.value(), self.delta.value(), self.n_lines.value())
+
+
 class ToolsTab(QWidget):
-    PAGES = ("Plot dimensions", "Data corrections")
+    PAGES = ("Plot dimensions", "Data corrections", "Models")
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -314,6 +364,8 @@ class ToolsTab(QWidget):
         self.corrections_page = CorrectionsPage()
         self.stack.addWidget(self.limits_page)
         self.stack.addWidget(self.corrections_page)
+        self.models_page = ModelsPage()
+        self.stack.addWidget(self.models_page)
         self.page_combo.currentIndexChanged.connect(self.stack.setCurrentIndex)
         layout.addWidget(self.page_combo)
         layout.addWidget(self.stack, stretch=1)

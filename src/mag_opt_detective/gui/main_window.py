@@ -16,6 +16,7 @@ from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import QMainWindow, QMessageBox, QSplitter
 
 from mag_opt_detective import __version__
+from mag_opt_detective.core.models import dirac_interband
 from mag_opt_detective.core.pipeline import (
     PlotKind,
     ProcessOptions,
@@ -33,7 +34,7 @@ from mag_opt_detective.core.processing import (
 )
 from mag_opt_detective.core.readers import Measurement, load_measurement
 from mag_opt_detective.core.spectra import FieldMap, load_tsv, save_tsv
-from mag_opt_detective.core.units import convert
+from mag_opt_detective.core.units import Unit, convert
 from mag_opt_detective.gui.console import QtLogHandler
 from mag_opt_detective.gui.data_panel import DataPanel
 from mag_opt_detective.gui.measurement_tab import MeasurementTab
@@ -123,6 +124,7 @@ class MainWindow(QMainWindow):
 
         self.limits_page = self.data_panel.tools.limits_page
         self.corrections = self.data_panel.tools.corrections_page
+        self.models_page = self.data_panel.tools.models_page
         self.point_model = self.corrections.model
 
         self.persistence = Persistence(settings) if settings is not None else None
@@ -185,6 +187,7 @@ class MainWindow(QMainWindow):
         pp.selectionChanged.connect(self.replot)
         pp.referenceSelectionChanged.connect(self.plot_reference)
         self.limits_page.changed.connect(self.replot_all)
+        self.models_page.changed.connect(self.update_model_overlay)
         pp.color_map.pointClicked.connect(self.on_point_clicked)
         pp.color_map.levelsEdited.connect(self.on_levels_edited)
         pp.reference_map.levelsEdited.connect(self.on_reference_levels_edited)
@@ -234,6 +237,11 @@ class MainWindow(QMainWindow):
         c = self.corrections
         for attr in ("baseline_off", "baseline_on", "baseline_min", "baseline_max", "column_name"):
             bind(f"corrections/{attr}", getattr(c, attr))
+        mp = self.models_page
+        bind("models/show_dirac", mp.show_dirac)
+        bind("models/velocity", mp.velocity.spin)
+        bind("models/delta", mp.delta.spin)
+        bind("models/n_lines", mp.n_lines)
         bind("processed/full_energy", dp.processed.full_energy)
         bind("processed/auto_field", dp.processed.auto_field)
 
@@ -372,12 +380,25 @@ class MainWindow(QMainWindow):
             y_range=limits.energy_view,
         )
         self.update_point_markers()
+        self.update_model_overlay()
         if pp.stacked_enabled.isChecked():
             pp.stacked.set_map(
                 fmap, pp.offset.value(), y_range=limits.stacked_range, x_range=limits.energy_view
             )
         else:
             pp.stacked.clear_map()
+
+    def update_model_overlay(self) -> None:
+        cmap = self.plot_panel.color_map
+        model = self.models_page.dirac()
+        if model is None or self.result is None:
+            cmap.set_model_curves(np.array([]), None)
+            return
+        shown = self.result.ratio
+        lo = max(0.0, float(shown.field.min()))
+        field = np.linspace(lo, float(shown.field.max()), 300)
+        lines_mev = dirac_interband(field, model.velocity, model.delta, model.n_lines)
+        cmap.set_model_curves(field, convert(lines_mev, Unit.MEV, shown.unit))
 
     @user_action("Plot reference")
     def plot_reference(self) -> None:

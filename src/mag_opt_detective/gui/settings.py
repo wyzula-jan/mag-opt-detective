@@ -6,7 +6,14 @@ import logging
 
 from PySide6.QtCore import QByteArray, QSettings
 from PySide6.QtGui import QValidator
-from PySide6.QtWidgets import QAbstractButton, QComboBox, QLineEdit, QSpinBox, QWidget
+from PySide6.QtWidgets import (
+    QAbstractButton,
+    QComboBox,
+    QDoubleSpinBox,
+    QLineEdit,
+    QSpinBox,
+    QWidget,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +32,7 @@ def _read(widget: QWidget):
         return widget.isChecked()
     if isinstance(widget, QComboBox):
         return widget.currentText()
-    if isinstance(widget, QSpinBox):
+    if isinstance(widget, QSpinBox | QDoubleSpinBox):
         return widget.value()
     if isinstance(widget, QLineEdit):
         return widget.text()
@@ -52,6 +59,15 @@ def _apply(widget: QWidget, value) -> bool:
     if isinstance(widget, QSpinBox):
         try:
             number = int(value)
+        except (TypeError, ValueError):
+            return False
+        if not widget.minimum() <= number <= widget.maximum():
+            return False
+        widget.setValue(number)
+        return True
+    if isinstance(widget, QDoubleSpinBox):
+        try:
+            number = float(value)
         except (TypeError, ValueError):
             return False
         if not widget.minimum() <= number <= widget.maximum():

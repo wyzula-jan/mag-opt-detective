@@ -16,10 +16,14 @@ from PySide6.QtCore import (
 from PySide6.QtGui import QDoubleValidator, QKeySequence
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QDoubleSpinBox,
     QFileDialog,
+    QHBoxLayout,
     QLineEdit,
     QListWidget,
     QListWidgetItem,
+    QSlider,
+    QWidget,
 )
 
 from mag_opt_detective.core.points import PointTable
@@ -176,6 +180,44 @@ class FloatEdit(QLineEdit):
         if value is None:
             raise ValueError(f"{self._name} is empty")
         return value
+
+
+class SliderSpin(QWidget):
+    """A spin box with a slider next to it for quick, live changes."""
+
+    valueChanged = Signal(float)
+
+    def __init__(self, minimum: float, maximum: float, step: float, value: float, suffix=""):
+        super().__init__()
+        self._step = step
+        self.spin = QDoubleSpinBox()
+        self.spin.setLocale(QLocale.c())  # same decimal point as the other number fields
+        self.spin.setRange(minimum, maximum)
+        self.spin.setSingleStep(step)
+        self.spin.setDecimals(max(0, -math.floor(math.log10(step))))
+        self.spin.setSuffix(suffix)
+        self.spin.setValue(value)
+        self.slider = QSlider(Qt.Orientation.Horizontal)
+        self.slider.setRange(round(minimum / step), round(maximum / step))
+        self.slider.setValue(round(value / step))
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(self.slider, stretch=1)
+        layout.addWidget(self.spin)
+        self.slider.valueChanged.connect(lambda i: self.spin.setValue(i * self._step))
+        self.spin.valueChanged.connect(self._on_spin)
+
+    def _on_spin(self, value: float) -> None:
+        self.slider.blockSignals(True)
+        self.slider.setValue(round(value / self._step))
+        self.slider.blockSignals(False)
+        self.valueChanged.emit(value)
+
+    def value(self) -> float:
+        return self.spin.value()
+
+    def setValue(self, value: float) -> None:
+        self.spin.setValue(value)
 
 
 class PointTableModel(QAbstractTableModel):
