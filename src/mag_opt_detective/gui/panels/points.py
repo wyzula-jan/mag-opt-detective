@@ -60,6 +60,7 @@ from mag_opt_detective.gui.points_view import (
     curve_color,
     draw_markers,
     map_markers,
+    stacked_field,
     stacked_markers,
 )
 from mag_opt_detective.gui.theme import current_tokens
@@ -520,15 +521,15 @@ def trace_field(window, energy: float, y: float) -> float | None:
     The nearest trace counts if the click is within one offset (or a few pixels) of it.
     """
     c, stacked = window.controller, window.plots.stacked
-    j = stacked.trace_at(energy, y)
-    if j is None or c.result is None:
+    j, field = stacked.trace_at(energy, y), stacked_field(c)
+    if j is None or field is None or j >= field.size:
         return None
     trace_y = stacked.trace_y(j, energy)
     pixel_h = abs(stacked.plot.vb.viewPixelSize()[1])
     reach = max(abs(c.view.stacked_offset), REMOVE_RADIUS * pixel_h)
     if trace_y is None or abs(trace_y - y) > reach:
         return None
-    return float(c.result.ratio.field[j])
+    return float(field[j])
 
 
 @user_action("Pick point")

@@ -86,7 +86,7 @@ def click_map(window, b: float, energy: float, modifiers=Qt.KeyboardModifier.NoM
 def click_stacked(window, b: float, energy: float, modifiers=Qt.KeyboardModifier.NoModifier):
     """A click on the stacked plot on the trace of field *b* at *energy* (display unit)."""
     stacked = window.plots.stacked
-    j = int(np.abs(window.controller.result.ratio.field - b).argmin())
+    j = int(np.abs(window.controller.current_map().field - b).argmin())  # the map drawn
     return window.tools.click("stacked", energy, stacked.trace_y(j, energy), modifiers)
 
 

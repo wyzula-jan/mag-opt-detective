@@ -16,6 +16,7 @@ from gui_helpers import (
     open_from,
     process,
     save_to,
+    select,
     set_unit,
 )
 from mag_opt_detective.core.spectra import FieldMap
@@ -373,6 +374,32 @@ def test_stacked_markers_sit_on_their_traces(processed):
     check([(0, 300.0)], [(2, 700.0)])
     set_unit(w, "meV")
     check([(0, 300.0 / MEV)], [(2, 700.0 / MEV)])
+
+
+def test_pick_and_markers_on_the_field_step_ratio(processed, errors):
+    """R(B)/R(B-ΔB) has no trace for the first field: its trace j is the field j + 1."""
+    w = processed
+    c, stacked = w.controller, w.plots.stacked
+    select(w, kind="Ratio_Step")
+    w.plot_area.set_current_view("stacked")
+    w.tools.set_active("pick")
+    np.testing.assert_allclose(c.current_map().field, [1.0, 1.5, 2.0])
+    assert w.tools.click("stacked", 500.0, stacked.trace_y(2, 500.0))  # the 2 T trace
+    b, e = c.points.points("LL 1")
+    np.testing.assert_allclose(b, [2.0])
+    np.testing.assert_allclose(e, [500.0])
+    assert click_stacked(w, 1.5, 450.0)
+    c.record_points([0.5, 1.0], [300.0, 400.0], unit="cm-1")  # no trace for 0.5 T here
+    x, y = stacked.layer("points").point_data()[-1]
+    np.testing.assert_allclose(x, [400.0, 450.0, 500.0])
+    expected = [stacked.trace_y(j, e) for j, e in ((0, 400.0), (1, 450.0), (2, 500.0))]
+    np.testing.assert_allclose(y, expected)
+    assert w.tools.click("stacked", 520.0, stacked.trace_y(2, 520.0), ALT)  # Alt on 2 T
+    np.testing.assert_allclose(c.points.points("LL 1")[0], [0.5, 1.0, 1.5])
+    select(w, order=1, axis="B")  # a field derivative keeps the field axis
+    assert w.tools.click("stacked", 600.0, stacked.trace_y(2, 600.0))
+    np.testing.assert_allclose(c.points.points("LL 1")[0], [0.5, 1.0, 1.5, 2.0])
+    assert not errors
 
 
 def test_stacked_plot_signals_redrawn_traces(qtbot):

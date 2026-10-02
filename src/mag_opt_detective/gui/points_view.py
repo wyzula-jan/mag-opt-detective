@@ -94,14 +94,28 @@ def field_index(field: np.ndarray, b: float) -> int | None:
     return j if abs(field[j] - b) <= tolerance else None
 
 
+def stacked_field(controller) -> np.ndarray | None:
+    """Field of each trace index of the stacked plot, None without one.
+
+    That is the field of the map shown, which for R(B)/R(B-ΔB) starts at the second field
+    (derivatives keep the field axis).
+    """
+    if controller.result is None:
+        return None
+    try:
+        return controller.result.base(controller.selection.kind).field
+    except ValueError:  # R(B)/R(B-ΔB) of a single field
+        return None
+
+
 def stacked_markers(controller, stacked: StackedPlot, mode: str) -> list[MarkerSet]:
     """Markers on the stacked plot: each point on its field's trace (energy, trace y).
 
     Points on traces that are not shown (every n-th spectrum) or outside them are left out.
     """
-    if controller.result is None:
+    field = stacked_field(controller)
+    if field is None:
         return []
-    field = controller.result.ratio.field
     sets = []
     for name, color, current in shown_curves(controller, mode):
         b, e = controller.points.points(name)
