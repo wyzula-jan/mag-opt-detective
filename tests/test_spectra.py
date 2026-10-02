@@ -1,7 +1,13 @@
 import numpy as np
 import pytest
 
-from mag_opt_detective.core.spectra import FieldMap, field_label, load_tsv, save_tsv
+from mag_opt_detective.core.spectra import (
+    FieldMap,
+    energy_mask,
+    field_label,
+    load_tsv,
+    save_tsv,
+)
 from mag_opt_detective.core.units import (
     CM1_PER_UNIT,
     Unit,
@@ -113,3 +119,41 @@ def test_load_tsv_errors(tmp_path):
     with pytest.raises(ValueError, match="field"):
         load_tsv(path)
     assert field_label(1.0) == "1.00T"
+
+
+def make_cm1_map() -> FieldMap:
+    rng = np.random.default_rng(1)
+    return FieldMap(
+        energy=np.linspace(400.0, 4000.0, 3601),
+        field=np.array([0.0, 0.5, 1.0]),
+        values=rng.normal(size=(3601, 3)),
+    )
+
+
+def test_to_unit_round_trip():
+    fmap = make_cm1_map()
+    assert fmap.to_unit(Unit.CM1) is fmap
+    mev = fmap.to_unit("meV")
+    assert mev.unit is Unit.MEV
+    assert mev.values is fmap.values  # values do not depend on the unit
+    np.testing.assert_array_equal(mev.field, fmap.field)
+    np.testing.assert_allclose(mev.energy, fmap.energy / 8.0656, rtol=1e-15)
+    assert mev.to_unit(Unit.MEV) is mev
+    for unit in (Unit.MEV, Unit.THZ):
+        back = fmap.to_unit(unit).to_unit(Unit.CM1)
+        assert back.unit is Unit.CM1
+        np.testing.assert_allclose(back.energy, fmap.energy, rtol=1e-12, atol=0)
+    np.testing.assert_allclose(
+        fmap.to_unit(Unit.THZ).to_unit(Unit.MEV).energy, mev.energy, rtol=1e-12, atol=0
+    )
+
+
+def test_energy_mask_keeps_converted_limits():
+    energy = np.linspace(400.0, 4000.0, 3601)
+    np.testing.assert_array_equal(energy_mask(energy, None, None), True)
+    assert energy_mask(energy, 500.0, 600.0).sum() == 101  # inclusive
+    for unit in (Unit.MEV, Unit.THZ):
+        # every sample, used as both limits after a round trip through *unit*, is kept
+        limits = convert(convert(energy, Unit.CM1, unit), unit, Unit.CM1)
+        kept = [energy_mask(energy, lim, lim).sum() for lim in limits]
+        assert kept == [1] * energy.size

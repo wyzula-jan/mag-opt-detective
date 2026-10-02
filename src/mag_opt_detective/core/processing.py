@@ -11,7 +11,7 @@ from scipy.interpolate import make_interp_spline
 from scipy.signal import savgol_filter
 
 from mag_opt_detective.core.readers import Measurement
-from mag_opt_detective.core.spectra import FieldMap
+from mag_opt_detective.core.spectra import FieldMap, energy_mask
 
 logger = logging.getLogger(__name__)
 
@@ -96,15 +96,6 @@ def step_ratio(fmap: FieldMap) -> FieldMap:
     if fmap.field.size < 2:
         raise ValueError("the field-step ratio needs at least two field values")
     return fmap.replace(field=fmap.field[1:], values=fmap.values[:, 1:] / fmap.values[:, :-1])
-
-
-def energy_mask(energy: np.ndarray, lo: float | None, hi: float | None) -> np.ndarray:
-    mask = np.ones(energy.size, dtype=bool)
-    if lo is not None:
-        mask &= energy >= lo
-    if hi is not None:
-        mask &= energy <= hi
-    return mask
 
 
 def baseline_normalize(fmap: FieldMap, region: tuple[float, float]) -> FieldMap:

@@ -8,7 +8,11 @@ from pathlib import Path
 
 import numpy as np
 
-from mag_opt_detective.core.units import Unit, axis_label, parse_axis_label
+from mag_opt_detective.core.units import Unit, axis_label, convert, parse_axis_label
+
+# Relative slack on energy limits: a limit converted from another unit is a few ulp off
+# and must still include the sample it was converted from.
+LIMIT_RTOL = 1e-9
 
 
 @dataclass(frozen=True, eq=False)
@@ -45,9 +49,30 @@ class FieldMap:
     def with_values(self, values: np.ndarray) -> FieldMap:
         return dataclasses.replace(self, values=values)
 
+    def to_unit(self, unit: Unit | str) -> FieldMap:
+        """This map with the energy axis in *unit*; the values (shared) do not change.
+
+        Returns the map itself if it is already in *unit*.
+        """
+        unit = Unit(unit)
+        if unit is self.unit:
+            return self
+        return dataclasses.replace(self, energy=convert(self.energy, self.unit, unit), unit=unit)
+
     @property
     def field_labels(self) -> list[str]:
         return [field_label(b) for b in self.field]
+
+
+def energy_mask(energy: np.ndarray, lo: float | None, hi: float | None) -> np.ndarray:
+    """Samples of *energy* inside ``[lo, hi]`` (inclusive, see LIMIT_RTOL; None = open)."""
+    energy = np.asarray(energy, dtype=float)
+    mask = np.ones(energy.size, dtype=bool)
+    if lo is not None:
+        mask &= energy >= lo - abs(lo) * LIMIT_RTOL
+    if hi is not None:
+        mask &= energy <= hi + abs(hi) * LIMIT_RTOL
+    return mask
 
 
 def field_label(b: float) -> str:
