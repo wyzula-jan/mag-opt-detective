@@ -127,7 +127,7 @@ def figure_rc(preset: JournalPreset, font_size_pt: float, line_width_pt: float) 
         "text.usetex": False,
         "axes.unicode_minus": True,
         "axes.formatter.useoffset": False,
-        "axes.formatter.limits": (-3, 4),
+        "axes.formatter.limits": (-3, 6),  # cm⁻¹ up to 10⁶ without an exponent
         "axes.linewidth": lw,
         "axes.labelpad": 0.4 * fs,
         "axes.titlepad": 0.5 * fs,

@@ -10,6 +10,7 @@ import zlib
 import matplotlib as mpl
 import numpy as np
 import pytest
+from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.collections import QuadMesh
 from matplotlib.image import AxesImage
 from PIL import Image
@@ -293,6 +294,16 @@ def test_map_levels_ranges_and_labels(map_state, fmap):
     flat = dataclasses.replace(map_state, levels=(2.0, 2.0))
     image = nature_single(flat).axes[0].images[0]
     assert (image.norm.vmin, image.norm.vmax) == (1.5, 2.5)
+
+
+def test_large_wavenumbers_have_no_exponent():
+    energy = np.linspace(8000.0, 12000.0, 41)
+    fmap = FieldMap(energy, np.linspace(0.0, 4.0, 5), np.ones((41, 5)), unit="cm-1")
+    fig = nature_single(FigureState("map", fmap, colorbar=False))
+    FigureCanvasAgg(fig).draw()
+    ax = fig.axes[0]
+    assert ax.yaxis.get_offset_text().get_text() == ""
+    assert "12000" in [t.get_text() for t in ax.get_yticklabels()]
 
 
 def test_map_colorbar(map_state):
