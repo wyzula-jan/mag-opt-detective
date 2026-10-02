@@ -340,6 +340,7 @@ source = { editable = "." }
 dependencies = [
     { name = "matplotlib" },
     { name = "numpy" },
+    { name = "pillow" },
     { name = "pyqtgraph" },
     { name = "pyside6-essentials" },
     { name = "scipy" },
@@ -360,6 +361,7 @@ dev = [
 requires-dist = [
     { name = "matplotlib", specifier = ">=3.11" },
     { name = "numpy", specifier = ">=2.0" },
+    { name = "pillow", specifier = ">=12" },
     { name = "pyqtgraph", specifier = ">=0.13.7" },
     { name = "pyside6-essentials", specifier = ">=6.8" },
     { name = "scipy", specifier = ">=1.13" },
