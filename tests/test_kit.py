@@ -2,7 +2,7 @@ import json
 
 import pytest
 from PySide6.QtCore import QPoint, QSettings, Qt
-from PySide6.QtWidgets import QCheckBox, QLabel, QSplitter, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QCheckBox, QLabel, QLineEdit, QSplitter, QVBoxLayout, QWidget
 
 from mag_opt_detective.gui.kit import (
     CollapsibleSection,
@@ -286,6 +286,8 @@ class Content(QWidget):
         super().__init__()
         layout = QVBoxLayout(self)
         layout.addWidget(QLabel(text))
+        self.edit = QLineEdit()
+        layout.addWidget(self.edit)
         self.setMinimumSize(120, 60)
 
 
@@ -331,29 +333,143 @@ def test_slide_panel_open_close_without_animation(qtbot):
         left.set_open(True, animate=False)
 
 
+def drag_handle(qtbot, splitter: QSplitter, index: int, to: int) -> None:
+    """Drag handle *index* of a horizontal splitter with the mouse until it is at x = *to*."""
+    handle = splitter.handle(index)
+    grab = QPoint(handle.width() // 2, handle.height() // 2)
+    qtbot.mousePress(handle, Qt.MouseButton.LeftButton, pos=grab)
+    target = QPoint(to - handle.x() + grab.x(), grab.y())
+    qtbot.mouseMove(handle, target)
+    qtbot.mouseRelease(handle, Qt.MouseButton.LeftButton, pos=target)
+
+
 def test_slide_panel_user_drag_and_restore(qtbot):
     splitter, left, _right = make_splitter(qtbot)
     shown(qtbot, splitter)
-    sizes = splitter.sizes()
-    splitter.setSizes([180, sizes[1] + 70, sizes[2]])  # the user drags the handle
-    splitter.splitterMoved.emit(180, 1)
+    drag_handle(qtbot, splitter, 1, 180)
+    assert splitter.sizes()[0] == 180
     assert left.open_size() == 180
 
     with qtbot.waitSignal(left.openChanged) as closed:  # dragging to zero closes
-        splitter.setSizes([0, sizes[1] + 250, sizes[2]])
-        splitter.splitterMoved.emit(0, 1)
+        drag_handle(qtbot, splitter, 1, 0)
     assert closed.args == [False]
-    assert not left.is_open()
+    assert splitter.sizes()[0] == 0
+    assert not left.content().isVisible()
 
     left.set_open(True, animate=False)  # reopening restores the last open size
     assert splitter.sizes()[0] == 180
 
     left.set_open(False, animate=False)
     with qtbot.waitSignal(left.openChanged) as reopened:  # dragging out of zero opens
-        splitter.setSizes([150, sizes[1] + 100, sizes[2]])
-        splitter.splitterMoved.emit(150, 1)
+        drag_handle(qtbot, splitter, 1, 150)
     assert reopened.args == [True]
+    assert splitter.sizes()[0] == 150
     assert left.open_size() == 150
+    assert left.content().isVisible()
+
+
+def test_slide_panel_follows_set_sizes(qtbot):
+    splitter, left, right = make_splitter(qtbot)
+    shown(qtbot, splitter)
+    total = sum(splitter.sizes())
+    with qtbot.waitSignal(left.openChanged) as closed:
+        splitter.setSizes([0, total - 200, 200])
+    assert closed.args == [False]
+    assert not left.is_open()
+    assert not left.content().isVisible()
+    left.toggle(animate=False)  # the first toggle opens it again
+    assert left.is_open()
+    assert splitter.sizes()[0] == 250
+
+    with qtbot.waitSignal(right.openChanged):
+        splitter.setSizes([250, total - 250, 0])
+    assert not right.is_open()
+    with qtbot.waitSignal(right.openChanged) as opened:
+        splitter.setSizes([250, total - 420, 170])
+    assert opened.args == [True]
+    assert right.open_size() == 170
+    assert right.content().isVisible()
+
+    right.hide()  # a hidden pane gets no space, but it is not closed
+    right.show()
+    qtbot.waitUntil(lambda: splitter.sizes()[2] == 170)
+    assert right.is_open()
+
+
+def saved_states(qtbot) -> tuple:
+    """``saveState()`` with the left panel closed, and with it open at 180 px."""
+    splitter, left, _right = make_splitter(qtbot)
+    shown(qtbot, splitter)
+    left.set_open(False, animate=False)
+    closed = splitter.saveState()
+    sizes = splitter.sizes()
+    splitter.setSizes([180, sizes[1] - 180, sizes[2]])
+    assert left.is_open()
+    opened = splitter.saveState()
+    splitter.hide()
+    return closed, opened
+
+
+def test_slide_panel_follows_restore_state(qtbot):
+    closed, opened = saved_states(qtbot)
+    splitter, left, _right = make_splitter(qtbot)
+    shown(qtbot, splitter)
+    with qtbot.waitSignal(left.openChanged) as changed:
+        assert splitter.restoreState(closed)
+    assert changed.args == [False]
+    assert splitter.sizes()[0] == 0
+    assert not left.content().isVisible()
+    with qtbot.waitSignal(left.openChanged) as changed:
+        assert splitter.restoreState(opened)
+    assert changed.args == [True]
+    assert splitter.sizes()[0] == 180
+    assert left.open_size() == 180
+    assert left.content().isVisible()
+
+
+def test_slide_panel_restore_state_at_launch(qtbot):
+    closed, opened = saved_states(qtbot)
+    splitter, left, _right = make_splitter(qtbot)
+    assert splitter.restoreState(closed)  # before show, as at launch
+    shown(qtbot, splitter)
+    assert splitter.sizes()[0] == 0
+    assert not left.is_open()
+    assert not left.content().edit.isVisible()  # out of the Tab order
+    left.toggle(animate=False)  # the first toggle opens it
+    assert left.is_open()
+    assert splitter.sizes()[0] == 250
+
+    # restoreState after a set_open made before show wins: it came later
+    splitter, left, _right = make_splitter(qtbot)
+    left.set_open(False, animate=False)
+    assert splitter.restoreState(opened)
+    shown(qtbot, splitter)
+    qtbot.waitUntil(left.is_open)
+    assert splitter.sizes()[0] == 180
+    assert left.content().isVisible()
+
+
+def test_slide_panel_closed_before_it_is_added(qtbot):
+    splitter = QSplitter()  # no stretch factor: the closed panel still gets no space
+    qtbot.addWidget(splitter)
+    panel = SlidePanel(Content("early"), 220)
+    panel.set_open(False, animate=False)
+    splitter.addWidget(panel)
+    splitter.addWidget(QLabel("plot"))
+    splitter.resize(1000, 600)
+    shown(qtbot, splitter)
+    assert splitter.sizes()[0] == 0
+    assert not panel.is_open()
+    assert not panel.content().isVisible()
+
+    late = SlidePanel(Content("late"), 160)
+    late.set_open(False, animate=False)
+    splitter.addWidget(late)  # into a splitter that is already shown
+    assert splitter.sizes()[2] == 0
+    assert not late.is_open()
+    panel.toggle(animate=False)
+    assert splitter.sizes()[0] == 220
+    assert panel.content().isVisible()
 
 
 def test_slide_panel_vertical_drawer(qtbot):
@@ -384,6 +500,23 @@ def test_slide_panel_animation_keeps_the_content_size(qtbot):
     assert splitter.sizes()[0] == 0
     assert splitter.sizes()[2] == 200
     assert right.minimumSizeHint().width() >= 120
+
+
+def test_slide_panel_at_start_behind_a_rail(qtbot):
+    splitter = QSplitter()
+    qtbot.addWidget(splitter)
+    panel = SlidePanel(Content("left"), 200, at_start=True)
+    for widget in (QLabel("rail"), panel, QLabel("plot")):
+        splitter.addWidget(widget)
+    splitter.setStretchFactor(2, 1)
+    splitter.resize(1000, 600)
+    shown(qtbot, splitter)
+    panel.duration_ms = 1500
+    panel.set_open(False)
+    qtbot.waitUntil(lambda: 20 < splitter.sizes()[1] < 180)
+    content = panel.content().geometry()
+    assert content.width() == 200
+    assert content.right() == panel.width() - 1  # slides out towards the window's start
 
 
 def test_slide_panel_before_show_and_settings(qtbot):

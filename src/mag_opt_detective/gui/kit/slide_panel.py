@@ -19,26 +19,46 @@ from mag_opt_detective.gui.kit._common import (
 class SlidePanel(QWidget):
     """A pane in a QSplitter whose open/close animates the splitter sizes.
 
-    Add it to a splitter like any widget. While it moves, the content keeps its open width
-    (height in a vertical splitter) and is clipped, anchored to the edge next to the rest of
-    the window, so it slides instead of being squeezed. The user can drag the splitter handle;
-    dragging it to zero closes the panel, and reopening restores the last open size. Space is
-    taken from (and given back to) the largest sibling that is not a SlidePanel. ``openChanged``
-    fires on every change of :meth:`is_open`. Settings protocol: JSON
-    ``{"open": bool, "size": int}``.
+    Add it to a splitter like any widget and give the main pane a stretch factor
+    (``splitter.setStretchFactor(i, 1)``); without one QSplitter shares the space in proportion
+    to the size hints, and the panel only gets its default size from :meth:`set_open`. While it
+    moves, the content keeps its open width (height in a vertical splitter) and is clipped,
+    anchored to the edge next to the rest of the window, so it slides instead of being squeezed.
+    Space is taken from (and given back to) the largest sibling that is not a SlidePanel.
+    *at_start* says whether the panel sits at the start (left/top) of the window; by default
+    only the first pane does.
+
+    The open state follows the size the splitter gives the panel, whoever sets it (a drag of
+    the handle, ``setSizes`` or ``restoreState``): zero is closed, anything else open, and
+    reopening restores the last open size. So the sizes can be kept with
+    ``QSplitter.saveState``; the settings protocol (JSON ``{"open": bool, "size": int}``) is the
+    alternative, use one of the two. A state set before the splitter is shown is applied again
+    once it is laid out, unless ``restoreState`` or ``setSizes`` opened or closed the panel
+    after that. ``openChanged`` fires on every change of :meth:`is_open`.
     """
 
     openChanged = Signal(bool)
     duration_ms = DURATION_MS  # animation length; tests may lengthen it per instance
 
-    def __init__(self, content: QWidget, default_size: int = 280, parent: QWidget | None = None):
+    def __init__(
+        self,
+        content: QWidget,
+        default_size: int = 280,
+        parent: QWidget | None = None,
+        *,
+        at_start: bool | None = None,
+    ):
         super().__init__(parent)
         self._content = content
         content.setParent(self)
         self._size = max(1, int(default_size))
         self._open = True
+        self._at_start = at_start
         self._animating = False
-        self._pending = False
+        self._pending = False  # apply the state again once the splitter is laid out
+        self._applied = False  # the splitter had a size for us after we last set the sizes
+        self._settle_queued = False
+        self._reshown = False  # shown again after hide(): wait for the splitter's layout
         self._splitter: QSplitter | None = None
         self._donor: int | None = None
         self._animation = make_animation(self)
@@ -76,12 +96,13 @@ class SlidePanel(QWidget):
         parent = self.parentWidget()
         splitter = parent if isinstance(parent, QSplitter) else None
         if splitter is not self._splitter:
-            if self._splitter is not None:
-                self._splitter.splitterMoved.disconnect(self._on_splitter_moved)
             self._splitter = splitter
-            if splitter is not None:
-                splitter.splitterMoved.connect(self._on_splitter_moved)
+            self._applied = False
         return splitter
+
+    def _index(self) -> int:
+        """Our index in the splitter, -1 when not (yet) in one."""
+        return self._splitter.indexOf(self) if self._splitter is not None else -1
 
     def _horizontal(self) -> bool:
         return self._splitter is None or self._splitter.orientation() == Qt.Orientation.Horizontal
@@ -90,8 +111,10 @@ class SlidePanel(QWidget):
         return size.width() if self._horizontal() else size.height()
 
     def _anchor_end(self) -> bool:
-        """The leading pane slides towards its far edge; the others towards their near edge."""
-        return self._splitter is not None and self._splitter.indexOf(self) == 0
+        """A panel at the start slides towards its far edge; the others towards their near edge."""
+        if self._at_start is not None:
+            return self._at_start
+        return self._index() == 0
 
     def _sizes(self, splitter: QSplitter) -> list[int]:
         sizes = splitter.sizes()
@@ -103,6 +126,14 @@ class SlidePanel(QWidget):
             widget = splitter.widget(i)
             hints.append(0 if widget.isHidden() else max(0, self._along(widget.sizeHint())))
         return hints
+
+    def _current_size(self) -> int | None:
+        """Our size in the splitter, or None while it is not laid out."""
+        index = self._index()
+        if index < 0:
+            return None
+        sizes = self._splitter.sizes()
+        return sizes[index] if sum(sizes) > 0 else None
 
     def _pick_donor(self, splitter: QSplitter, sizes: list[int]) -> int | None:
         index = splitter.indexOf(self)
@@ -128,14 +159,15 @@ class SlidePanel(QWidget):
     def _run(self, animate: bool) -> None:
         self._animation.stop()
         splitter = self._attach()
-        if splitter is None:
+        index = self._index()
+        if index < 0:
             self._set_animating(False)
             self._content.setVisible(self._open)
             return
-        splitter.setCollapsible(splitter.indexOf(self), True)
+        splitter.setCollapsible(index, True)
         target = self._size if self._open else 0
         sizes = splitter.sizes()
-        current = sizes[splitter.indexOf(self)]
+        current = sizes[index]
         if not animate or not splitter.isVisible() or sum(sizes) == 0 or current == target:
             self._finish()
             return
@@ -154,7 +186,7 @@ class SlidePanel(QWidget):
 
     def _on_step(self, value) -> None:
         # from the live sizes, so panels animating at the same time do not undo each other
-        if self._animating and self._splitter is not None:
+        if self._animating and self._index() >= 0:
             self._resize_to(round(value), self._splitter.sizes(), self._donor)
 
     def _on_finished(self) -> None:
@@ -162,26 +194,60 @@ class SlidePanel(QWidget):
             self._finish()
 
     def _finish(self) -> None:
-        """Jump to the final size (the restored minimum size lets the splitter collapse us)."""
+        """Jump to the final size."""
         self._set_animating(False)
         splitter = self._splitter
-        if splitter is None:
+        if self._index() < 0:
             return
         sizes = self._sizes(splitter)
         self._resize_to(self._size if self._open else 0, sizes, self._pick_donor(splitter, sizes))
         self._content.setVisible(self._open)
         self._place_content()
-        self._pending = not splitter.isVisible() or sum(splitter.sizes()) == 0
+        self._applied = sum(splitter.sizes()) > 0
+        self._pending = not (self._applied and splitter.isVisible())
 
-    def _on_splitter_moved(self, _pos: int, _index: int) -> None:
-        if self._animating or self._splitter is None:
+    # --- following the splitter --------------------------------------------------------
+    def _check_size(self) -> None:
+        """After a resize: follow the new size now, or once the splitter has settled."""
+        splitter = self._splitter
+        if splitter is None or self._animating or not splitter.isVisible():
             return
-        size = self._splitter.sizes()[self._splitter.indexOf(self)]
+        if self._pending or self._reshown:  # the splitter lays us out again after this
+            if not self._settle_queued:
+                self._settle_queued = True
+                QTimer.singleShot(0, self, self._settle)
+            return
+        self._follow_size()
+
+    def _settle(self) -> None:
+        """Re-apply a pending state (setSizes before show is only relative), else follow."""
+        self._settle_queued = False
+        self._reshown = False
+        splitter = self._splitter
+        if splitter is None or self._animating or not splitter.isVisible():
+            return
+        current = self._current_size()
+        if current is None:
+            return
+        changed_after_us = self._applied and (current > 0) != self._open
+        if self._pending and not changed_after_us:
+            self._pending = False
+            self._finish()
+        else:
+            self._pending = False
+            self._follow_size()
+
+    def _follow_size(self) -> None:
+        """Take the state from the size the splitter gives us: zero is closed."""
+        size = self._current_size()
+        if size is None or self.isHidden():
+            return
         if size > 0:
             self._size = size
         if (size > 0) != self._open:
             self._open = size > 0
             self._content.setVisible(self._open)
+            self.updateGeometry()
             self._place_content()
             self.openChanged.emit(self._open)
 
@@ -203,7 +269,7 @@ class SlidePanel(QWidget):
     def minimumSizeHint(self) -> QSize:
         minimum = self._content_minimum()
         width, height = max(1, minimum.width()), max(1, minimum.height())
-        if self._animating:  # let the splitter make us smaller than the content
+        if self._animating or not self._open:  # moving or closed: may be smaller than the content
             return QSize(0, height) if self._horizontal() else QSize(width, 0)
         return QSize(width, height)
 
@@ -225,18 +291,19 @@ class SlidePanel(QWidget):
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
         self._place_content()
-        if self._pending and self._splitter is not None and self._splitter.isVisible():
-            self._pending = False
-            QTimer.singleShot(0, self._settle)
+        self._check_size()
 
-    def _settle(self) -> None:
-        """Re-apply the size once the splitter is laid out (setSizes before show is relative)."""
-        if not self._animating and self._splitter is not None:
-            self._finish()
+    def hideEvent(self, event) -> None:
+        super().hideEvent(event)
+        if self.isHidden():  # hidden itself: the splitter shows us at 0 until it lays out again
+            self._reshown = True
 
     def event(self, event: QEvent) -> bool:
         if event.type() == QEvent.Type.ParentChange:
-            self._attach()
+            if self._animating:
+                self._animation.stop()
+                self._set_animating(False)
+            self._attach()  # the new splitter lays us out from our hints (0 when closed)
         elif event.type() == QEvent.Type.LayoutRequest:  # the content's size hints changed
             self.updateGeometry()
             self._place_content()
