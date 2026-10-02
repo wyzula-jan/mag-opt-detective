@@ -10,25 +10,32 @@ from PySide6.QtCore import (
     QLocale,
     QModelIndex,
     QPersistentModelIndex,
+    QPoint,
+    QRect,
+    QSize,
     Qt,
     Signal,
 )
-from PySide6.QtGui import QDoubleValidator, QKeySequence
+from PySide6.QtGui import QAction, QDoubleValidator, QKeySequence, QPainter
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QDoubleSpinBox,
     QFileDialog,
     QHBoxLayout,
+    QLayout,
+    QLayoutItem,
     QLineEdit,
     QListWidget,
     QListWidgetItem,
+    QSizePolicy,
     QSlider,
     QWidget,
 )
 
 from mag_opt_detective.core.points import PointTable
 from mag_opt_detective.core.readers import sort_paths
-from mag_opt_detective.core.units import Unit, from_cm1
+from mag_opt_detective.core.units import Unit, from_cm1, to_cm1
+from mag_opt_detective.gui.theme import current_tokens
 
 SPECTRA_FILTER = "Spectra (*.txt *.dat *.[0-9] *.[0-9][0-9]);;All files (*)"
 TABLE_FILTER = "Tab-separated table (*.csv *.tsv *.txt);;All files (*)"
@@ -181,6 +188,194 @@ class FloatEdit(QLineEdit):
         if value is None:
             raise ValueError(f"{self._name} is empty")
         return value
+
+
+def parse_float(text: str) -> float | None:
+    """A typed number (C locale), or None when the text is empty or not a number."""
+    try:
+        value = float(text.strip())
+    except ValueError:
+        return None
+    return value if math.isfinite(value) else None
+
+
+class EnergyEdit(FloatEdit):
+    """Number field for an energy: shown in the display unit, kept in cm^-1.
+
+    :meth:`set_unit` shows the kept value in another unit without changing it, so switching
+    units back and forth never accumulates rounding. The settings protocol stores cm^-1
+    (an empty field stores ""), so restoring it does not depend on the restored unit.
+    ``valueChanged`` fires when the text changes the kept value.
+    """
+
+    valueChanged = Signal()
+
+    def __init__(self, value_cm1: float | None = None, name: str = "value", parent=None):
+        super().__init__(None, name, parent)
+        self._unit = Unit.CM1
+        self._cm1 = value_cm1
+        self._rendering = False
+        self.textChanged.connect(self._on_text)
+        self._render()
+
+    def unit(self) -> Unit:
+        return self._unit
+
+    def set_unit(self, unit: Unit | str) -> None:
+        self._unit = Unit(unit)
+        self._render()
+
+    def cm1(self) -> float | None:
+        """The kept value in cm^-1 (None when empty or not a number)."""
+        return self._cm1
+
+    def set_cm1(self, value: float | None) -> None:
+        self._cm1 = None if value is None else float(value)
+        self._render()
+        self.valueChanged.emit()
+
+    def set_value(self, value: float) -> None:
+        """Set the value in the display unit."""
+        self.set_cm1(float(to_cm1(value, self._unit)))
+
+    def _render(self) -> None:
+        self._rendering = True
+        try:
+            text = "" if self._cm1 is None else f"{float(from_cm1(self._cm1, self._unit)):.6g}"
+            self.setText(text)
+        finally:
+            self._rendering = False
+
+    def _on_text(self, text: str) -> None:
+        if self._rendering:
+            return
+        value = parse_float(text)
+        self._cm1 = None if value is None else float(to_cm1(value, self._unit))
+        self.valueChanged.emit()
+
+    def settings_value(self) -> float | str:
+        return "" if self._cm1 is None else self._cm1
+
+    def set_settings_value(self, value) -> bool:
+        if value == "" or value is None:
+            self.set_cm1(None)
+            return True
+        number = value if isinstance(value, float | int) else parse_float(str(value))
+        if number is None or isinstance(number, bool) or not math.isfinite(number):
+            return False
+        self.set_cm1(float(number))
+        return True
+
+
+class CheckableSetting:
+    """Settings protocol for a checkable QAction (``Persistence.bind`` accepts it)."""
+
+    def __init__(self, action: QAction):
+        self.action = action
+
+    def settings_value(self) -> bool:
+        return self.action.isChecked()
+
+    def set_settings_value(self, value) -> bool:
+        if isinstance(value, str) and value.lower() in ("true", "false"):
+            value = value.lower() == "true"
+        if not isinstance(value, bool):
+            return False
+        self.action.setChecked(value)
+        return True
+
+
+class Separator(QWidget):
+    """A one-pixel line in the theme's line colour."""
+
+    def __init__(self, orientation=Qt.Orientation.Horizontal, parent=None):
+        super().__init__(parent)
+        self._horizontal = orientation == Qt.Orientation.Horizontal
+        if self._horizontal:
+            self.setFixedHeight(1)
+            self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        else:
+            self.setFixedWidth(1)
+            self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
+
+    def paintEvent(self, event) -> None:
+        painter = QPainter(self)
+        painter.fillRect(self.rect(), current_tokens()["line"])
+        painter.end()
+
+
+class FlowLayout(QLayout):
+    """Lays its items out left to right and wraps them onto new rows when space runs out."""
+
+    def __init__(self, parent: QWidget | None = None, spacing: int = 6, row_spacing: int = 6):
+        super().__init__(parent)
+        self._items: list[QLayoutItem] = []
+        self._spacing = spacing
+        self._row_spacing = row_spacing
+        self.setContentsMargins(0, 0, 0, 0)
+
+    def addItem(self, item: QLayoutItem) -> None:
+        self._items.append(item)
+
+    def count(self) -> int:
+        return len(self._items)
+
+    def itemAt(self, index: int) -> QLayoutItem | None:
+        return self._items[index] if 0 <= index < len(self._items) else None
+
+    def takeAt(self, index: int) -> QLayoutItem | None:
+        return self._items.pop(index) if 0 <= index < len(self._items) else None
+
+    def expandingDirections(self) -> Qt.Orientation:
+        return Qt.Orientation(0)
+
+    def hasHeightForWidth(self) -> bool:
+        return True
+
+    def heightForWidth(self, width: int) -> int:
+        return self._arrange(QRect(0, 0, width, 0), apply=False)
+
+    def setGeometry(self, rect: QRect) -> None:
+        super().setGeometry(rect)
+        self._arrange(rect, apply=True)
+
+    def sizeHint(self) -> QSize:
+        return self.minimumSize()
+
+    def minimumSize(self) -> QSize:
+        """The widest item (items are never squeezed below their size hint)."""
+        size = QSize()
+        for item in self._items:
+            size = size.expandedTo(item.sizeHint())
+        m = self.contentsMargins()
+        return size + QSize(m.left() + m.right(), m.top() + m.bottom())
+
+    def _arrange(self, rect: QRect, apply: bool) -> int:
+        """Place the items (centred vertically in their row); returns the height used."""
+        m = self.contentsMargins()
+        area = rect.adjusted(m.left(), m.top(), -m.right(), -m.bottom())
+        rows: list[list[tuple[QLayoutItem, QSize]]] = [[]]
+        x = area.x()
+        for item in self._items:
+            if item.isEmpty():
+                continue
+            hint = item.sizeHint()
+            if rows[-1] and x + hint.width() > area.right() + 1:
+                rows.append([])
+                x = area.x()
+            rows[-1].append((item, hint))
+            x += hint.width() + self._spacing
+        y = area.y()
+        for row in rows:
+            height = max((hint.height() for _item, hint in row), default=0)
+            x = area.x()
+            for item, hint in row:
+                if apply:
+                    item.setGeometry(QRect(QPoint(x, y + (height - hint.height()) // 2), hint))
+                x += hint.width() + self._spacing
+            y += height + self._row_spacing
+        used = y - self._row_spacing if rows[0] else y
+        return used - rect.y() + m.bottom()
 
 
 class SliderSpin(QWidget):
