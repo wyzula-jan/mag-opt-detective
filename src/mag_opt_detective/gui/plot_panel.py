@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QKeySequence
 from PySide6.QtWidgets import (
     QButtonGroup,
@@ -34,6 +34,8 @@ class PlotPanel(QWidget):
         (PlotKind.AVERAGE, "R(B)/R(B-AVR)", "Ctrl+3"),
     )
     ORDERS = ((0, "No", "Alt+1"), (1, "1st", "Alt+2"), (2, "2nd", "Alt+3"))
+    AUTO_COLOURS = "Auto"
+    COLOURS = (AUTO_COLOURS, "magma", "viridis", "inferno", "plasma", "turbo", "grey", "bipolar")
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -52,6 +54,11 @@ class PlotPanel(QWidget):
             self.kind_buttons[kind] = button
             grid.addWidget(button, 0, col)
         self.kind_buttons[PlotKind.RATIO].setChecked(True)
+        self.cmap_combo = QComboBox()
+        self.cmap_combo.addItems(self.COLOURS)
+        self.cmap_combo.setToolTip("Colour map. Auto: magma for maps, grey for derivatives")
+        grid.addWidget(QLabel("Colours:"), 0, len(self.KINDS) + 2, Qt.AlignmentFlag.AlignRight)
+        grid.addWidget(self.cmap_combo, 0, len(self.KINDS) + 3)
 
         self.order_group = QButtonGroup(self)
         self.order_buttons: dict[int, QRadioButton] = {}
@@ -123,6 +130,8 @@ class PlotPanel(QWidget):
             )
         self.axis_combo.currentIndexChanged.connect(self.selectionChanged)
         self.per_unit.toggled.connect(self.selectionChanged)
+        self.cmap_combo.currentIndexChanged.connect(self.selectionChanged)
+        self.cmap_combo.currentIndexChanged.connect(self.referenceSelectionChanged)
         self.stacked_enabled.toggled.connect(self.selectionChanged)
         self.replot_button.clicked.connect(self.selectionChanged)
         self.offset.editingFinished.connect(self.selectionChanged)
@@ -138,6 +147,16 @@ class PlotPanel(QWidget):
 
     def axis(self) -> Axis:
         return Axis.FIELD if self.axis_combo.currentIndex() == 1 else Axis.ENERGY
+
+    def colormap(self, order: int = 0) -> str:
+        choice = self.cmap_combo.currentText()
+        if choice == self.AUTO_COLOURS:
+            return "magma" if order == 0 else "grey"
+        return choice
+
+    def current_view(self):
+        """The plot widget of the visible tab."""
+        return (self.color_map, self.stacked, self.reference_map)[self.tabs.currentIndex()]
 
     def physical(self) -> bool:
         return self.per_unit.isChecked()

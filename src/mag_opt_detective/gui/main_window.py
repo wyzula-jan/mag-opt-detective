@@ -38,8 +38,8 @@ from mag_opt_detective.gui.console import QtLogHandler
 from mag_opt_detective.gui.data_panel import DataPanel
 from mag_opt_detective.gui.measurement_tab import MeasurementTab
 from mag_opt_detective.gui.plot_panel import PlotPanel
-from mag_opt_detective.gui.tools_tab import PointMode
-from mag_opt_detective.gui.widgets import open_file, save_file
+from mag_opt_detective.gui.tools_tab import PointMode, level_key
+from mag_opt_detective.gui.widgets import IMAGE_FILTER, open_file, save_file
 
 logger = logging.getLogger("mag_opt_detective")
 
@@ -50,6 +50,7 @@ PER_UNIT_SUFFIX = "_perUnit"
 SHORTCUTS = [
     ("Ctrl+F", "Process"),
     ("Ctrl+E", "Export current plot"),
+    ("Ctrl+Shift+E", "Save the visible plot as an image"),
     ("Ctrl+L / Ctrl+Shift+L", "Load sample field / zero-field files"),
     ("Ctrl+R / Ctrl+Shift+R", "Load reference field / zero-field files"),
     ("Ctrl+1 / 2 / 3", "Plot R(B)/R(0) / Data / R(B)/R(B-AVR)"),
@@ -122,6 +123,7 @@ class MainWindow(QMainWindow):
         dp = self.data_panel
         self.process_action = self._action("&Process", self.process_data, "Ctrl+F")
         self.export_action = self._action("&Export Current Plot…", self.export_current, "Ctrl+E")
+        self.image_action = self._action("Save Plot &Image…", self.save_image, "Ctrl+Shift+E")
         load_actions = [
             self._action("Load Sample Field…", dp.sample.load_field_dialog, "Ctrl+L"),
             self._action("Load Sample Zero Field…", dp.sample.load_zero_dialog, "Ctrl+Shift+L"),
@@ -138,6 +140,7 @@ class MainWindow(QMainWindow):
         file_menu.addSeparator()
         file_menu.addAction(self.process_action)
         file_menu.addAction(self.export_action)
+        file_menu.addAction(self.image_action)
         file_menu.addSeparator()
         file_menu.addAction(quit_action)
 
@@ -157,6 +160,8 @@ class MainWindow(QMainWindow):
         pp.referenceSelectionChanged.connect(self.plot_reference)
         self.limits_page.changed.connect(self.replot_all)
         pp.color_map.pointClicked.connect(self.on_point_clicked)
+        pp.color_map.levelsEdited.connect(self.on_levels_edited)
+        pp.reference_map.levelsEdited.connect(self.on_reference_levels_edited)
 
         c = self.corrections
         c.show_all_button.toggled.connect(self.update_point_markers)
@@ -257,7 +262,7 @@ class MainWindow(QMainWindow):
         pp.color_map.set_map(
             fmap,
             levels=levels,
-            cmap="magma" if order == 0 else "grey",
+            cmap=pp.colormap(order),
             x_range=limits.field_range,
             y_range=limits.energy_view,
         )
@@ -282,8 +287,24 @@ class MainWindow(QMainWindow):
         pp.reference_map.set_map(
             fmap,
             levels=limits.levels_for(kind),
+            cmap=pp.colormap(0),
             x_range=limits.field_range,
             y_range=limits.energy_view,
+        )
+
+    def on_levels_edited(self, lo: float, hi: float) -> None:
+        pp = self.plot_panel
+        if pp.physical() and pp.order():
+            return  # per-unit derivatives are always autoscaled
+        self._store_levels(level_key(pp.kind(), pp.order()), lo, hi)
+
+    def on_reference_levels_edited(self, lo: float, hi: float) -> None:
+        self._store_levels(level_key(self.plot_panel.reference_kind()), lo, hi)
+
+    def _store_levels(self, key: str, lo: float, hi: float) -> None:
+        self.limits_page.set_levels(key, lo, hi)
+        logger.info(
+            "Colour range of %s set to %.4g … %.4g", self.limits_page.level_label(key), lo, hi
         )
 
     # ------------------------------------------------------------------ export
@@ -309,6 +330,18 @@ class MainWindow(QMainWindow):
             out = out.with_name(f"{out.stem}_{name}{out.suffix}")
         save_tsv(fmap, out)
         logger.info("Exported %s to %s", name, out)
+
+    @user_action("Save image")
+    def save_image(self) -> None:
+        if self.result is None:
+            raise ValueError("nothing to save - process data first")
+        view = self.plot_panel.current_view()
+        path = save_file(self, "Save plot image", IMAGE_FILTER)
+        if not path:
+            return
+        out = Path(path) if Path(path).suffix else Path(path).with_suffix(".png")
+        view.export_image(out)
+        logger.info("Saved image %s", out)
 
     # ------------------------------------------------------------------ points
     def _init_points_if_requested(self, field: np.ndarray) -> None:
