@@ -24,7 +24,7 @@ from mag_opt_detective.core.pipeline import (
     process,
 )
 from mag_opt_detective.core.points import PointTable
-from mag_opt_detective.core.processing import crop_energy, merge_energy
+from mag_opt_detective.core.processing import crop_energy, merge_energy, merge_field
 from mag_opt_detective.core.readers import Measurement, load_measurement
 from mag_opt_detective.core.spectra import FieldMap, load_tsv, save_tsv
 from mag_opt_detective.core.units import convert
@@ -163,7 +163,8 @@ class MainWindow(QMainWindow):
         pt.loadRequested.connect(self.load_slot)
         pt.saveRequested.connect(self.save_slot)
         pt.plotRequested.connect(self.plot_slot)
-        pt.mergeRequested.connect(self.merge_slots)
+        pt.mergeEnergyRequested.connect(self.merge_slots)
+        pt.mergeFieldRequested.connect(self.merge_slots_by_field)
 
     # ------------------------------------------------------------------ helpers
     def report_error(self, title: str, message: str) -> None:
@@ -421,15 +422,34 @@ class MainWindow(QMainWindow):
         logger.info("Plotting slot %d: %s", slot, processed.slot_name(slot))
         self._set_result(ProcessResult.from_map(fmap, self.corrections.baseline_region()))
 
+    def _used_slots(self) -> list[int]:
+        used = self.data_panel.processed.used_slots(self.slots)
+        if not used:
+            raise ValueError("no slot to merge - load slots and tick them in the Use column")
+        return used
+
     @user_action("Merge by energy")
     def merge_slots(self) -> None:
-        if not self.slots:
-            raise ValueError("all slots are empty")
         processed = self.data_panel.processed
-        order = sorted(self.slots)
-        merged = merge_energy([(self.slots[i], *processed.energy_range(i)) for i in order])
+        used = self._used_slots()
+        merged = merge_energy([(self.slots[i], *processed.energy_range(i)) for i in used])
         logger.info("-" * 40)
-        logger.info("Merged slots %s; energy re-gridded to a uniform step.", order)
+        logger.info("Merged slots %s by energy; energy re-gridded to a uniform step.", used)
+        self._set_result(ProcessResult.from_map(merged, self.corrections.baseline_region()))
+
+    @user_action("Merge by field")
+    def merge_slots_by_field(self) -> None:
+        processed = self.data_panel.processed
+        used = self._used_slots()
+        merged = merge_field([(self.slots[i], *processed.field_range(i)) for i in used])
+        logger.info("-" * 40)
+        logger.info(
+            "Merged slots %s by field: %d fields, B = %g … %g T.",
+            used,
+            merged.field.size,
+            merged.field[0],
+            merged.field[-1],
+        )
         self._set_result(ProcessResult.from_map(merged, self.corrections.baseline_region()))
 
     # ------------------------------------------------------------------ window

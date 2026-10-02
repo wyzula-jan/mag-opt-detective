@@ -178,3 +178,36 @@ def test_result_get_physical(sweep):
     got = res.get(PlotKind.DATA, order=1, axis=Axis.FIELD, physical=True)
     expected = proc.derivative(res.data, Axis.FIELD, physical=True)
     np.testing.assert_allclose(got.values, expected.values)
+
+
+def test_crop_field():
+    fmap = make_map(field=np.array([1.0, 2.0, 3.0]))
+    np.testing.assert_allclose(proc.crop_field(fmap, 2, None).field, [2, 3])
+    with pytest.raises(ValueError, match="no data"):
+        proc.crop_field(fmap, 5, 6)
+
+
+def test_merge_field_joins_sorts_and_averages():
+    energy = np.linspace(0, 10, 11)
+    low = make_map(energy=energy, field=np.array([1.0, 2.0, 3.0]))
+    high = make_map(energy=energy, field=np.array([3.0, 4.0, 5.0]))
+    high = high.with_values(high.values + 1.0)  # makes the 3 T overlap visible
+    merged = proc.merge_field([(high, None, None), (low, None, None)])
+    np.testing.assert_allclose(merged.field, [1, 2, 3, 4, 5])
+    np.testing.assert_allclose(merged.values[:, 2], energy + 3 + 0.5)  # mean of both 3 T
+    np.testing.assert_allclose(merged.values[:, 4], energy + 5 + 1.0)
+
+    cut = proc.merge_field([(low, None, 2.5), (high, 3.5, None)])
+    np.testing.assert_allclose(cut.field, [1, 2, 4, 5])
+
+
+def test_merge_field_interpolates_to_common_energy():
+    a = make_map(energy=np.linspace(0, 10, 11), field=np.array([1.0]))
+    b = make_map(energy=np.linspace(2, 12, 21), field=np.array([2.0]))
+    merged = proc.merge_field([(a, None, None), (b, None, None)])
+    np.testing.assert_allclose(merged.energy, np.linspace(2, 10, 9))
+    np.testing.assert_allclose(merged.values, np.add.outer(merged.energy, [1.0, 2.0]))
+    with pytest.raises(ValueError, match="common energy"):
+        proc.merge_field([(a, None, None), (make_map(energy=np.linspace(20, 30, 5)), None, None)])
+    with pytest.raises(ValueError, match="cannot merge"):
+        proc.merge_field([(a, None, None), (make_map(unit="meV"), None, None)])
