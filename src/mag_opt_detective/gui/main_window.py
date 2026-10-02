@@ -15,9 +15,12 @@ import numpy as np
 import pyqtgraph as pg
 import scipy
 from PySide6 import __version__ as pyside_version
-from PySide6.QtCore import QRectF, QSettings, QSize, Qt, qVersion
+from PySide6.QtCore import QEvent, QRectF, QSettings, QSize, Qt, qVersion
 from PySide6.QtGui import QAction, QActionGroup, QKeySequence, QPainter
 from PySide6.QtWidgets import (
+    QAbstractItemView,
+    QApplication,
+    QComboBox,
     QHBoxLayout,
     QLabel,
     QMainWindow,
@@ -70,6 +73,15 @@ KINDS = (
 ORDERS = (("0", "Off", "Alt+1"), ("1", "1st", "Alt+2"), ("2", "2nd", "Alt+3"))
 UNITS = ((Unit.CM1, "cm⁻¹"), (Unit.MEV, "meV"), (Unit.THZ, "THz"))
 SCHEME_ICONS = {"system": "contrast", "light": "sun", "dark": "moon"}
+
+
+def _types_text(event) -> bool:
+    """A key event that types a character (no modifier other than Shift)."""
+    modifiers = event.modifiers() & ~(
+        Qt.KeyboardModifier.ShiftModifier | Qt.KeyboardModifier.KeypadModifier
+    )
+    text = event.text()
+    return modifiers == Qt.KeyboardModifier.NoModifier and bool(text) and text.isprintable()
 
 
 def _paint_dot(widget: QWidget, token: str = "warn", size: float = 9.0) -> None:
@@ -754,6 +766,18 @@ class MainWindow(QMainWindow):
             f"Python {platform.python_version()}, Qt {qVersion()}, PySide6 {pyside_version}<br>"
             f"numpy {np.__version__}, scipy {scipy.__version__}, pyqtgraph {pg.__version__}",
         )
+
+    def event(self, event) -> bool:
+        # The tool shortcuts are single letters for the whole window; a list, table or combo
+        # box with the focus keeps typed letters (keyboard search, starting an edit).
+        if (
+            event.type() == QEvent.Type.ShortcutOverride
+            and _types_text(event)
+            and isinstance(QApplication.focusWidget(), QAbstractItemView | QComboBox)
+        ):
+            event.accept()
+            return True
+        return super().event(event)
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
