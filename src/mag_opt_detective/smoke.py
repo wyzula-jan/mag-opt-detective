@@ -34,22 +34,27 @@ def _write_sweep(folder: Path) -> tuple[list[str], list[str]]:
 
 
 def run(window) -> None:
-    """Drive *window* through loading, processing and plotting; raise on any failure."""
-    from mag_opt_detective.core.pipeline import PlotKind
+    """Drive *window* through loading, processing, plotting and a unit switch; raise on failure."""
+    from mag_opt_detective.gui.controller import SweepFiles
 
+    controller = window.controller
     with tempfile.TemporaryDirectory(prefix="mag-opt-smoke-") as tmp:
         zero, field = _write_sweep(Path(tmp))
-        window.data_panel.sample.zero_list.set_paths(zero)
-        window.data_panel.sample.field_list.set_paths(field)
+        controller.set_processing(sample_files=SweepFiles(tuple(zero), tuple(field)))
         errors: list[str] = []
-        window.report_error = lambda title, message: errors.append(f"{title}: {message}")
-        window.process_data()
-        if errors or window.result is None:
+        window.report_error = lambda title, message, **_kw: errors.append(f"{title}: {message}")
+        window.commands["process"].trigger()
+        if errors or controller.result is None:
             raise RuntimeError("; ".join(errors) or "processing produced no result")
-        for kind, button in window.plot_panel.kind_buttons.items():
-            button.click()
-            if window.plot_panel.color_map.image.image is None:
-                raise RuntimeError(f"no image for {PlotKind(kind)}")
+        image = window.plots.map.image
+        for kind in window.toolbar.kind.options():
+            window.toolbar.kind.set_value(kind)
+            if image.image is None:
+                raise RuntimeError(f"no image for {kind}")
+        for unit in reversed(window.toolbar.unit.options()):
+            window.toolbar.unit.set_value(unit)
+            if controller.unit != unit or window.plots.map.image.image is None:
+                raise RuntimeError(f"the plots did not switch to {unit}")
         if errors:
             raise RuntimeError("; ".join(errors))
     logger.info("Smoke test passed: %d field spectra processed.", len(field))

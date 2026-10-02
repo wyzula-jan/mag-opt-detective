@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QSignalBlocker, Qt, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
     QGridLayout,
@@ -16,7 +16,11 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from mag_opt_detective.core.units import Unit, from_cm1, to_cm1
+from mag_opt_detective.gui.widgets import parse_float
+
 N_SLOTS = 16
+CM1_ROLE = Qt.ItemDataRole.UserRole  # E min / E max cells keep cm^-1 here (None = no cut)
 
 
 # table columns
@@ -25,7 +29,11 @@ HEADERS = ["Use", "Dataset", "E min", "E max", "B min", "B max"]
 
 
 class ProcessedTab(QWidget):
-    """Table of slots (use, name, energy and field cut) plus the actions working on them."""
+    """Table of slots (use, name, energy and field cut) plus the actions working on them.
+
+    The E min / E max cells are typed in the display unit (:meth:`set_unit`) and kept in cm^-1,
+    so switching the unit only changes how they are shown.
+    """
 
     loadRequested = Signal(int)
     saveRequested = Signal(int)
@@ -36,6 +44,7 @@ class ProcessedTab(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self._unit = Unit.CM1
         layout = QVBoxLayout(self)
         grid = QGridLayout()
 
@@ -100,6 +109,7 @@ class ProcessedTab(QWidget):
             for col in (COL_EMIN, COL_EMAX, COL_BMIN, COL_BMAX):
                 self.table.setItem(row, col, QTableWidgetItem(""))
         self.table.currentCellChanged.connect(lambda row, *_: self.slot_spin.setValue(max(row, 0)))
+        self.table.itemChanged.connect(self._on_item_changed)
         layout.addWidget(self.table, stretch=1)
 
         self.load_button.clicked.connect(lambda: self.loadRequested.emit(self.slot()))
@@ -143,7 +153,13 @@ class ProcessedTab(QWidget):
         return values[0], values[1]
 
     def energy_range(self, slot: int) -> tuple[float | None, float | None]:
-        """E min / E max as typed (in the panel's energy unit; None = no cut)."""
+        """E min / E max of *slot* in cm^-1 (None = no cut)."""
+        self._range(slot, (COL_EMIN, COL_EMAX), ("E min", "E max"))  # report bad text
+        lo, hi = (self.table.item(slot, col).data(CM1_ROLE) for col in (COL_EMIN, COL_EMAX))
+        return lo, hi
+
+    def shown_energy_range(self, slot: int) -> tuple[float | None, float | None]:
+        """E min / E max as typed, in the display unit."""
         return self._range(slot, (COL_EMIN, COL_EMAX), ("E min", "E max"))
 
     def field_range(self, slot: int) -> tuple[float | None, float | None]:
@@ -154,7 +170,32 @@ class ProcessedTab(QWidget):
             self.table.item(slot, col).setText("" if value is None else f"{value:g}")
 
     def set_energy_range(self, slot: int, lo: float | None, hi: float | None) -> None:
+        """Set E min / E max in the display unit."""
         self._set_range(slot, (COL_EMIN, COL_EMAX), lo, hi)
+
+    # --- display unit ------------------------------------------------------------------
+    def unit(self) -> Unit:
+        return self._unit
+
+    def set_unit(self, unit: Unit | str) -> None:
+        """Show the energy limits in *unit* (they are kept in cm^-1)."""
+        self._unit = Unit(unit)
+        with QSignalBlocker(self.table):
+            for row in range(N_SLOTS):
+                for col in (COL_EMIN, COL_EMAX):
+                    item = self.table.item(row, col)
+                    value = item.data(CM1_ROLE)
+                    if value is not None:
+                        item.setText(f"{float(from_cm1(value, self._unit)):.6g}")
+        self.table.viewport().update()
+
+    def _on_item_changed(self, item: QTableWidgetItem) -> None:
+        if item.column() not in (COL_EMIN, COL_EMAX):
+            return
+        value = parse_float(item.text())
+        cm1 = None if value is None else float(to_cm1(value, self._unit))
+        with QSignalBlocker(self.table):
+            item.setData(CM1_ROLE, cm1)
 
     def set_field_range(self, slot: int, lo: float | None, hi: float | None) -> None:
         self._set_range(slot, (COL_BMIN, COL_BMAX), lo, hi)

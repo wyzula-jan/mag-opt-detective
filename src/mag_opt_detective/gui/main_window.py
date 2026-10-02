@@ -1,8 +1,12 @@
-"""Main window: wires the panels to the processing core."""
+"""Main window: the frame (toolbar, rail, panels, plot area, inspector, log, status bar).
+
+The window only builds the frame; the area modules (``plot_panel``, ``console``,
+``panels.*``, ``inspector.*``) put their widgets into it, wire them to the
+:class:`~mag_opt_detective.gui.controller.AppController` and bind their own settings.
+"""
 
 from __future__ import annotations
 
-import functools
 import logging
 import platform
 from pathlib import Path
@@ -11,264 +15,679 @@ import numpy as np
 import pyqtgraph as pg
 import scipy
 from PySide6 import __version__ as pyside_version
-from PySide6.QtCore import QSettings, Qt, qVersion
-from PySide6.QtGui import QAction, QKeySequence
-from PySide6.QtWidgets import QMainWindow, QMessageBox, QSplitter
+from PySide6.QtCore import QRectF, QSettings, QSize, Qt, qVersion
+from PySide6.QtGui import QAction, QActionGroup, QKeySequence, QPainter
+from PySide6.QtWidgets import (
+    QHBoxLayout,
+    QLabel,
+    QMainWindow,
+    QMenu,
+    QMessageBox,
+    QPushButton,
+    QScrollArea,
+    QSizePolicy,
+    QSplitter,
+    QSplitterHandle,
+    QStackedWidget,
+    QToolButton,
+    QVBoxLayout,
+    QWidget,
+)
 
 from mag_opt_detective import __version__
-from mag_opt_detective.core.models import dirac_interband
-from mag_opt_detective.core.pipeline import (
-    PlotKind,
-    ProcessOptions,
-    ProcessResult,
-    ReferenceMode,
-    process,
-)
-from mag_opt_detective.core.points import PointTable
-from mag_opt_detective.core.processing import (
-    average_maps,
-    crop_energy,
-    crop_field,
-    merge_energy,
-    merge_field,
-)
-from mag_opt_detective.core.readers import Measurement, load_measurement
-from mag_opt_detective.core.spectra import FieldMap, load_tsv, save_tsv
-from mag_opt_detective.core.units import Range, Unit, convert, convert_range, from_cm1, to_cm1
-from mag_opt_detective.gui.console import QtLogHandler
-from mag_opt_detective.gui.data_panel import DataPanel
-from mag_opt_detective.gui.measurement_tab import MeasurementTab
-from mag_opt_detective.gui.plot_panel import PlotPanel
+from mag_opt_detective.core.units import Unit
+from mag_opt_detective.gui import console, icons, plot_panel
+from mag_opt_detective.gui.controller import AppController
+from mag_opt_detective.gui.inspector import overlays, view
+from mag_opt_detective.gui.kit import CollapsibleSection, InfoBar, SegmentedControl, SlidePanel
+from mag_opt_detective.gui.panels import PanelPage, library, points, processing, reference, sample
 from mag_opt_detective.gui.settings import Persistence
-from mag_opt_detective.gui.tools_tab import PointMode, level_key
-from mag_opt_detective.gui.widgets import (
-    IMAGE_FILTER,
-    last_dir,
-    open_file,
-    save_file,
-    set_last_dir,
-)
+from mag_opt_detective.gui.theme import SCHEMES, Theme, current_theme, current_tokens
+from mag_opt_detective.gui.widgets import FlowLayout, Separator, last_dir, set_last_dir
 
 logger = logging.getLogger("mag_opt_detective")
 
-EXPORT_NAMES = {
-    PlotKind.RATIO: "Ratio",
-    PlotKind.DATA: "Data",
-    PlotKind.AVERAGE: "Ratio_AVR",
-    PlotKind.STEP: "Ratio_Step",
-}
-ORDER_SUFFIX = {0: "", 1: "_1stDer", 2: "_2ndDer"}
-PER_UNIT_SUFFIX = "_perUnit"
+SIDE_WIDTH, INSPECTOR_WIDTH, LOG_HEIGHT = 292, 300, 180
 
 SHORTCUTS = [
-    ("Ctrl+F", "Process"),
-    ("Ctrl+E", "Export current plot"),
+    ("Ctrl+Return (or Ctrl+F)", "Process"),
+    ("Ctrl+E", "Export the shown data as a table"),
     ("Ctrl+Shift+E", "Save the visible plot as an image"),
-    ("Ctrl+L / Ctrl+Shift+L", "Load sample field / zero-field files"),
+    ("Ctrl+L / Ctrl+Shift+L", "Open sample field / zero-field files"),
     ("Ctrl+R / Ctrl+Shift+R", "Load reference field / zero-field files"),
     ("Ctrl+1 / 2 / 3 / 4", "Plot R(B)/R(0) / Data / R(B)/R(B-AVR) / R(B)/R(B-ΔB)"),
     ("Alt+1 / 2 / 3", "No / 1st / 2nd derivative"),
+    ("V / Z / P", "Pan and zoom / box zoom / pick points"),
+    ("A", "Fit the plot to the data"),
 ]
+KINDS = (
+    ("Ratio", "R(B)/R(0)", "Ctrl+1"),
+    ("Data", "Data", "Ctrl+2"),
+    ("Ratio_AVR", "R(B)/R(B-AVR)", "Ctrl+3"),
+    ("Ratio_Step", "R(B)/R(B-ΔB)", "Ctrl+4"),
+)
+ORDERS = (("0", "Off", "Alt+1"), ("1", "1st", "Alt+2"), ("2", "2nd", "Alt+3"))
+UNITS = ((Unit.CM1, "cm⁻¹"), (Unit.MEV, "meV"), (Unit.THZ, "THz"))
+SCHEME_ICONS = {"system": "contrast", "light": "sun", "dark": "moon"}
 
 
-def user_action(title: str):
-    """Run a slot, logging and reporting expected errors instead of crashing."""
+def _paint_dot(widget: QWidget, token: str = "warn", size: float = 9.0) -> None:
+    """A status dot in the top-right corner of *widget*."""
+    tokens = current_tokens()
+    painter = QPainter(widget)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    rect = QRectF(widget.width() - size - 2, 2, size, size)
+    painter.setPen(tokens["win"])
+    painter.setBrush(tokens[token])
+    painter.drawEllipse(rect)
+    painter.end()
 
-    def decorator(method):
-        @functools.wraps(method)
-        def wrapper(self, *args, **kwargs):
-            try:
-                return method(self, *args, **kwargs)
-            except (ValueError, OSError, KeyError) as exc:
-                self.report_error(title, str(exc))
-            except Exception as exc:
-                logger.exception("%s failed", title)
-                self.report_error(title, f"Unexpected error: {exc!r}")
-            return None
 
-        return wrapper
+class _ProcessButton(QPushButton):
+    """The primary Process button; a dot marks settings changed since the last run."""
 
-    return decorator
+    def __init__(self, parent=None):
+        super().__init__("Process", parent)
+        self.setProperty("kit", "primary")
+        icons.set_icon(self, "play", "accent-fg")
+        self.dot = False
+
+    def set_dot(self, dot: bool) -> None:
+        self.dot = dot
+        self.update()
+
+    def paintEvent(self, event) -> None:
+        super().paintEvent(event)
+        if self.dot:
+            _paint_dot(self)
+
+
+class _RailButton(QToolButton):
+    """A rail button: icon above a short label; a dot marks a panel that needs attention."""
+
+    def __init__(self, icon: str, text: str, tooltip: str, parent=None):
+        super().__init__(parent)
+        self.setProperty("kit", "rail")
+        self.setCheckable(True)
+        self.setText(text)
+        self.setToolTip(tooltip)
+        self.setAccessibleName(text)
+        self.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
+        self.setIconSize(QSize(20, 20))
+        self.setFixedWidth(58)
+        font = self.font()
+        if font.pointSizeF() > 0:
+            font.setPointSizeF(font.pointSizeF() * 0.82)
+        self.setFont(font)
+        icons.set_icon(self, icon, "muted", on_color="accent")
+        self.badge = False
+
+    def set_badge(self, badge: bool) -> None:
+        self.badge = badge
+        self.update()
+
+    def paintEvent(self, event) -> None:
+        super().paintEvent(event)
+        if self.badge:
+            _paint_dot(self, size=8.0)
+
+
+class _Pane(QWidget):
+    """A plain widget filled with a theme colour (rail, panels)."""
+
+    def __init__(self, token: str = "win", parent=None):
+        super().__init__(parent)
+        self._token = token
+
+    def paintEvent(self, event) -> None:
+        painter = QPainter(self)
+        painter.fillRect(self.rect(), current_tokens()[self._token])
+        painter.end()
+
+
+class _LineHandle(QSplitterHandle):
+    def paintEvent(self, event) -> None:
+        tokens = current_tokens()
+        painter = QPainter(self)
+        painter.fillRect(self.rect(), tokens["win"])
+        rect = self.rect()
+        if self.orientation() == Qt.Orientation.Horizontal:
+            painter.fillRect(rect.center().x(), 0, 1, rect.height(), tokens["line"])
+        else:
+            painter.fillRect(0, rect.center().y(), rect.width(), 1, tokens["line"])
+        painter.end()
+
+
+class _Splitter(QSplitter):
+    """Splitter whose handles are drawn as one-pixel lines."""
+
+    def __init__(self, orientation, parent=None):
+        super().__init__(orientation, parent)
+        self.setHandleWidth(5)
+
+    def createHandle(self) -> QSplitterHandle:
+        return _LineHandle(self.orientation(), self)
+
+
+def _group(*widgets: QWidget, label: str | None = None) -> QWidget:
+    box = QWidget()
+    row = QHBoxLayout(box)
+    row.setContentsMargins(0, 0, 0, 0)
+    row.setSpacing(5)
+    if label:
+        text = QLabel(label)
+        text.setProperty("kit", "muted")
+        row.addWidget(text)
+    for widget in widgets:
+        row.addWidget(widget)
+    return box
+
+
+def _segmented(options, name: str) -> SegmentedControl:
+    control = SegmentedControl(size="sm")
+    for value, text, tooltip in options:
+        control.add_option(value, text, tooltip)
+    control.setAccessibleName(name)
+    return control
+
+
+class MainToolbar(QWidget):
+    """Open, Process, the plot selection, the energy unit, Export and Appearance.
+
+    The groups wrap onto a second row when the window is narrow.
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.open_button = QPushButton("Open sweep…")
+        self.open_button.setToolTip("Open the in-field files of a sweep (Ctrl+L)")
+        icons.set_icon(self.open_button, "folder-open")
+        self.process_button = _ProcessButton()
+        self.kind = _segmented([(v, t, f"{t} ({k})") for v, t, k in KINDS], "Plot")
+        self.order = _segmented([(v, t, k) for v, t, k in ORDERS], "Derivative")
+        self.axis = _segmented(
+            [("E", "d/dE", "Along energy"), ("B", "d/dB", "Along field")], "Derivative axis"
+        )
+        self.per_unit = QToolButton()
+        self.per_unit.setProperty("kit", "tool")
+        self.per_unit.setCheckable(True)
+        self.per_unit.setText("per unit")
+        self.per_unit.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
+        self.per_unit.setToolTip(
+            "Divide by the real step: d/dE per energy unit or d/dB per tesla.\n"
+            "Off: per data point, as in the old versions."
+        )
+        self.unit = _segmented([(u.value, t, f"Show energies in {t}") for u, t in UNITS], "Unit")
+        self.unit.setToolTip("Energy unit of the plots, ranges, points and exports")
+
+        self.export_button = QToolButton()
+        self.export_button.setText("Export")
+        self.export_button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        self.export_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        icons.set_icon(self.export_button, "download")
+        self.export_menu = QMenu(self.export_button)
+        self.export_button.setMenu(self.export_menu)
+        self.appearance = QToolButton()  # cycles System -> Light -> Dark
+        self.appearance.setProperty("kit", "tool")
+        self.appearance.setIconSize(QSize(18, 18))
+
+        flow_box = QWidget()
+        flow = FlowLayout(flow_box, spacing=8, row_spacing=8)
+        flow.addWidget(_group(self.open_button, self.process_button))
+        flow.addWidget(_group(self.kind, label="Plot"))
+        flow.addWidget(_group(self.order, self.axis, self.per_unit, label="Derivative"))
+        flow.addWidget(_group(self.unit, label="Unit"))
+        flow_box.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        row = QHBoxLayout(self)
+        row.setContentsMargins(10, 8, 10, 8)
+        row.setSpacing(8)
+        row.addWidget(flow_box, stretch=1)
+        row.addWidget(_group(self.export_button, self.appearance), 0, Qt.AlignmentFlag.AlignTop)
+
+
+class AppearanceSetting:
+    """Settings protocol for the appearance (the theme's scheme)."""
+
+    def __init__(self, window: MainWindow):
+        self.window = window
+
+    def settings_value(self) -> str:
+        return self.window.theme.scheme()
+
+    def set_settings_value(self, value) -> bool:
+        if value not in SCHEMES:
+            return False
+        self.window.set_appearance(value)
+        return True
+
+
+class PanelSetting:
+    """Settings protocol for the panel shown in the side panel (by name)."""
+
+    def __init__(self, window: MainWindow):
+        self.window = window
+
+    def settings_value(self) -> str:
+        return self.window.current_panel()
+
+    def set_settings_value(self, value) -> bool:
+        if value not in self.window.panels:
+            return False
+        self.window.show_panel(value, open=None)
+        return True
 
 
 class MainWindow(QMainWindow):
     """The application window.
 
-    *settings*: where choices are remembered between sessions; None keeps nothing
-    (used by tests). The application passes the user's settings store.
+    *settings*: where choices are remembered between sessions; None keeps nothing (tests).
+    *theme*: the application's :class:`Theme`; without one the window uses the applied theme,
+    or makes its own (not applied to the application) for the plot colours and Appearance.
+
+    Accessors for the area modules: ``controller``, ``persistence``, ``theme``, ``tools``,
+    ``panels`` (name -> panel widget), ``inspector`` (name -> section), ``plots`` (map,
+    stacked, reference), ``infobar``, ``commands`` (name -> QAction), ``toolbar``, ``rail``
+    and the slide panels ``side_panel``, ``inspector_panel`` and ``log_panel``.
     """
 
-    def __init__(self, parent=None, settings: QSettings | None = None):
+    def __init__(self, parent=None, settings: QSettings | None = None, theme: Theme | None = None):
         super().__init__(parent)
         self.setWindowTitle(f"Magneto-Optical Detective {__version__}")
         self.resize(1400, 900)
-
-        self.result: ProcessResult | None = None
-        self.shown_unit = Unit.CM1  # energy unit the result is shown in, see display_unit()
-        self.points: PointTable | None = None
-        self.slots: dict[int, FieldMap] = {}
-
-        self.data_panel = DataPanel()
-        self.plot_panel = PlotPanel()
-        self.main_splitter = QSplitter(Qt.Orientation.Horizontal)
-        self.main_splitter.addWidget(self.data_panel)
-        self.main_splitter.addWidget(self.plot_panel)
-        self.main_splitter.setStretchFactor(0, 0)
-        self.main_splitter.setStretchFactor(1, 1)
-        self.main_splitter.setSizes([460, 940])
-        self.setCentralWidget(self.main_splitter)
-        self.statusBar()
-
-        self._log_handler = QtLogHandler(self.data_panel.console)
-        logger.addHandler(self._log_handler)
-        logger.setLevel(logging.INFO)
-
-        self.limits_page = self.data_panel.tools.limits_page
-        self.corrections = self.data_panel.tools.corrections_page
-        self.models_page = self.data_panel.tools.models_page
-        self.point_model = self.corrections.model
-
+        self.controller = AppController(self)
         self.persistence = Persistence(settings) if settings is not None else None
+        self.theme = theme or current_theme() or Theme("system", self)
         self.geometry_restored = False
+        self._shown = False
+        self.commands: dict[str, QAction] = {}
+        self.panels: dict[str, QWidget] = {}
+        self.panel_pages: dict[str, PanelPage] = {}
+        self.inspector: dict[str, CollapsibleSection] = {}
+        self.splitters: dict[str, QSplitter] = {}
+        self._rail_buttons: dict[str, _RailButton] = {}
+        self._panel = ""
+        self.infobar = InfoBar()
+
         self._create_actions()
-        self._connect()
+        self._build_frame()
+        self._create_menus()
+        plot_panel.install(self)
+        console.install(self)
+        for module in (sample, reference, processing, library, points):
+            module.install(self)
+        for module in (view, overlays):
+            module.install(self)
+        self._wire_frame()
+        self.show_panel(next(iter(self.panels)), open=None)
         if self.persistence is not None:
             self._bind_settings()
             self.restore_settings()
 
-    # ------------------------------------------------------------------ setup
-    def _action(self, text: str, slot, shortcut: str | QKeySequence | None = None) -> QAction:
+    # ------------------------------------------------------------------ frame
+    def _action(self, name: str, text: str, shortcuts=(), slot=None) -> QAction:
         action = QAction(text, self)
-        if shortcut is not None:
-            action.setShortcut(QKeySequence(shortcut))
-        action.triggered.connect(lambda _checked=False: slot())
+        action.setShortcuts([QKeySequence(s) for s in shortcuts])
+        if slot is not None:
+            action.triggered.connect(lambda _checked=False: slot())
         self.addAction(action)
+        self.commands[name] = action
         return action
 
     def _create_actions(self) -> None:
-        dp = self.data_panel
-        self.process_action = self._action("&Process", self.process_data, "Ctrl+F")
-        self.export_action = self._action("&Export Current Plot…", self.export_current, "Ctrl+E")
-        self.image_action = self._action("Save Plot &Image…", self.save_image, "Ctrl+Shift+E")
-        load_actions = [
-            self._action("Load Sample Field…", dp.sample.load_field_dialog, "Ctrl+L"),
-            self._action("Load Sample Zero Field…", dp.sample.load_zero_dialog, "Ctrl+Shift+L"),
-            self._action("Load Reference Field…", dp.reference.load_field_dialog, "Ctrl+R"),
-            self._action(
-                "Load Reference Zero Field…", dp.reference.load_zero_dialog, "Ctrl+Shift+R"
-            ),
-        ]
-        quit_action = self._action("&Quit", self.close, QKeySequence.StandardKey.Quit)
+        process = self._action("process", "&Process", ("Ctrl+Return", "Ctrl+Enter", "Ctrl+F"))
+        process.setToolTip("Process the loaded files (Ctrl+Return)")
+        table = self._action("export_table", "Data table…", ("Ctrl+E",))
+        icons.set_icon(table, "file-text")
+        image = self._action("export_image", "Image (PNG, SVG)…", ("Ctrl+Shift+E",))
+        icons.set_icon(image, "image")
+        suffix = self._action("export_suffix", "Add plot type to the file name")
+        suffix.setCheckable(True)
+        suffix.setChecked(True)
+        self._action("quit", "&Quit", (QKeySequence.StandardKey.Quit,), self.close)
 
+    def _build_frame(self) -> None:
+        self.toolbar = MainToolbar()
+        tb = self.toolbar
+        tb.process_button.clicked.connect(self.commands["process"].trigger)
+        tb.export_menu.addAction(self.commands["export_table"])
+        tb.export_menu.addAction(self.commands["export_image"])
+        tb.export_menu.addSeparator()
+        tb.export_menu.addAction(self.commands["export_suffix"])
+        group = QActionGroup(self)
+        self._scheme_actions: dict[str, QAction] = {}
+        for scheme in SCHEMES:
+            action = QAction(scheme.capitalize(), self, checkable=True)
+            icons.set_icon(action, SCHEME_ICONS[scheme])
+            action.triggered.connect(lambda _checked=False, s=scheme: self.set_appearance(s))
+            group.addAction(action)
+            self._scheme_actions[scheme] = action
+        tb.appearance.clicked.connect(self.cycle_appearance)
+        self._sync_appearance()
+
+        self.rail = _Pane("sunken")
+        self.rail.setFixedWidth(64)
+        self._rail_layout = QVBoxLayout(self.rail)
+        self._rail_layout.setContentsMargins(3, 8, 3, 8)
+        self._rail_layout.setSpacing(4)
+        self._rail_layout.addStretch(1)
+
+        self._side_stack = QStackedWidget()
+        side = _Pane("win")
+        QVBoxLayout(side).setContentsMargins(0, 0, 0, 0)
+        side.layout().addWidget(self._side_stack)
+        self.side_panel = SlidePanel(side, SIDE_WIDTH)
+
+        self.stage = QWidget()
+        stage_layout = QVBoxLayout(self.stage)
+        stage_layout.setContentsMargins(0, 0, 0, 0)
+        stage_layout.setSpacing(0)
+        log = _Pane("win")
+        log_layout = QVBoxLayout(log)
+        log_layout.setContentsMargins(0, 0, 0, 0)
+        log_layout.setSpacing(0)
+        self.log_panel = SlidePanel(log, LOG_HEIGHT)
+        self.log_panel.set_open(False, animate=False)
+        self.stage_splitter = _Splitter(Qt.Orientation.Vertical)
+        self.stage_splitter.addWidget(self.stage)
+        self.stage_splitter.addWidget(self.log_panel)
+        self.stage_splitter.setStretchFactor(0, 1)
+        self.stage_splitter.setCollapsible(0, False)
+
+        inspector = QWidget()
+        inspector_layout = QVBoxLayout(inspector)
+        inspector_layout.setContentsMargins(0, 0, 0, 0)
+        inspector_layout.setSpacing(0)
+        head = QWidget()
+        head_layout = QVBoxLayout(head)
+        head_layout.setContentsMargins(14, 12, 14, 10)
+        head_layout.setSpacing(2)
+        self._inspector_title = QLabel("Map")
+        font = self._inspector_title.font()
+        font.setBold(True)
+        self._inspector_title.setFont(font)
+        hint = QLabel("Settings for the plot on screen")
+        hint.setProperty("kit", "muted")
+        head_layout.addWidget(self._inspector_title)
+        head_layout.addWidget(hint)
+        inspector_layout.addWidget(head)
+        inspector_layout.addWidget(Separator())
+        self._inspector_layout = QVBoxLayout()
+        self._inspector_layout.setSpacing(0)
+        inspector_layout.addLayout(self._inspector_layout)
+        inspector_layout.addStretch(1)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setWidget(inspector)
+        self.inspector_panel = SlidePanel(scroll, INSPECTOR_WIDTH)
+
+        self.body_splitter = _Splitter(Qt.Orientation.Horizontal)
+        self.body_splitter.addWidget(self.side_panel)
+        self.body_splitter.addWidget(self.stage_splitter)
+        self.body_splitter.addWidget(self.inspector_panel)
+        self.body_splitter.setStretchFactor(1, 1)
+        self.body_splitter.setCollapsible(1, False)
+        self.add_splitter("body", self.body_splitter)
+        self.add_splitter("stage", self.stage_splitter)
+
+        central = QWidget()
+        layout = QVBoxLayout(central)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        layout.addWidget(self.toolbar)
+        layout.addWidget(Separator())
+        row = QHBoxLayout()
+        row.setSpacing(0)
+        row.addWidget(self.rail)
+        row.addWidget(Separator(Qt.Orientation.Vertical))
+        row.addWidget(self.body_splitter, stretch=1)
+        layout.addLayout(row, stretch=1)
+        self.setCentralWidget(central)
+
+        status = self.statusBar()
+        self._state_label = QLabel()
+        self._summary_label = QLabel()
+        self._summary_label.setProperty("kit", "muted")
+        self._summary_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        self._cursor_label = QLabel()
+        self._cursor_label.setProperty("kit", "muted")
+        status.addWidget(self._state_label)
+        status.addWidget(self._summary_label, stretch=1)
+        status.addPermanentWidget(self._cursor_label)
+
+    def _create_menus(self) -> None:
         file_menu = self.menuBar().addMenu("&File")
-        for action in load_actions:
-            file_menu.addAction(action)
+        self._file_menu = file_menu
+        self._file_anchor = file_menu.addSeparator()
+        file_menu.addAction(self.commands["process"])
+        file_menu.addAction(self.commands["export_table"])
+        file_menu.addAction(self.commands["export_image"])
         file_menu.addSeparator()
-        file_menu.addAction(self.process_action)
-        file_menu.addAction(self.export_action)
-        file_menu.addAction(self.image_action)
-        file_menu.addSeparator()
-        file_menu.addAction(quit_action)
+        file_menu.addAction(self.commands["quit"])
 
         view_menu = self.menuBar().addMenu("&View")
-        view_menu.addAction(self._action("&Center Window", self.center_on_screen))
-        reset = self._action("&Reset Settings", self.reset_settings)
+        appearance = view_menu.addMenu("&Appearance")
+        for action in self._scheme_actions.values():
+            appearance.addAction(action)
+        center = QAction("&Center Window", self)
+        center.triggered.connect(self.center_on_screen)
+        view_menu.addAction(center)
+        reset = QAction("&Reset Settings", self)
+        reset.triggered.connect(self.reset_settings)
         reset.setEnabled(self.persistence is not None)
         view_menu.addAction(reset)
 
         help_menu = self.menuBar().addMenu("&Help")
-        help_menu.addAction(self._action("&Shortcuts", self.show_shortcuts))
-        help_menu.addAction(self._action("&About", self.show_about))
+        shortcuts = QAction("&Shortcuts", self)
+        shortcuts.triggered.connect(self.show_shortcuts)
+        about = QAction("&About", self)
+        about.triggered.connect(self.show_about)
+        help_menu.addAction(shortcuts)
+        help_menu.addAction(about)
 
-    def _connect(self) -> None:
-        dp, pp = self.data_panel, self.plot_panel
-        dp.process_button.clicked.connect(self.process_action.trigger)
-        dp.export_button.clicked.connect(self.export_action.trigger)
+    def _wire_frame(self) -> None:
+        c, tb = self.controller, self.toolbar
+        tb.unit.valueChanged.connect(c.set_unit)
 
-        pp.selectionChanged.connect(self.replot)
-        pp.referenceSelectionChanged.connect(self.plot_reference)
-        self.limits_page.changed.connect(self.replot_all)
-        self.models_page.changed.connect(self.update_model_overlay)
-        pp.color_map.pointClicked.connect(self.on_point_clicked)
-        pp.color_map.levelsEdited.connect(self.on_levels_edited)
-        pp.reference_map.levelsEdited.connect(self.on_reference_levels_edited)
+        for value, _text, shortcut in KINDS:
+            self._shortcut(shortcut, lambda v=value: tb.kind.set_value(v))
+        for value, _text, shortcut in ORDERS:
+            self._shortcut(shortcut, lambda v=value: tb.order.set_value(v))
 
-        c = self.corrections
-        c.show_all_button.toggled.connect(self.update_point_markers)
-        c.column_name.editingFinished.connect(self.update_point_markers)
-        c.drop_button.clicked.connect(self.drop_curve)
-        c.load_button.clicked.connect(self.load_points)
-        c.export_button.clicked.connect(self.export_points)
+        def on_order(value: str) -> None:
+            derivative = value != "0"
+            for option in tb.axis.options():
+                tb.axis.set_option_enabled(option, derivative)
+            tb.per_unit.setEnabled(derivative)
 
-        pt = dp.processed
-        pt.loadRequested.connect(self.load_slot)
-        pt.saveRequested.connect(self.save_slot)
-        pt.plotRequested.connect(self.plot_slot)
-        pt.mergeEnergyRequested.connect(self.merge_slots)
-        pt.mergeFieldRequested.connect(self.merge_slots_by_field)
-        pt.averageRequested.connect(self.average_slots)
+        tb.order.valueChanged.connect(on_order)
+        on_order(tb.order.value())
+
+        c.changedSinceProcess.connect(self._sync_state)
+        c.resultChanged.connect(self._sync_state)
+        c.unitChanged.connect(lambda _old, _new: self._sync_state())
+        self.theme.changed.connect(self._sync_state)
+        self.theme.changed.connect(self._sync_appearance)
+        self._sync_state()
+        self.side_panel.openChanged.connect(lambda _open: self._sync_rail())
+
+    def _shortcut(self, key: str, slot) -> None:
+        action = QAction(self)
+        action.setShortcut(QKeySequence(key))
+        action.triggered.connect(lambda _checked=False: slot())
+        self.addAction(action)
+
+    def _bind_settings(self) -> None:
+        bind, tb = self.persistence.bind, self.toolbar
+        bind("window/appearance", AppearanceSetting(self))
+        bind("window/panel", PanelSetting(self))
+        bind("view/unit", tb.unit)
+        bind("plot/kind", tb.kind)
+        bind("plot/order", tb.order)
+        bind("plot/axis", tb.axis)
+        bind("plot/per_unit", tb.per_unit)
+
+    # ------------------------------------------------------------------ areas
+    def add_panel(
+        self,
+        name: str,
+        title: str,
+        icon: str,
+        tooltip: str,
+        widget: QWidget,
+        subtitle: str = "",
+        rail_text: str | None = None,
+    ) -> PanelPage:
+        """Add a rail button and its panel; returns the page (header and scrolling content)."""
+        page = PanelPage(title, subtitle, widget)
+        self._side_stack.addWidget(page)
+        button = _RailButton(icon, rail_text or title, tooltip)
+        button.clicked.connect(lambda _checked=False, n=name: self._on_rail(n))
+        self._rail_layout.insertWidget(self._rail_layout.count() - 1, button)
+        self.panels[name] = widget
+        self.panel_pages[name] = page
+        self._rail_buttons[name] = button
+        return page
+
+    def current_panel(self) -> str:
+        return self._panel
+
+    def show_panel(self, name: str, open: bool | None = True) -> None:
+        """Show panel *name* in the side panel; *open*: also open (True) or leave it (None)."""
+        self._side_stack.setCurrentWidget(self.panel_pages[name])
+        self._panel = name
+        if open:
+            self.side_panel.set_open(True)
+        self._sync_rail()
+
+    def _on_rail(self, name: str) -> None:
+        if name == self._panel and self.side_panel.is_open():
+            self.side_panel.set_open(False)
+        else:
+            self.show_panel(name)
+        self._sync_rail()
+
+    def _sync_rail(self) -> None:
+        for name, button in self._rail_buttons.items():
+            button.setChecked(self.side_panel.is_open() and name == self._panel)
+
+    def add_inspector_section(
+        self, name: str, title: str, widget: QWidget, expanded: bool = True
+    ) -> CollapsibleSection:
+        section = CollapsibleSection(title, expanded=expanded)
+        section.body_layout().addWidget(widget)
+        self._inspector_layout.addWidget(section)
+        self.inspector[name] = section
+        if self.persistence is not None:
+            self.persistence.bind(f"inspector/{name}_expanded", section)
+        return section
+
+    def set_inspector_title(self, text: str) -> None:
+        self._inspector_title.setText(text)
+
+    def add_splitter(self, key: str, splitter: QSplitter) -> None:
+        """Remember *splitter*'s layout between sessions (saveState under *key*)."""
+        self.splitters[key] = splitter
+
+    def add_file_action(self, action: QAction) -> None:
+        """Add a file action (e.g. a load dialog) to the File menu, before Process."""
+        self._file_menu.insertAction(self._file_anchor, action)
+        self.addAction(action)
+
+    def set_cursor_text(self, text: str) -> None:
+        self._cursor_label.setText(text)
+
+    # ------------------------------------------------------------------ state
+    def _sync_state(self, *_args) -> None:
+        c = self.controller
+        tokens = current_tokens()
+        changed = c.changed_since_process()
+        self.toolbar.process_button.set_dot(changed)
+        if (button := self._rail_buttons.get("processing")) is not None:
+            button.set_badge(changed)
+        if c.result is None:
+            color, text = tokens["faint"], "Not processed yet"
+        elif changed:
+            color, text = tokens["warn"], "Settings changed - process again"
+        else:
+            stamp = c.processed_at.strftime("%H:%M") if c.processed_at else ""
+            color, text = tokens["ok"], f"Processed {stamp}"
+        self._state_label.setText(
+            f"<span style='color:{color.name()}'>●</span>&nbsp;"
+            f"<span style='color:{(tokens['warn'] if changed else tokens['fg']).name()}'>"
+            f"{text}</span>"
+        )
+        self.toolbar.process_button.setToolTip(
+            "Settings changed since the last run. Process again (Ctrl+Return)"
+            if changed
+            else "Process the loaded files (Ctrl+Return)"
+        )
+        self._summary_label.setText(self._summary())
+
+    def _summary(self) -> str:
+        c = self.controller
+        if c.result is None:
+            return ""
+        fmap = c.result.ratio.to_unit(c.unit)
+        b, e = fmap.field, fmap.energy
+        return (
+            f"{b.size} spectra · B {b.min():.4g} – {b.max():.4g} T · "
+            f"E {e.min():.4g} – {e.max():.4g} {c.unit}"
+        )
+
+    def summary_text(self) -> str:
+        return self._summary_label.text()
+
+    def state_text(self) -> str:
+        return self._state_label.text()
+
+    # ------------------------------------------------------------------ appearance
+    def set_appearance(self, scheme: str) -> None:
+        self.theme.set_scheme(scheme)
+        self._sync_appearance()
+
+    def cycle_appearance(self) -> None:
+        """System -> Light -> Dark -> System (the toolbar button)."""
+        self.set_appearance(SCHEMES[(SCHEMES.index(self.theme.scheme()) + 1) % len(SCHEMES)])
+
+    def _sync_appearance(self) -> None:
+        scheme = self.theme.scheme()
+        self._scheme_actions[scheme].setChecked(True)
+        button = self.toolbar.appearance
+        icons.set_icon(button, SCHEME_ICONS[scheme], "muted")
+        button.setToolTip(f"Appearance: {scheme.capitalize()} (click to change)")
+        button.setAccessibleName(f"Appearance: {scheme.capitalize()}")
+
+    # ------------------------------------------------------------------ errors
+    def report_error(
+        self, title: str, message: str, panel: str | None = None, expected: bool = True
+    ) -> None:
+        """Log an error; expected ones show in the bar above the plot, others in a dialog."""
+        logger.error("%s: %s", title, message)
+        if not expected:
+            QMessageBox.warning(self, title, message)
+            return
+        text = message[:1].upper() + message[1:]
+        if panel in self.panels:
+            title_of = self.panel_pages[panel].title.text()
+            self.infobar.show_message(
+                "error", f"{title} failed", text, f"Open {title_of}", lambda: self.show_panel(panel)
+            )
+        else:
+            self.infobar.show_message("error", f"{title} failed", text)
 
     # ------------------------------------------------------------------ settings
-    def _bind_settings(self) -> None:
-        bind = self.persistence.bind
-        dp, pp = self.data_panel, self.plot_panel
-        bind("data/field_source", dp.field_source)
-        bind("data/unit", dp.unit)
-        bind("data/export_type_suffix", dp.export_type_suffix)
-        for name, tab in (("sample", dp.sample), ("reference", dp.reference)):
-            box = tab.field_range
-            for part in ("start", "step", "end"):
-                bind(f"{name}/field_{part}", getattr(box, part))
-        ref = dp.reference
-        for attr in ("ref_none", "ref_separate", "ref_self", "smooth", "sg_window", "sg_poly"):
-            bind(f"reference/{attr}", getattr(ref, attr))
-
-        bind("tools/page", dp.tools.page_combo)
-        lp = self.limits_page
-        for attr in (
-            "field_auto", "field_custom", "field_min", "field_max",
-            "energy_auto", "energy_custom", "energy_cut", "energy_min", "energy_max",
-            "level_auto", "level_custom",
-            "stacked_auto", "stacked_custom", "stacked_min", "stacked_max",
-        ):  # fmt: skip
-            bind(f"limits/{attr}", getattr(lp, attr))
-        for key, (lo, hi) in lp.level_edits.items():
-            bind(f"limits/levels_{key}_min", lo)
-            bind(f"limits/levels_{key}_max", hi)
-        c = self.corrections
-        for attr in ("baseline_off", "baseline_on", "baseline_min", "baseline_max", "column_name"):
-            bind(f"corrections/{attr}", getattr(c, attr))
-        mp = self.models_page
-        bind("models/show_dirac", mp.show_dirac)
-        bind("models/velocity", mp.velocity.spin)
-        bind("models/delta", mp.delta.spin)
-        bind("models/n_lines", mp.n_lines)
-        bind("processed/full_energy", dp.processed.full_energy)
-        bind("processed/auto_field", dp.processed.auto_field)
-
-        for kind, button in pp.kind_buttons.items():
-            bind(f"plot/kind_{kind}", button)
-        for order, button in pp.order_buttons.items():
-            bind(f"plot/order_{order}", button)
-        bind("plot/axis", pp.axis_combo)
-        bind("plot/per_unit", pp.per_unit)
-        bind("plot/colours", pp.cmap_combo)
-        bind("plot/stacked_enabled", pp.stacked_enabled)
-        bind("plot/offset", pp.offset)
-        bind("plot/reference_ratio", pp.ref_ratio)
-        bind("plot/reference_data", pp.ref_data)
-
     def restore_settings(self) -> None:
         p = self.persistence
-        p.restore()
+        if p is None:
+            return
+        with self.controller.restoring():
+            p.restore()
         if (geometry := p.bytes_value("window/geometry")) is not None:
             self.geometry_restored = self.restoreGeometry(geometry)
-        for key, splitter in (
-            ("window/main_splitter", self.main_splitter),
-            ("window/data_splitter", self.data_panel.splitter),
-        ):
-            if (state := p.bytes_value(key)) is not None:
-                splitter.restoreState(state)
+        for key, splitter in self.splitters.items():
+            p.restore_splitter(key, splitter)
         folder = p.value("files/last_dir")
         if isinstance(folder, str) and Path(folder).is_dir():
             set_last_dir(folder)
@@ -278,396 +697,25 @@ class MainWindow(QMainWindow):
         if p is None:
             return
         p.set_value("window/geometry", self.saveGeometry())
-        p.set_value("window/main_splitter", self.main_splitter.saveState())
-        p.set_value("window/data_splitter", self.data_panel.splitter.saveState())
+        if self._shown:  # a window never laid out has no meaningful sizes
+            for key, splitter in self.splitters.items():
+                p.save_splitter(key, splitter)
         p.set_value("files/last_dir", last_dir())
         p.save()
 
     def reset_settings(self) -> None:
         if self.persistence is None:
             return
-        self.persistence.reset()
-        self.main_splitter.setSizes([460, 940])
+        with self.controller.restoring():
+            self.persistence.reset()
+        self.side_panel.set_open(True, animate=False)
+        self.inspector_panel.set_open(True, animate=False)
+        self.log_panel.set_open(False, animate=False)
+        for panel in self.plot_area.scale_panels().values():
+            panel.set_open(True, animate=False)
         self.resize(1400, 900)
         self.center_on_screen()
         logger.info("Settings reset to the defaults.")
-
-    # ------------------------------------------------------------------ helpers
-    def report_error(self, title: str, message: str) -> None:
-        logger.error("%s: %s", title, message)
-        QMessageBox.warning(self, title, message)
-
-    def display_unit(self) -> Unit:
-        """Energy unit of the plots, exports and picked points.
-
-        Data are kept in cm^-1. The unit chosen in the panel applies to the energies
-        typed in (cut, baseline, slot ranges) and is shown from the next Process, slot
-        plot or merge on; without a result it is the panel's unit.
-        """
-        return self.shown_unit if self.result is not None else self.data_panel.energy_unit()
-
-    def _baseline_region(self, unit: Unit) -> Range | None:
-        """Baseline region of the Tools tab (typed in *unit*) in cm^-1."""
-        return convert_range(self.corrections.baseline_region(), unit, Unit.CM1)
-
-    def _load(self, tab: MeasurementTab, energy_cut: Range) -> Measurement:
-        """Load a sweep in cm^-1; *energy_cut* is in cm^-1."""
-        dp = self.data_panel
-        return load_measurement(
-            tab.zero_paths(),
-            tab.field_paths(),
-            field=tab.field_range.field() if dp.custom_field() else None,
-            energy_limits=energy_cut,
-        )
-
-    def _set_result(self, result: ProcessResult, unit: Unit) -> None:
-        """Show *result* (cm^-1) in energy *unit*."""
-        self.result = result
-        self.shown_unit = unit
-        self.point_model.set_unit(unit)
-        self._init_points_if_requested(result.ratio.field)
-        self.replot_all()
-
-    # ------------------------------------------------------------------ processing
-    @user_action("Process")
-    def process_data(self) -> None:
-        dp = self.data_panel
-        unit = dp.energy_unit()
-        energy_cut = convert_range(self.limits_page.limits().energy_cut, unit, Unit.CM1)
-        ref_tab = dp.reference
-        mode = ref_tab.reference_mode()
-        options = ProcessOptions(
-            reference_mode=mode,
-            smooth_reference=ref_tab.smooth.isChecked(),
-            sg_window=ref_tab.sg_window.value(),
-            sg_poly=ref_tab.sg_poly.value(),
-            baseline_region=self._baseline_region(unit),
-        )
-        logger.info("-" * 40)
-        sample = self._load(dp.sample, energy_cut)
-        spectra = sample.spectra
-        e_lo, e_hi = from_cm1(spectra.energy[[0, -1]], unit)
-        logger.info(
-            "Sample: %d spectra, B = %g … %g T, %d zero-field file(s), E = %.4g … %.4g %s",
-            spectra.field.size,
-            spectra.field.min(),
-            spectra.field.max(),
-            sample.zero.shape[1],
-            e_lo,
-            e_hi,
-            unit,
-        )
-        reference = None
-        if mode is ReferenceMode.SEPARATE:
-            reference = self._load(ref_tab, energy_cut)
-            logger.info(
-                "Reference: %d spectra interpolated onto the sample field",
-                reference.spectra.field.size,
-            )
-        elif mode is ReferenceMode.SELF:
-            logger.info("Using the data itself as reference.")
-        if options.smooth_reference and mode is not ReferenceMode.NONE:
-            logger.info(
-                "Reference smoothed (SG window %d, order %d).", options.sg_window, options.sg_poly
-            )
-        result = process(sample, reference, options)
-        if options.baseline_region is not None:
-            lo, hi = self.corrections.baseline_region()
-            logger.info("Baseline corrected in range %g – %g %s.", lo, hi, unit)
-        self._set_result(result, unit)
-
-    # ------------------------------------------------------------------ plotting
-    def replot_all(self) -> None:
-        self.replot()
-        self.plot_reference()
-
-    @user_action("Plot")
-    def replot(self) -> None:
-        if self.result is None:
-            return
-        pp = self.plot_panel
-        limits = self.limits_page.limits()
-        kind, order, physical = pp.kind(), pp.order(), pp.physical()
-        fmap = self.result.get(kind, order, pp.axis(), physical=physical, unit=self.display_unit())
-        # the derivative limits in Tools are per data point; per-unit maps autoscale
-        levels = None if physical and order else limits.levels_for(kind, order)
-        pp.color_map.set_map(
-            fmap,
-            levels=levels,
-            cmap=pp.colormap(order),
-            x_range=limits.field_range,
-            y_range=limits.energy_view,
-        )
-        self.update_point_markers()
-        self.update_model_overlay()
-        if pp.stacked_enabled.isChecked():
-            pp.stacked.set_map(
-                fmap, pp.offset.value(), y_range=limits.stacked_range, x_range=limits.energy_view
-            )
-        else:
-            pp.stacked.clear_map()
-
-    def update_model_overlay(self) -> None:
-        cmap = self.plot_panel.color_map
-        model = self.models_page.dirac()
-        if model is None or self.result is None:
-            cmap.set_model_curves(np.array([]), None)
-            return
-        shown = self.result.ratio
-        lo = max(0.0, float(shown.field.min()))
-        field = np.linspace(lo, float(shown.field.max()), 300)
-        lines_mev = dirac_interband(field, model.velocity, model.delta, model.n_lines)
-        cmap.set_model_curves(field, convert(lines_mev, Unit.MEV, self.display_unit()))
-
-    @user_action("Plot reference")
-    def plot_reference(self) -> None:
-        pp = self.plot_panel
-        result = self.result
-        if result is None or result.reference_data is None or result.reference_ratio is None:
-            pp.reference_map.clear_map()
-            return
-        limits = self.limits_page.limits()
-        kind = pp.reference_kind()
-        fmap = result.reference_data if kind is PlotKind.DATA else result.reference_ratio
-        fmap = fmap.to_unit(self.display_unit())
-        pp.reference_map.set_map(
-            fmap,
-            levels=limits.levels_for(kind),
-            cmap=pp.colormap(0),
-            x_range=limits.field_range,
-            y_range=limits.energy_view,
-        )
-
-    def on_levels_edited(self, lo: float, hi: float) -> None:
-        pp = self.plot_panel
-        if pp.physical() and pp.order():
-            return  # per-unit derivatives are always autoscaled
-        self._store_levels(level_key(pp.kind(), pp.order()), lo, hi)
-
-    def on_reference_levels_edited(self, lo: float, hi: float) -> None:
-        self._store_levels(level_key(self.plot_panel.reference_kind()), lo, hi)
-
-    def _store_levels(self, key: str, lo: float, hi: float) -> None:
-        self.limits_page.set_levels(key, lo, hi)
-        logger.info(
-            "Colour range of %s set to %.4g … %.4g", self.limits_page.level_label(key), lo, hi
-        )
-
-    # ------------------------------------------------------------------ export
-    @user_action("Export")
-    def export_current(self) -> None:
-        if self.result is None:
-            raise ValueError("nothing to export - process data first")
-        pp = self.plot_panel
-        kind, order, physical = pp.kind(), pp.order(), pp.physical()
-        fmap = self.result.get(kind, order, pp.axis(), physical=physical, unit=self.display_unit())
-        name = (
-            EXPORT_NAMES[kind]
-            + ORDER_SUFFIX[order]
-            + (PER_UNIT_SUFFIX if physical and order else "")
-        )
-        path = save_file(self, "Export current plot")
-        if not path:
-            return
-        out = Path(path)
-        if not out.suffix:
-            out = out.with_suffix(".csv")
-        if self.data_panel.export_type_suffix.isChecked():
-            out = out.with_name(f"{out.stem}_{name}{out.suffix}")
-        save_tsv(fmap, out)
-        logger.info("Exported %s to %s", name, out)
-
-    @user_action("Save image")
-    def save_image(self) -> None:
-        if self.result is None:
-            raise ValueError("nothing to save - process data first")
-        view = self.plot_panel.current_view()
-        path = save_file(self, "Save plot image", IMAGE_FILTER)
-        if not path:
-            return
-        out = Path(path) if Path(path).suffix else Path(path).with_suffix(".png")
-        view.export_image(out)
-        logger.info("Saved image %s", out)
-
-    # ------------------------------------------------------------------ points
-    def _init_points_if_requested(self, field: np.ndarray) -> None:
-        c = self.corrections
-        if not c.init_table.isChecked() and self.points is not None:
-            return
-        self.points = PointTable(field)
-        name = c.column_name.text().strip()
-        if name:
-            self.points.add_column(name)
-        self.point_model.set_table(self.points)
-        c.init_table.setChecked(False)
-        logger.info("New point extraction table initialized.")
-
-    @user_action("Pick point")
-    def on_point_clicked(self, b: float, energy: float) -> None:
-        """Record or remove a point clicked at *energy* in the shown unit (kept in cm^-1)."""
-        mode = self.corrections.point_mode()
-        if mode is PointMode.OFF or self.points is None:
-            return
-        name = self.corrections.curve_name()
-        if mode is PointMode.RECORD:
-            unit = self.display_unit()
-            row = self.points.set_nearest(name, b, float(to_cm1(energy, unit)))
-            logger.info("%s: B = %g T -> E = %.4g %s", name, self.points.field[row], energy, unit)
-        else:
-            row = self.points.clear_nearest(name, b)
-            logger.info("%s: point at B = %g T removed", name, self.points.field[row])
-        self.point_model.refresh()
-        self.update_point_markers()
-
-    def update_point_markers(self) -> None:
-        cmap = self.plot_panel.color_map
-        if self.points is None:
-            cmap.set_points(None)
-            return
-        unit = self.display_unit()
-
-        def shown(curve: str) -> tuple[np.ndarray, np.ndarray]:
-            b, e = self.points.points(curve)
-            return b, from_cm1(e, unit)
-
-        name = self.corrections.column_name.text().strip()
-        current = shown(name) if name in self.points.names else None
-        others = []
-        if self.corrections.show_all_button.isChecked():
-            names = self.points.names
-            for i, other in enumerate(names):
-                others.append((*shown(other), pg.intColor(i, hues=max(len(names), 1))))
-        cmap.set_points(current, others)
-
-    @user_action("Drop curve")
-    def drop_curve(self) -> None:
-        if self.points is None:
-            return
-        name = self.corrections.curve_name()
-        self.points.drop(name)
-        self.point_model.refresh()
-        self.update_point_markers()
-        logger.info("Curve %r dropped.", name)
-
-    @user_action("Load points")
-    def load_points(self) -> None:
-        path = open_file(self, "Load points")
-        if not path:
-            return
-        unit = self.display_unit()  # of tables without a unit in the header
-        self.points = PointTable.load_tsv(path, default_unit=unit)
-        self.point_model.set_unit(unit)
-        self.point_model.set_table(self.points)
-        self.corrections.init_table.setChecked(False)
-        if self.points.names:
-            self.corrections.column_name.setText(self.points.names[0])
-        self.update_point_markers()
-        logger.info("Loaded points %s (%s)", Path(path).name, ", ".join(self.points.names))
-
-    @user_action("Export points")
-    def export_points(self) -> None:
-        if self.points is None:
-            raise ValueError("no points to export")
-        path = save_file(self, "Export points")
-        if not path:
-            return
-        out = Path(path) if Path(path).suffix else Path(path).with_suffix(".csv")
-        self.points.save_tsv(out, unit=self.display_unit())
-        logger.info("Exported points to %s", out)
-
-    # ------------------------------------------------------------------ processed slots
-    @user_action("Load slot")
-    def load_slot(self, slot: int) -> None:
-        path = open_file(self, f"Load processed table into slot {slot}")
-        if not path:
-            return
-        # a table without unit in its header is read in the panel's unit; slots keep cm^-1
-        fmap = load_tsv(path, default_unit=self.data_panel.energy_unit())
-        file_unit = fmap.unit
-        fmap = fmap.to_unit(Unit.CM1)
-        if not self.data_panel.processed.auto_field.isChecked():
-            field = self.data_panel.sample.field_range.field()
-            if field.size != fmap.field.size:
-                raise ValueError(
-                    f"custom field range has {field.size} values, the table has {fmap.field.size}"
-                )
-            fmap = fmap.replace(field=field)
-        self.slots[slot] = fmap
-        self.data_panel.processed.set_slot_name(slot, Path(path).name)
-        logger.info("Slot %d: loaded %s (energy in %s)", slot, Path(path).name, file_unit)
-
-    @user_action("Save slot")
-    def save_slot(self, slot: int) -> None:
-        if self.result is None:
-            raise ValueError("nothing to save - process data first")
-        self.slots[slot] = self.result.ratio
-        self.data_panel.processed.set_slot_name(slot, f"Saved R(B)/R(0) [{slot}]")
-        logger.info("Slot %d: current R(B)/R(0) saved", slot)
-
-    @user_action("Plot slot")
-    def plot_slot(self, slot: int) -> None:
-        if slot not in self.slots:
-            raise ValueError(f"slot {slot} is empty")
-        processed = self.data_panel.processed
-        unit = self.data_panel.energy_unit()
-        fmap = self.slots[slot]
-        if not processed.full_energy.isChecked():
-            fmap = crop_energy(fmap, *self._slot_energy_range(slot, unit))
-        logger.info("-" * 40)
-        logger.info("Plotting slot %d: %s", slot, processed.slot_name(slot))
-        self._set_result(ProcessResult.from_map(fmap, self._baseline_region(unit)), unit)
-
-    def _slot_energy_range(self, slot: int, unit: Unit) -> Range:
-        """E min / E max of a slot (typed in *unit*) in cm^-1."""
-        return convert_range(self.data_panel.processed.energy_range(slot), unit, Unit.CM1)
-
-    def _used_slots(self) -> list[int]:
-        used = self.data_panel.processed.used_slots(self.slots)
-        if not used:
-            raise ValueError("no slot selected - load slots and tick them in the Use column")
-        return used
-
-    @user_action("Merge by energy")
-    def merge_slots(self) -> None:
-        unit = self.data_panel.energy_unit()
-        used = self._used_slots()
-        merged = merge_energy([(self.slots[i], *self._slot_energy_range(i, unit)) for i in used])
-        logger.info("-" * 40)
-        logger.info("Merged slots %s by energy; energy re-gridded to a uniform step.", used)
-        self._set_result(ProcessResult.from_map(merged, self._baseline_region(unit)), unit)
-
-    @user_action("Merge by field")
-    def merge_slots_by_field(self) -> None:
-        processed = self.data_panel.processed
-        unit = self.data_panel.energy_unit()
-        used = self._used_slots()
-        merged = merge_field([(self.slots[i], *processed.field_range(i)) for i in used])
-        logger.info("-" * 40)
-        logger.info(
-            "Merged slots %s by field: %d fields, B = %g … %g T.",
-            used,
-            merged.field.size,
-            merged.field[0],
-            merged.field[-1],
-        )
-        self._set_result(ProcessResult.from_map(merged, self._baseline_region(unit)), unit)
-
-    @user_action("Average")
-    def average_slots(self) -> None:
-        processed = self.data_panel.processed
-        unit = self.data_panel.energy_unit()
-        used = self._used_slots()
-        maps = [
-            crop_field(
-                crop_energy(self.slots[i], *self._slot_energy_range(i, unit)),
-                *processed.field_range(i),
-            )
-            for i in used
-        ]
-        averaged = average_maps(maps)
-        logger.info("-" * 40)
-        logger.info("Averaged slots %s (%d datasets).", used, len(used))
-        self._set_result(ProcessResult.from_map(averaged, self._baseline_region(unit)), unit)
 
     # ------------------------------------------------------------------ window
     def center_on_screen(self) -> None:
@@ -691,7 +739,11 @@ class MainWindow(QMainWindow):
             f"numpy {np.__version__}, scipy {scipy.__version__}, pyqtgraph {pg.__version__}",
         )
 
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        self._shown = True
+
     def closeEvent(self, event) -> None:
         self.save_settings()
-        logger.removeHandler(self._log_handler)
+        logger.removeHandler(self.log_handler)
         super().closeEvent(event)

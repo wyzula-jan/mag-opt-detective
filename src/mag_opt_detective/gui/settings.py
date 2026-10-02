@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QDoubleSpinBox,
     QLineEdit,
     QSpinBox,
+    QSplitter,
     QWidget,
 )
 
@@ -19,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 ORGANIZATION = "mag-opt-detective"
 APPLICATION = "mag-opt-detective"
-PREFIX = "v1"  # bump when stored keys change meaning
+PREFIX = "v2"  # bump when stored keys change meaning (older values are then ignored)
 
 
 def default_settings() -> QSettings:
@@ -99,7 +100,7 @@ def _apply(widget: QWidget, value) -> bool:
 
 
 class Persistence:
-    """Saves and restores registered widgets under ``v1/<key>``.
+    """Saves and restores registered widgets under ``v2/<key>``.
 
     Besides buttons, combo boxes, spin boxes and line edits, any widget with the settings
     protocol can be bound: ``settings_value()`` returns a str, int, float or bool (JSON text
@@ -144,3 +145,12 @@ class Persistence:
     def bytes_value(self, key: str) -> QByteArray | None:
         value = self.value(key)
         return value if isinstance(value, QByteArray) and not value.isEmpty() else None
+
+    # splitter layouts (sizes, and so which slide panels are open) ----------------
+    def save_splitter(self, key: str, splitter: QSplitter) -> None:
+        self.set_value(f"splitters/{key}", splitter.saveState())
+
+    def restore_splitter(self, key: str, splitter: QSplitter) -> bool:
+        """Restore a layout saved with :meth:`save_splitter`; False if none or invalid."""
+        state = self.bytes_value(f"splitters/{key}")
+        return state is not None and splitter.restoreState(state)
