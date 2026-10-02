@@ -26,7 +26,7 @@ class PlotColors:
 
     background: str = "#000000"
     foreground: str = "#969696"
-    grid: str = "#96969640"
+    grid: str = "#96969640"  # for grid lines; the views draw none yet
     crosshair: str = "#c8c8c896"
     accent: str = "#fe9f6d"
     well: str = "#000000"  # behind the image, shows where there is no data (NaN)
