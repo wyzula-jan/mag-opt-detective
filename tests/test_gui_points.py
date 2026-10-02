@@ -1,5 +1,6 @@
 import numpy as np
 import pyqtgraph as pg
+import pytest
 from PySide6.QtCore import QPoint, Qt
 from PySide6.QtTest import QTest
 
@@ -17,6 +18,7 @@ from gui_helpers import (
 window, errors = gui_helpers.window, gui_helpers.errors  # shared fixtures
 
 ALT = Qt.KeyboardModifier.AltModifier
+MEV = 8.0656
 
 
 def test_points_record_remove_export(window, sweep, tmp_path, monkeypatch, errors):
@@ -199,3 +201,118 @@ def test_stacked_plot_signals_redrawn_traces(qtbot):
     assert stacked.trace_y(1, 150.0) is None
     with qtbot.waitSignal(stacked.tracesChanged):
         stacked.clear_map()
+
+
+# ---------------------------------------------------------------------- undo (controller)
+@pytest.fixture
+def ctl(qapp, sweep):
+    from mag_opt_detective.gui.controller import AppController, SweepFiles
+
+    c = AppController()
+    c.set_processing(sample_files=SweepFiles(tuple(sweep["zero"]), tuple(sweep["field"])))
+    c.process()
+    return c
+
+
+def energies(c, name=None):
+    return c.points.column(name or c.curve).copy()
+
+
+def test_every_point_edit_is_undone_and_redone(ctl, tmp_path):
+    c, stack = ctl, ctl.points_undo
+    assert stack.count() == 0 and c.points.names == ["LL 1"]  # the first table is no step
+    c.record_point(1.0, 300.0)
+    c.record_point(1.5, 400.0)
+    c.remove_point(1.04)
+    c.add_curve()
+    c.record_point(2.0, 500.0)
+    c.rename_curve("CR")
+    c.drop_curve("LL 1")
+    path = tmp_path / "points.csv"
+    path.write_text("Energy (cm-1)\tA\n0.5\t\n1.0\t333\n1.5\t\n2.0\t\n")
+    c.load_points(path)
+    c.set_new_table(True)
+    c.process()
+    texts = [stack.text(i) for i in range(stack.count())]
+    assert texts == [
+        "Record point on LL 1",
+        "Record point on LL 1",
+        "Remove point from LL 1",
+        "New curve LL 2",
+        "Record point on LL 2",
+        "Rename curve LL 2",
+        "Delete curve LL 1",
+        "Import points.csv",
+        "New point table",
+    ]
+    assert np.isnan(energies(c)).all() and c.points.names == ["A"]
+    states = []
+    for _ in texts:
+        states.append((c.points.names, c.curve, energies(c)))
+        stack.undo()
+    assert c.points.names == ["LL 1"] and c.curve == "LL 1" and np.isnan(energies(c)).all()
+    for names, curve, values in reversed(states):
+        stack.redo()
+        assert (c.points.names, c.curve) == (names, curve)
+        np.testing.assert_array_equal(energies(c), values)
+
+
+def test_undo_steps_follow_the_display_unit_and_skip_no_ops(ctl):
+    c, stack = ctl, ctl.points_undo
+    c.set_unit("meV")
+    c.record_point(1.0, 40.0)
+    c.remove_point(2.0)  # nothing there: no step
+    c.record_point(1.0, 40.0)  # the same value again: no step
+    assert stack.count() == 1
+    c.set_unit("THz")
+    stack.undo()
+    stack.redo()
+    np.testing.assert_allclose(c.points.points("LL 1")[1], [40.0 * MEV])  # kept in cm-1
+
+
+def test_typed_renames_merge_into_one_step(ctl):
+    c, stack = ctl, ctl.points_undo
+    for name in ("C", "CR", "CR1"):
+        c.rename_curve(name, merge=("rename", 1))
+    assert stack.count() == 1 and c.curve == "CR1"
+    c.rename_curve("CR", merge=("rename", 2))  # another editing session
+    assert stack.count() == 2
+    c.rename_curve("CR1", merge=("rename", 2))  # typed back: the step goes away
+    assert stack.count() == 1
+    stack.undo()
+    assert c.curve == "LL 1" and c.points.names == ["LL 1"]
+    with pytest.raises(ValueError, match="exists already"):
+        c.add_curve("LL 1")
+    c.add_curve("LL 2")
+    with pytest.raises(ValueError, match="exists already"):
+        c.rename_curve("LL 1")
+    with pytest.raises(ValueError, match="letters"):
+        c.rename_curve("LL\t2")
+
+
+def test_a_batch_is_one_step_and_one_signal(ctl, qtbot):
+    c, stack = ctl, ctl.points_undo
+    signals = []
+    c.pointsChanged.connect(lambda: signals.append(1))
+    fields = c.points.field
+    n = c.record_points(fields, [100.0, np.nan, 120.0, 130.0], curve="auto", unit="meV")
+    assert n == 3 and stack.count() == 1 and len(signals) == 1
+    assert stack.undoText() == "Record 3 points on auto"
+    np.testing.assert_allclose(c.points.points("auto")[1], np.array([100, 120, 130]) * MEV)
+    with c.point_edit("Tidy up"):
+        c.record_point(0.5, 300.0)
+        c.remove_point(1.5)
+    assert stack.count() == 2 and stack.undoText() == "Tidy up" and len(signals) == 2
+    stack.undo()
+    stack.undo()
+    assert "auto" not in c.points.names and len(c.points.points("LL 1")[0]) == 0
+
+
+def test_dropping_the_last_curve_leaves_an_empty_one(ctl):
+    c = ctl
+    c.record_point(1.0, 300.0)
+    c.rename_curve("CR")
+    c.drop_curve()
+    assert c.points.names == ["LL 1"] and c.curve == "LL 1"
+    c.points_undo.undo()
+    assert c.points.names == ["CR"] and c.curve == "CR"

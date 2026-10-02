@@ -5,7 +5,8 @@ the library maps, the display energy unit, the view (:class:`ViewState`) and the
 options (:class:`ProcessingState`). Data, maps, points, the energy window and the baseline
 region are kept in cm^-1; the display unit is applied only when showing or exporting, so a
 unit switch never reprocesses anything. Area modules (panels, inspector, plot area) change the
-state through this class and redraw on its signals.
+state through this class and redraw on its signals. Point edits go through
+:meth:`AppController.point_edit`, which makes them undoable (``points_undo``).
 """
 
 from __future__ import annotations
@@ -17,7 +18,7 @@ import logging
 import math
 import os
 import re
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Hashable, Iterator, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -54,6 +55,7 @@ from mag_opt_detective.core.units import (
     to_cm1,
 )
 from mag_opt_detective.gui.plots.base import robust_levels
+from mag_opt_detective.gui.points_undo import PointsState, PointsUndoStack
 
 logger = logging.getLogger("mag_opt_detective")
 
@@ -92,6 +94,8 @@ VIEW_RANGES = {
     "stacked": ("energy_range", "stacked_range"),
     "reference": ("field_range", "energy_range"),
 }
+
+CURVE_NAME = re.compile(r"[A-Za-z0-9_ .+-]{1,32}")  # names of picked-point curves
 
 Curve = tuple[np.ndarray, np.ndarray]
 
@@ -462,7 +466,9 @@ class AppController(QObject):
         self._changed = False
         self._restoring = 0
         self.curve = "LL 1"
-        self.new_table = True  # start a new point table on the next result
+        self.new_table = False  # start a new point table with the next result
+        self.points_undo = PointsUndoStack(self._restore_points, self)
+        self._point_edits = 0  # depth of nested point_edit blocks
         self._overlays: dict[str, Callable[[Unit], list[Curve]]] = {}
 
     # --- unit --------------------------------------------------------------------------
@@ -811,7 +817,40 @@ class AppController(QObject):
         )
 
     # --- points ------------------------------------------------------------------------
+    @contextlib.contextmanager
+    def point_edit(self, text: str, merge: Hashable | None = None) -> Iterator[None]:
+        """Change the points inside the block as one undo step called *text*.
+
+        Blocks nest (the outermost one makes the step), and :attr:`pointsChanged` fires once at
+        the end if anything changed. Edits that raise half-way still become a step. Steps with
+        the same *merge* key in a row are merged (e.g. the letters of a typed name).
+        """
+        outer = not self._point_edits
+        before = self.points_undo.capture(self.points, self.curve) if outer else None
+        self._point_edits += 1
+        try:
+            yield
+        finally:
+            self._point_edits -= 1
+            if before is not None:
+                after = self.points_undo.capture(self.points, self.curve)
+                if self.points_undo.record(text, before, after, merge):
+                    self.pointsChanged.emit()
+
+    def _restore_points(self, state: PointsState) -> None:
+        self.points = state.table()
+        self.curve = state.curve
+        self.pointsChanged.emit()
+
+    def curve_names(self) -> list[str]:
+        """The curves: the table's columns, then the current curve if it has no column yet."""
+        names = self.points.names if self.points is not None else []
+        if self.curve and self.curve not in names:
+            names.append(self.curve)
+        return names
+
     def set_curve(self, name: str) -> None:
+        """Make *name* the current curve, the one clicks record into (not an undo step)."""
         name = name.strip()
         if name != self.curve:
             self.curve = name
@@ -822,58 +861,161 @@ class AppController(QObject):
             raise panel_error("enter a curve name for the picked points", "points")
         return self.curve
 
+    def curve_name_problem(self, name: str, old: str | None = None) -> str | None:
+        """Why *name* cannot name a curve (renaming *old*), or None if it can."""
+        name = name.strip()
+        if not name:
+            return "enter a curve name"
+        if not CURVE_NAME.fullmatch(name):
+            return "use letters, digits, spaces and _ . + - (at most 32)"
+        if name != old and name in self.curve_names():
+            return f"a curve named {name!r} exists already"
+        return None
+
+    def add_curve(self, name: str | None = None) -> str:
+        """Add an empty curve (by default the first free "LL n") and make it current."""
+        if self.points is None:
+            raise panel_error("no point table - process data first", "points")
+        names = self.curve_names()
+        if name is None:
+            n = len(names) + 1
+            while f"LL {n}" in names:
+                n += 1
+            name = f"LL {n}"
+        name = name.strip()
+        if problem := self.curve_name_problem(name):
+            raise panel_error(problem, "points")
+        with self.point_edit(f"New curve {name}"):
+            self.points.add_column(name)
+            self.curve = name
+        return name
+
+    def rename_curve(
+        self, name: str, old: str | None = None, merge: Hashable | None = None
+    ) -> None:
+        """Rename curve *old* (default: the current one); the current curve follows.
+
+        *merge*: renames with the same key in a row are one undo step (typing a name).
+        """
+        old = self.curve if old is None else old
+        name = name.strip()
+        if problem := self.curve_name_problem(name, old):
+            raise panel_error(problem, "points")
+        if name == old:
+            return
+        with self.point_edit(f"Rename curve {old}", merge):
+            table = self.points
+            if table is not None and old in table.names:
+                columns = {(name if n == old else n): table.column(n) for n in table.names}
+                self.points = PointTable(table.field, columns)
+            if self.curve == old:
+                self.curve = name
+        logger.debug("Curve %r renamed to %r.", old, name)
+
     def set_new_table(self, new: bool) -> None:
         if bool(new) != self.new_table:
             self.new_table = bool(new)
             self.pointsChanged.emit()
 
     def _init_points_if_requested(self, field_values: np.ndarray) -> None:
+        """A new (empty) table on the result's field, keeping the curve names, if asked."""
         if not self.new_table and self.points is not None:
             return
-        self.points = PointTable(field_values)
-        if self.curve:
-            self.points.add_column(self.curve)
-        self.new_table = False
+        names = self.curve_names() or ["LL 1"]
+        table = PointTable(
+            field_values, {name: np.full(field_values.shape, np.nan) for name in names}
+        )
+        curve = self.curve if self.curve in names else names[0]
+        if self.points is None:  # the first table: nothing to undo before it
+            self.points, self.curve = table, curve
+            self.points_undo.clear()
+            self.pointsChanged.emit()
+        else:
+            with self.point_edit("New point table"):
+                self.points, self.curve = table, curve
+        self.set_new_table(False)
         logger.info("New point extraction table initialized.")
-        self.pointsChanged.emit()
 
     def record_point(self, b: float, energy: float) -> int:
         """Record a point clicked at *energy* in the display unit (kept in cm^-1)."""
         if self.points is None:
             raise panel_error("no point table - process data first", "points")
         name = self.curve_name()
-        row = self.points.set_nearest(name, b, float(to_cm1(energy, self._unit)))
+        with self.point_edit(f"Record point on {name}"):
+            row = self.points.set_nearest(name, b, float(to_cm1(energy, self._unit)))
         logger.info("%s: B = %g T -> E = %.4g %s", name, self.points.field[row], energy, self._unit)
-        self.pointsChanged.emit()
         return row
 
+    def record_points(
+        self,
+        field: np.ndarray,
+        energy: np.ndarray,
+        curve: str | None = None,
+        unit: Unit | str | None = None,
+        text: str | None = None,
+    ) -> int:
+        """Record many points as one undo step (e.g. an auto-pick result); returns how many.
+
+        Each point goes to the field row nearest to it in *curve* (default: the current one);
+        *energy* is in *unit* (default: the display unit). NaN energies are skipped.
+        """
+        if self.points is None:
+            raise panel_error("no point table - process data first", "points")
+        name = self.curve_name() if curve is None else curve.strip()
+        if name not in self.curve_names() and (problem := self.curve_name_problem(name)):
+            raise panel_error(problem, "points")
+        field, energy = np.broadcast_arrays(np.asarray(field, float), np.asarray(energy, float))
+        keep = np.isfinite(field) & np.isfinite(energy)
+        energy_cm1 = to_cm1(energy[keep], self._unit if unit is None else Unit(unit))
+        with self.point_edit(text or f"Record {int(keep.sum())} points on {name}"):
+            for b, e in zip(field[keep], energy_cm1, strict=True):
+                self.points.set_nearest(name, float(b), float(e))
+        logger.info("%s: %d points recorded", name, int(keep.sum()))
+        return int(keep.sum())
+
     def remove_point(self, b: float) -> int:
+        """Remove the current curve's point in the field row nearest to *b* (if there is one)."""
         if self.points is None:
             raise panel_error("no point table - process data first", "points")
         name = self.curve_name()
-        row = self.points.clear_nearest(name, b)
+        row = self.points.nearest_row(b)
+        if name not in self.points.names or np.isnan(self.points.column(name)[row]):
+            return row
+        with self.point_edit(f"Remove point from {name}"):
+            self.points.clear_nearest(name, b)
         logger.info("%s: point at B = %g T removed", name, self.points.field[row])
-        self.pointsChanged.emit()
         return row
 
-    def drop_curve(self) -> None:
+    def drop_curve(self, name: str | None = None) -> None:
+        """Delete curve *name* (default: the current one); its neighbour becomes current.
+
+        The table always keeps one curve: deleting the last leaves an empty "LL 1".
+        """
         if self.points is None:
             return
-        name = self.curve_name()
-        self.points.drop(name)
+        name = self.curve_name() if name is None else name
+        names = self.points.names
+        with self.point_edit(f"Delete curve {name}"):
+            self.points.drop(name)
+            rest = self.points.names
+            if not rest:
+                rest = ["LL 1"]
+                self.points.add_column(rest[0])
+            if self.curve == name or self.curve not in rest:
+                index = names.index(name) if name in names else 0
+                self.curve = rest[min(index, len(rest) - 1)]
         logger.info("Curve %r dropped.", name)
-        self.pointsChanged.emit()
 
     def load_points(self, path: str | Path) -> PointTable:
         """Read a point table; one without a unit in its header is in the display unit."""
         with in_panel("points"):
             table = PointTable.load_tsv(path, default_unit=self._unit)
-        self.points = table
-        self.new_table = False
-        if table.names:
-            self.curve = table.names[0]
+        with self.point_edit(f"Import {Path(path).name}"):
+            self.points = table
+            if table.names:
+                self.curve = table.names[0]
+        self.set_new_table(False)
         logger.info("Loaded points %s (%s)", Path(path).name, ", ".join(table.names))
-        self.pointsChanged.emit()
         return table
 
     def save_points(self, path: str | Path) -> None:
