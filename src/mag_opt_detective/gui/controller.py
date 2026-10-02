@@ -14,10 +14,13 @@ import contextlib
 import dataclasses
 import functools
 import logging
+import math
+import re
 from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
+from typing import NamedTuple
 
 import numpy as np
 from PySide6.QtCore import QObject, Signal
@@ -68,7 +71,17 @@ EXPORT_NAMES = {
 }
 ORDER_SUFFIX = {0: "", 1: "_1stDer", 2: "_2ndDer"}
 PER_UNIT_SUFFIX = "_perUnit"
+ORDINALS = {1: "1st", 2: "2nd"}
 AUTO_COLOURS = "Auto"
+
+# colour level modes: 1-99 % of the map, fixed levels, or symmetric about the centre of a kind
+AUTO_LEVELS, FIXED_LEVELS, SYMMETRIC_LEVELS = "auto", "fixed", "sym"
+LEVEL_MODES = (AUTO_LEVELS, FIXED_LEVELS, SYMMETRIC_LEVELS)
+DEFAULT_LEVELS = {
+    str(PlotKind.RATIO): (0.9, 1.1),
+    str(PlotKind.AVERAGE): (0.9, 1.1),
+    str(PlotKind.STEP): (0.98, 1.02),
+}
 
 Curve = tuple[np.ndarray, np.ndarray]
 
@@ -126,26 +139,76 @@ def fmt(value: float | None) -> str:
 
 
 # ---------------------------------------------------------------------- state
+class LevelKey(NamedTuple):
+    """What a :func:`level_key` stands for."""
+
+    kind: PlotKind
+    order: int = 0
+    axis: Axis = Axis.ENERGY
+    physical: bool = False  # a derivative per unit (only with an order)
+
+    @property
+    def axis_is_energy(self) -> bool:
+        return self.axis == Axis.ENERGY
+
+
+_DERIVATIVE_KEY = re.compile(r"(?P<kind>.+?)_der(?P<order>[12])_(?P<axis>[EB])(?P<unit>_unit)?")
+
+
 def level_key(kind: PlotKind | str, order: int = 0, axis: Axis = Axis.ENERGY, physical=False):
-    """Key of the colour levels of a plot.
+    """Key of the colour levels of a plot: one per kind, derivative order, axis and per unit.
 
-    Maps share a key per kind; derivatives per data point share one key per order (as the old
-    Plot dimensions page did); derivatives per unit get their own key per order and axis.
+    A map without a derivative is keyed by its kind (``"Ratio"``); derivatives add the order
+    and axis (``"Ratio_der1_E"``) and ``"_unit"`` when divided by the real step.
     """
+    kind = PlotKind(kind)
     if not order:
-        return str(PlotKind(kind))
-    if physical:
-        return f"der{order}_{'E' if axis == Axis.ENERGY else 'B'}_unit"
-    return f"der{order}"
+        return str(kind)
+    axis_name = "E" if axis == Axis.ENERGY else "B"
+    return f"{kind}_der{order}_{axis_name}" + ("_unit" if physical else "")
 
 
-def parse_level_key(key: str) -> tuple[int, bool, bool]:
-    """``(order, axis_is_energy, physical)`` of a :func:`level_key`."""
-    if not key.startswith("der"):
-        return 0, True, False
-    order = int(key[3])
-    physical = key.endswith("_unit")
-    return order, not (physical and key[5] == "B"), physical
+def parse_level_key(key: str) -> LevelKey:
+    """The plot of a :func:`level_key`; ValueError for anything else."""
+    match = _DERIVATIVE_KEY.fullmatch(key)
+    if match is None:
+        return LevelKey(PlotKind(key))
+    axis = Axis.ENERGY if match["axis"] == "E" else Axis.FIELD
+    return LevelKey(PlotKind(match["kind"]), int(match["order"]), axis, bool(match["unit"]))
+
+
+def level_label(key: str) -> str:
+    """What the levels of *key* are remembered for, e.g.
+    ``"R(B)/R(0) · 1st derivative d/dE per unit"``."""
+    k = parse_level_key(key)
+    text = KIND_LABELS[k.kind]
+    if k.order:
+        per = ("per unit" if k.axis_is_energy else "per T") if k.physical else "per point"
+        text += f" · {ORDINALS[k.order]} derivative d/d{'E' if k.axis_is_energy else 'B'} {per}"
+    return text
+
+
+def symmetric_centre(key: str) -> float | None:
+    """Centre of symmetric levels: 0 for derivatives, 1 for ratios, None for raw data."""
+    k = parse_level_key(key)
+    if k.order:
+        return 0.0
+    return None if k.kind is PlotKind.DATA else 1.0
+
+
+def default_level_mode(key: str) -> str:
+    """Derivatives start symmetric about 0, ratios at fixed levels, raw data on Auto."""
+    if parse_level_key(key).order:
+        return SYMMETRIC_LEVELS
+    return FIXED_LEVELS if key in DEFAULT_LEVELS else AUTO_LEVELS
+
+
+def symmetric_levels(levels: tuple[float, float], centre: float) -> tuple[float, float]:
+    """The smallest levels symmetric about *centre* that cover *levels*."""
+    half = max(abs(levels[0] - centre), abs(levels[1] - centre))
+    if not (math.isfinite(half) and half > 0):
+        half = 1e-6
+    return centre - half, centre + half
 
 
 @dataclass(frozen=True)
@@ -191,20 +254,37 @@ class PlotSelection:
 @dataclass(frozen=True)
 class ViewState:
     """How the maps are shown. Energies and the levels of per-unit E-derivatives are in the
-    display unit; everything else does not depend on it."""
+    display unit; everything else does not depend on it. Each colour level key
+    (:func:`level_key`) has a mode (``LEVEL_MODES``) and, when fixed or symmetric, its levels."""
 
     field_range: Range | None = None  # T; None: fit the data
     energy_range: Range | None = None  # display unit; None: fit the data
-    levels: Mapping[str, tuple[float, float]] = field(default_factory=dict)
-    custom_levels: bool = True  # False: every map autoscales
+    levels: Mapping[str, tuple[float, float]] = field(default_factory=lambda: dict(DEFAULT_LEVELS))
+    level_modes: Mapping[str, str] = field(default_factory=dict)  # missing: default_level_mode
     stacked_range: Range | None = None
     stacked_offset: float = 0.01
     colormap: str = AUTO_COLOURS
 
+    def level_mode(self, key: str) -> str:
+        return self.level_modes.get(key, default_level_mode(key))
+
     def levels_for(self, key: str) -> tuple[float, float] | None:
-        if not self.custom_levels:
+        """The kept levels of *key*, or None to autoscale (Auto, or nothing kept yet)."""
+        if self.level_mode(key) == AUTO_LEVELS:
             return None
         return self.levels.get(key)
+
+    def levels_in_effect(self, key: str, values: np.ndarray) -> tuple[float, float]:
+        """Levels a map of *values* is drawn with: the kept ones, else the 1st-99th
+        percentile (symmetric about the centre of the kind in the symmetric mode)."""
+        kept = self.levels_for(key)
+        if kept is not None:
+            return kept
+        auto = robust_levels(values)
+        centre = symmetric_centre(key)
+        if self.level_mode(key) == SYMMETRIC_LEVELS and centre is not None:
+            return symmetric_levels(auto, centre)
+        return auto
 
     def colormap_for(self, order: int) -> str:
         if self.colormap == AUTO_COLOURS:
@@ -215,8 +295,8 @@ class ViewState:
         """The same view in unit *dst*: energy range and per-unit E-derivative levels."""
         levels = {}
         for key, value in self.levels.items():
-            order, energy, physical = parse_level_key(key)
-            levels[key] = convert_levels(value, src, dst, order, energy, physical)
+            k = parse_level_key(key)
+            levels[key] = convert_levels(value, src, dst, k.order, k.axis_is_energy, k.physical)
         return dataclasses.replace(
             self, energy_range=convert_range(self.energy_range, src, dst), levels=levels
         )
@@ -382,10 +462,45 @@ class AppController(QObject):
             self._view = new
             self.viewChanged.emit()
 
-    def set_levels(self, key: str, lo: float, hi: float) -> None:
-        """Fix the colour levels of *key* (display unit) and use fixed levels."""
-        levels = {**self._view.levels, key: (float(lo), float(hi))}
-        self.set_view(levels=levels, custom_levels=True)
+    def set_levels(self, key: str, lo: float, hi: float, mode: str | None = None) -> None:
+        """Keep the colour levels of *key* (display unit).
+
+        *mode* None: symmetric levels stay symmetric when one end was moved (it is mirrored)
+        or the levels are centred already; anything else fixes them.
+        """
+        lo, hi = float(lo), float(hi)
+        view = self._view
+        centre = symmetric_centre(key)
+        if mode is None:
+            mode = FIXED_LEVELS
+            if view.level_mode(key) == SYMMETRIC_LEVELS and centre is not None:
+                old = view.levels_for(key)
+                if old is None and key == self._selection.level_key and self.result is not None:
+                    old = self.current_levels()
+                mirrored = _mirrored(lo, hi, old, centre)
+                if mirrored is not None:
+                    mode, (lo, hi) = SYMMETRIC_LEVELS, mirrored
+        if mode not in LEVEL_MODES:
+            raise ValueError(f"unknown level mode {mode!r}")
+        if not (math.isfinite(lo) and math.isfinite(hi) and lo < hi):
+            raise ValueError(f"invalid colour range {lo:g} – {hi:g}")
+        if mode == SYMMETRIC_LEVELS and centre is not None:
+            lo, hi = symmetric_levels((lo, hi), centre)
+        self.set_view(
+            levels={**view.levels, key: (lo, hi)}, level_modes={**view.level_modes, key: mode}
+        )
+
+    def set_level_mode(
+        self, key: str, mode: str, levels: tuple[float, float] | None = None
+    ) -> None:
+        """Use *mode* for *key*, keeping *levels* (display unit) if given."""
+        if mode not in LEVEL_MODES:
+            raise ValueError(f"unknown level mode {mode!r}")
+        view = self._view
+        kept = dict(view.levels)
+        if levels is not None:
+            kept[key] = (float(levels[0]), float(levels[1]))
+        self.set_view(levels=kept, level_modes={**view.level_modes, key: mode})
 
     @property
     def selection(self) -> PlotSelection:
@@ -398,8 +513,13 @@ class AppController(QObject):
             self.selectionChanged.emit()
 
     def current_levels(self) -> tuple[float, float] | None:
-        """Fixed levels of the map shown, or None to autoscale."""
-        return self._view.levels_for(self._selection.level_key)
+        """Levels of the map shown, or None to autoscale (1st-99th percentile)."""
+        key = self._selection.level_key
+        levels = self._view.levels_for(key)
+        symmetric = self._view.level_mode(key) == SYMMETRIC_LEVELS
+        if levels is None and symmetric and self.result is not None:
+            levels = self._view.levels_in_effect(key, self.current_map().values)
+        return levels
 
     def current_map(self) -> FieldMap:
         """The map shown (or exported), in the display unit."""
@@ -770,6 +890,21 @@ class AppController(QObject):
         logger.info("-" * 40)
         logger.info("Averaged slots %s (%d datasets).", [i for i, *_ in parts], len(parts))
         return self.from_map(averaged)
+
+
+def _mirrored(
+    lo: float, hi: float, old: tuple[float, float] | None, centre: float
+) -> tuple[float, float] | None:
+    """Levels symmetric about *centre* after an edit of symmetric levels *old*, or None when
+    the edit moved both ends off the centre (a shift)."""
+    tol = 1e-9 * max(abs(hi - lo), abs(centre), 1e-300)
+    if abs((lo + hi) / 2 - centre) <= tol:
+        return lo, hi
+    if old is not None and abs(hi - old[1]) <= tol and lo < centre:
+        return lo, 2 * centre - lo
+    if old is not None and abs(lo - old[0]) <= tol and hi > centre:
+        return 2 * centre - hi, hi
+    return None
 
 
 def _sorted_files(files: SweepFiles) -> SweepFiles:

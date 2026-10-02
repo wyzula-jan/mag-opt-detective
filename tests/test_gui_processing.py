@@ -9,6 +9,7 @@ import gui_helpers
 from gui_helpers import (
     energy_label,
     infobar_text,
+    inspector_page,
     load_sweep,
     process,
     save_to,
@@ -250,13 +251,12 @@ def test_export_without_the_plot_type_in_the_name(window, sweep, tmp_path, monke
 
 def test_histogram_levels_update_the_view(window, sweep, errors):
     load_sweep(window, sweep)
-    page = window.inspector["view"].body_layout().itemAt(0).widget()
-    page.level_auto.setChecked(True)
+    page = inspector_page(window, "colour")
+    page.mode.set_value("auto")
     process(window)
     window.plots.map.hist.region.setRegion((0.95, 1.05))  # as if dragged
-    lo, hi = page.level_edits["Ratio"]
-    assert (lo.value(), hi.value()) == pytest.approx((0.95, 1.05))
-    assert page.level_custom.isChecked()
+    assert page.fields.levels() == pytest.approx((0.95, 1.05))
+    assert page.mode.value() == "fixed"
     assert window.controller.view.levels["Ratio"] == pytest.approx((0.95, 1.05))
     assert window.plots.map.image.levels == pytest.approx([0.95, 1.05])
     assert not errors
@@ -269,8 +269,7 @@ def test_colour_map_choice(window, sweep):
     assert plot.colormap() == "magma"
     select(window, order=1)
     assert plot.colormap() == "grey"
-    page = window.inspector["view"].body_layout().itemAt(0).widget()
-    page.cmap_combo.setCurrentText("viridis")
+    inspector_page(window, "colour").picker.swatches["viridis"].click()
     assert plot.colormap() == "viridis"
     assert window.controller.view.colormap == "viridis"
 

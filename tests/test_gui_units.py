@@ -54,7 +54,7 @@ def test_live_unit_switch(window, sweep, errors):
     models.show_dirac.setChecked(True)
     select(window, kind=PlotKind.DATA, order=1, per_unit=True)
     window.plots.map.hist.region.setRegion((-0.002, 0.003))  # fixed levels per cm-1
-    assert c.view.levels["der1_E_unit"] == pytest.approx((-0.002, 0.003))
+    assert c.view.levels["Data_der1_E_unit"] == pytest.approx((-0.002, 0.003))
     ratio_levels = c.view.levels["Ratio"]
 
     set_unit(window, "meV")
@@ -68,7 +68,7 @@ def test_live_unit_switch(window, sweep, errors):
     assert c.view.energy_range == pytest.approx((200 / MEV, 800 / MEV))
     assert window.plots.map.plot.vb.viewRange()[1] == pytest.approx([200 / MEV, 800 / MEV])
     assert page.energy_min.text() == "24.7967" and page.energy_label.text() == "E (meV)"
-    assert c.view.levels["der1_E_unit"] == pytest.approx((-0.002 * MEV, 0.003 * MEV))
+    assert c.view.levels["Data_der1_E_unit"] == pytest.approx((-0.002 * MEV, 0.003 * MEV))
     assert window.plots.map.levels() == pytest.approx((-0.002 * MEV, 0.003 * MEV))
     assert c.view.levels["Ratio"] == ratio_levels  # other levels do not depend on the unit
     np.testing.assert_allclose(current_marker_energies(window), [300 / MEV])
@@ -87,7 +87,7 @@ def test_live_unit_switch(window, sweep, errors):
     set_unit(window, "cm-1")
     assert c.result is result
     assert c.view.energy_range == pytest.approx((200.0, 800.0))
-    assert c.view.levels["der1_E_unit"] == pytest.approx((-0.002, 0.003))
+    assert c.view.levels["Data_der1_E_unit"] == pytest.approx((-0.002, 0.003))
     assert page.energy_min.text() == "200"
     np.testing.assert_allclose(c.points.points("LL 1")[1], [300.0])  # kept in cm-1
     assert not errors
@@ -100,11 +100,11 @@ def test_derivatives_along_field_keep_their_levels(window, sweep):
     select(window, order=1, axis="B", per_unit=True)
     window.plots.map.hist.region.setRegion((-0.1, 0.1))
     set_unit(window, "THz")
-    assert c.view.levels["der1_B_unit"] == pytest.approx((-0.1, 0.1))
+    assert c.view.levels["Ratio_der1_B_unit"] == pytest.approx((-0.1, 0.1))
     select(window, axis="E", per_unit=False)
     window.plots.map.hist.region.setRegion((-0.02, 0.02))
     set_unit(window, "meV")
-    assert c.view.levels["der1"] == pytest.approx((-0.02, 0.02))  # per point: no scaling
+    assert c.view.levels["Ratio_der1_E"] == pytest.approx((-0.02, 0.02))  # per point: no scaling
 
 
 def test_energy_fields_are_kept_in_cm1(window, sweep):

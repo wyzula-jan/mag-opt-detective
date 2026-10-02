@@ -30,39 +30,50 @@ def controller(qapp):
 
 def test_level_keys():
     assert level_key(PlotKind.STEP) == "Ratio_Step"
-    assert level_key(PlotKind.DATA, 1, Axis.FIELD) == "der1"  # per point: shared per order
-    assert level_key(PlotKind.DATA, 2, Axis.ENERGY, physical=True) == "der2_E_unit"
-    assert level_key(PlotKind.RATIO, 1, Axis.FIELD, physical=True) == "der1_B_unit"
-    assert parse_level_key("der2_E_unit") == (2, True, True)
-    assert parse_level_key("der1_B_unit") == (1, False, True)
-    assert parse_level_key("der1") == (1, True, False)
-    assert parse_level_key("Ratio") == (0, True, False)
+    assert level_key(PlotKind.DATA, 1, Axis.FIELD) == "Data_der1_B"  # per kind, order, axis
+    assert level_key(PlotKind.DATA, 2, Axis.ENERGY, physical=True) == "Data_der2_E_unit"
+    assert level_key(PlotKind.STEP, 1, Axis.FIELD, physical=True) == "Ratio_Step_der1_B_unit"
+    for kind in PlotKind:
+        for order in (0, 1, 2):
+            for axis in Axis:
+                for physical in (False, True):
+                    key = level_key(kind, order, axis, physical)
+                    expected = (kind, order, axis, physical) if order else (kind, 0)
+                    assert parse_level_key(key)[: len(expected)] == expected
+    k = parse_level_key("Ratio_AVR_der2_E_unit")
+    assert (k.kind, k.order, k.axis_is_energy, k.physical) == (PlotKind.AVERAGE, 2, True, True)
+    assert not parse_level_key("Ratio_der1_B").axis_is_energy
+    with pytest.raises(ValueError):
+        parse_level_key("der1")  # the keys of phase 2 are not read any more
 
 
 def test_view_state_converts_only_unit_dependent_values():
     view = ViewState(
         field_range=(1.0, 2.0),
         energy_range=(100.0, None),
-        levels={"Ratio": (0.9, 1.1), "der1": (-1.0, 1.0), "der2_E_unit": (-1.0, 2.0),
-                "der1_B_unit": (-3.0, 3.0)},
+        levels={"Ratio": (0.9, 1.1), "Ratio_der1_E": (-1.0, 1.0),
+                "Data_der2_E_unit": (-1.0, 2.0), "Ratio_der1_B_unit": (-3.0, 3.0)},
         stacked_range=(0.5, 2.0),
     )  # fmt: skip
     mev = view.converted(Unit.CM1, Unit.MEV)
     assert mev.field_range == (1.0, 2.0) and mev.stacked_range == (0.5, 2.0)
     assert mev.energy_range == pytest.approx((100 / MEV, None))
-    assert mev.levels["Ratio"] == (0.9, 1.1) and mev.levels["der1"] == (-1.0, 1.0)
-    assert mev.levels["der1_B_unit"] == (-3.0, 3.0)
-    assert mev.levels["der2_E_unit"] == pytest.approx((-(MEV**2), 2 * MEV**2))
+    assert mev.levels["Ratio"] == (0.9, 1.1) and mev.levels["Ratio_der1_E"] == (-1.0, 1.0)
+    assert mev.levels["Ratio_der1_B_unit"] == (-3.0, 3.0)
+    assert mev.levels["Data_der2_E_unit"] == pytest.approx((-(MEV**2), 2 * MEV**2))
     back = mev.converted(Unit.MEV, Unit.CM1)
     assert back.energy_range == pytest.approx(view.energy_range)
-    assert back.levels["der2_E_unit"] == pytest.approx((-1.0, 2.0))
+    assert back.levels["Data_der2_E_unit"] == pytest.approx((-1.0, 2.0))
 
 
 def test_view_state_levels_and_colours():
-    view = ViewState(levels={"Ratio": (0.9, 1.1)})
-    assert view.levels_for("Ratio") == (0.9, 1.1)
-    assert view.levels_for("Data") is None
-    assert ViewState(levels={"Ratio": (0.9, 1.1)}, custom_levels=False).levels_for("Ratio") is None
+    view = ViewState(levels={"Ratio": (0.9, 1.1), "Data": (0.0, 2.0)})
+    assert view.levels_for("Ratio") == (0.9, 1.1)  # ratios start at fixed levels
+    assert view.levels_for("Data") is None  # raw data starts on Auto
+    assert view.levels_for("Ratio_der1_E") is None  # nothing kept yet
+    auto = ViewState(levels={"Ratio": (0.9, 1.1)}, level_modes={"Ratio": "auto"})
+    assert auto.levels_for("Ratio") is None
+    assert ViewState().levels["Ratio_Step"] == (0.98, 1.02)
     assert view.colormap_for(0) == "magma" and view.colormap_for(1) == "grey"
     assert ViewState(colormap="viridis").colormap_for(2) == "viridis"
 
@@ -87,11 +98,11 @@ def test_field_range():
 def test_unit_switch_converts_the_view_except_while_restoring(controller):
     changes = []
     controller.unitChanged.connect(lambda old, new: changes.append((old, new)))
-    controller.set_view(energy_range=(100.0, 200.0), levels={"der1_E_unit": (-1.0, 1.0)})
+    controller.set_view(energy_range=(100.0, 200.0), levels={"Ratio_der1_E_unit": (-1.0, 1.0)})
     controller.set_unit("meV")
     assert changes == [(Unit.CM1, Unit.MEV)]
     assert controller.view.energy_range == pytest.approx((100 / MEV, 200 / MEV))
-    assert controller.view.levels["der1_E_unit"] == pytest.approx((-MEV, MEV))
+    assert controller.view.levels["Ratio_der1_E_unit"] == pytest.approx((-MEV, MEV))
     restored = []
     controller.restored.connect(lambda: restored.append(True))
     with controller.restoring():

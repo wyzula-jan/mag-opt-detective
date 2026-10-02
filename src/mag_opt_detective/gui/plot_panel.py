@@ -36,7 +36,7 @@ from mag_opt_detective.core.processing import Axis
 from mag_opt_detective.core.spectra import save_tsv
 from mag_opt_detective.core.units import Unit
 from mag_opt_detective.gui import icons
-from mag_opt_detective.gui.controller import KIND_LABELS, level_key, user_action
+from mag_opt_detective.gui.controller import KIND_LABELS, level_key, level_label, user_action
 from mag_opt_detective.gui.kit import SlidePanel
 from mag_opt_detective.gui.plots import ColorMapPlot, PlotColors, StackedPlot
 from mag_opt_detective.gui.theme import current_tokens
@@ -470,15 +470,6 @@ def render_reference(window) -> None:
         x_range=view.field_range,
         y_range=view.energy_range,
     )
-
-
-def level_label(key: str) -> str:
-    if key.startswith("der"):
-        order = {"1": "1st", "2": "2nd"}[key[3]]
-        if key.endswith("_unit"):
-            return f"{order} derivative d/d{key[5]} per unit"
-        return f"{order} derivative"
-    return KIND_LABELS.get(PlotKind(key), key)
 
 
 # ---------------------------------------------------------------------- actions

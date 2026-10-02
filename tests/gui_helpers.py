@@ -94,3 +94,8 @@ def open_from(monkeypatch, path) -> None:
 def infobar_text(window) -> str:
     bar = window.infobar
     return "" if bar.isHidden() else f"{bar.title_label.text()}: {bar.text_label.text()}"
+
+
+def inspector_page(window, name: str):
+    """The content widget of inspector section *name* ("view", "colour", "traces", ...)."""
+    return window.inspector[name].body_layout().itemAt(0).widget()

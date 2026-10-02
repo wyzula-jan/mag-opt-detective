@@ -34,6 +34,10 @@ def view_page(window):
     return window.inspector["view"].body_layout().itemAt(0).widget()
 
 
+def colour_page(window):
+    return window.inspector["colour"].body_layout().itemAt(0).widget()
+
+
 def test_prefix_is_v2():
     assert PREFIX == "v2"
 
@@ -51,8 +55,8 @@ def test_settings_round_trip(qtbot, ini):
     page.energy_custom.setChecked(True)
     page.energy_max.setText("120")
     page.energy_max.editingFinished.emit()
-    page.level_edits["Ratio"][0].setText("0.95")
-    page.cmap_combo.setCurrentText("viridis")
+    colour_page(w).fields.lo.setValue(0.95)
+    colour_page(w).picker.swatches["viridis"].click()
     processing = w.panels["processing"]
     processing.cut_on.setChecked(True)
     processing.cut_lo.setText("55")
@@ -105,13 +109,14 @@ def test_restoring_does_not_depend_on_the_order(qtbot, ini):
     page.energy_min.setText("10")
     page.energy_max.setText("120")
     page.energy_max.editingFinished.emit()
-    w.controller.set_levels("der1_E_unit", -0.5, 0.5)  # per meV
+    w.controller.set_levels("Ratio_der1_E_unit", -0.5, 0.5)  # per meV
     w.panels["processing"].baseline_on.setChecked(True)
     w.panels["processing"].baseline_lo.setText("60")
     w.panels["processing"].baseline_hi.setText("70")
     w.save_settings()
-    stored = json.loads(QSettings(ini, QSettings.Format.IniFormat).value("v2/view/unit_levels_cm1"))
-    assert stored["der1_E_unit"] == pytest.approx([-0.5 / MEV, 0.5 / MEV])  # kept per cm-1
+    stored = json.loads(QSettings(ini, QSettings.Format.IniFormat).value("v2/view/levels"))
+    levels = stored["Ratio_der1_E_unit"]["levels"]
+    assert levels == pytest.approx([-0.5 / MEV, 0.5 / MEV])  # kept per cm-1
     w.close()
 
     for reverse in (False, True):
@@ -124,7 +129,7 @@ def test_restoring_does_not_depend_on_the_order(qtbot, ini):
         w2.restore_settings()
         assert c.unit is Unit.MEV
         assert c.view.energy_range == pytest.approx((10.0, 120.0))
-        assert c.view.levels["der1_E_unit"] == pytest.approx((-0.5, 0.5))
+        assert c.view.levels["Ratio_der1_E_unit"] == pytest.approx((-0.5, 0.5))
         assert c.processing.baseline == pytest.approx((60 * MEV, 70 * MEV))
         assert w2.panels["processing"].baseline_lo.text() == "60"
         assert view_page(w2).energy_min.text() == "10"
@@ -151,7 +156,8 @@ def test_invalid_values_fall_back_to_defaults(qtbot, ini):
     raw.setValue("v2/reference/sg_window", "abc")
     raw.setValue("v2/view/field_min", "not a number")
     raw.setValue("v2/processing/cut_lo_cm1", "x")
-    raw.setValue("v2/view/unit_levels_cm1", "{bad")
+    raw.setValue("v2/view/levels", '{"Ratio": {"mode": "fixed", "levels": [2, 1]}}')
+    raw.setValue("v2/view/colormap", "rainbow")
     raw.setValue("v2/window/panel", "nowhere")
     raw.setValue("v2/window/appearance", "purple")
     raw.setValue("v2/window/geometry", "garbage")
@@ -161,6 +167,8 @@ def test_invalid_values_fall_back_to_defaults(qtbot, ini):
     assert w.controller.unit is Unit.CM1
     assert w.panels["reference"].sg_window.value() == 11
     assert view_page(w).field_min.text() == "0"
+    assert w.controller.view.levels["Ratio"] == (0.9, 1.1)
+    assert w.controller.view.colormap == "Auto"
     assert w.panels["processing"].cut_lo.text() == ""
     assert w.current_panel() == "sample"
     assert w.theme.scheme() == "system"
