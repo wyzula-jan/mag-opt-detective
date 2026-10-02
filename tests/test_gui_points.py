@@ -4,6 +4,7 @@ import numpy as np
 import pyqtgraph as pg
 import pytest
 from PySide6.QtCore import QPoint, QSettings, Qt
+from PySide6.QtGui import QKeySequence
 from PySide6.QtTest import QTest
 
 import gui_helpers
@@ -413,6 +414,11 @@ def test_undo_and_redo_in_the_window_leave_text_fields_alone(shown):
     assert name.text() == "LL 1" and c.curve == "LL 1"
     assert stack.count() == 1 and stack.undoText() == "Record point on LL 1"  # typed back
     assert len(c.points.points("LL 1")[0]) == 1
+    QTest.keyClicks(name, "2")
+    undo.trigger()  # Edit > Undo with the mouse: the field follows
+    assert c.curve == "LL 1" and name.text() == "LL 1"
+    assert undo.shortcut() == QKeySequence("Ctrl+Z")
+    assert redo.shortcut() == QKeySequence("Ctrl+Shift+Z")  # shown in the menu
 
 
 # ---------------------------------------------------------------------- undo (controller)

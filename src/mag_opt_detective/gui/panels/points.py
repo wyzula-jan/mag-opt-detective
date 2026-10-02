@@ -93,11 +93,10 @@ def _title(text: str) -> QLabel:
     return label
 
 
-def _keys(standard: QKeySequence.StandardKey, *extra: str) -> list[QKeySequence]:
-    keys = list(QKeySequence.keyBindings(standard))
-    for text in extra:
-        if QKeySequence(text) not in keys:
-            keys.append(QKeySequence(text))
+def _keys(first: str, standard: QKeySequence.StandardKey) -> list[QKeySequence]:
+    """*first* (shown in menus), then the platform's other keys for *standard*."""
+    keys = [QKeySequence(first)]
+    keys += [key for key in QKeySequence.keyBindings(standard) if key not in keys]
     return keys
 
 
@@ -602,8 +601,8 @@ def install_undo(window) -> None:
     stack = window.controller.points_undo
     undo = stack.createUndoAction(window, "Undo")
     redo = stack.createRedoAction(window, "Redo")
-    undo.setShortcuts(_keys(QKeySequence.StandardKey.Undo, "Ctrl+Z"))
-    redo.setShortcuts(_keys(QKeySequence.StandardKey.Redo, "Ctrl+Shift+Z"))
+    undo.setShortcuts(_keys("Ctrl+Z", QKeySequence.StandardKey.Undo))
+    redo.setShortcuts(_keys("Ctrl+Shift+Z", QKeySequence.StandardKey.Redo))
     icons.set_icon(undo, "undo-2")
     icons.set_icon(redo, "redo-2")
     for name, action in (("undo", undo), ("redo", redo)):
@@ -684,8 +683,9 @@ def install(window) -> None:
         panel.chips.set_curves(curves, c.curve)
         panel.chips.new_chip.setEnabled(table is not None)
         panel.delete_button.setEnabled(table is not None)
-        name = panel.column_name
-        if not name.hasFocus() and name.text() != c.curve:
+        name = panel.column_name  # follows the curve, but keeps a refused name being typed
+        typing = name.hasFocus() and c.curve_name_problem(name.text(), c.curve) is not None
+        if name.text().strip() != c.curve and not typing:
             with QSignalBlocker(name):
                 name.setText(c.curve)
             panel.show_name_problem(None)
