@@ -494,6 +494,7 @@ def test_export_svg_contains_the_scale(make_plot, tmp_path, style):
     assert box.width() == pytest.approx(expected, abs=1)
     assert box.width() > plot.view.ci.sceneBoundingRect().width()
     assert label and plot.label.text == label  # restored after the export
+    assert "clip-path" in out.read_text()  # SVG 1.1 keeps the image inside the axes
 
 
 def test_export_rejects_unknown_suffix(make_plot, tmp_path):
