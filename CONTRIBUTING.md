@@ -24,10 +24,17 @@ uv run pytest
 - Never commit measurement data. Tests needing real data use the `data_dir` fixture,
   which skips when `Data_to_test/` is missing.
 
-## Branches
+## Branches and the task board
 
 `main` always works. Do the work on a short-lived branch (`feat/merge-by-field`,
 `fix/opus-csf`, …) and merge it back when the tests pass.
+
+Open work is tracked on the task board at
+<https://claude.ai/artifact/GYM8suwEvzhze7WGGhvNRF> (private, ask Jan for access).
+Each task there has an ID (`P2-04`), acceptance criteria and a suggested branch name
+(`feat/p2-04-merge-by-field`). Claim a task on the board before starting it and set it
+to *In review* when its branch is ready. The board's *Agent handoff* section explains
+how coding agents update it.
 
 ## Commit messages
 
