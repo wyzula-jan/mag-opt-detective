@@ -1,10 +1,10 @@
 name: App bundles
 
-# Standalone apps for computers without Python. Built for every version tag (v*) and on
+# Standalone apps for computers without Python. Built for every version tag (v5.0.0) and on
 # demand; a tag also publishes them as a GitHub release.
 on:
   push:
-    tags: ["v*"]
+    tags: ["v[0-9]+.[0-9]+.[0-9]+*"]
   workflow_dispatch:
 
 jobs:
