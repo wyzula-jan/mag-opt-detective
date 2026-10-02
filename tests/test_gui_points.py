@@ -167,3 +167,19 @@ def test_a_real_click_on_the_map_picks_a_point(window, sweep, qtbot):
     b, e = window.controller.points.points("LL 1")
     np.testing.assert_allclose(b, [1.5])
     assert abs(e[0] - 550.0) < 20
+
+
+def test_pick_works_on_the_map_only(window, sweep):
+    load_sweep(window, sweep)
+    process(window)
+    tools, panel, area = window.tools, window.panels["points"], window.plot_area
+    area.set_current_view("stacked")
+    assert not tools.set_active("pick")  # refused: the stacked plot takes no picks
+    assert tools.active() == "navigate"
+    pick = tools.tool("pick").button
+    assert not pick.isChecked() and not pick.isEnabled()
+    panel.point_record.setChecked(True)  # Record shows the map, where the tool works
+    assert area.current_view() == "map" and tools.active() == "pick"
+    assert pick.isChecked() and pick.isEnabled()
+    area.set_current_view("stacked")
+    assert tools.active() == "navigate" and panel.point_off.isChecked()

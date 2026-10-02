@@ -152,12 +152,14 @@ class ToolRegistry(QObject):
     def active(self) -> str:
         return self._active
 
-    def set_active(self, name: str) -> None:
+    def set_active(self, name: str) -> bool:
+        """Make *name* the active tool; False (nothing changes) if it does not work on the
+        view shown - show one of its views first."""
         if name not in self._tools:
             raise KeyError(f"no tool named {name!r}")
-        if name == self._active:
+        if name == self._active or self._view not in self._tools[name].views:
             self._sync()
-            return
+            return name == self._active
         old = self._tools.get(self._active)
         self._active = name
         if old is not None and old.on_deactivate is not None:
@@ -167,13 +169,17 @@ class ToolRegistry(QObject):
             new.on_activate()
         self._sync()
         self.toolChanged.emit(name)
+        return True
 
     def toggle(self, name: str) -> None:
         """Activate *name*, or go back to the default tool if it is active already."""
         if name == self._active and name != self.default():
             self.set_active(self.default())
-        elif self._view in self._tools[name].views:
+        else:
             self.set_active(name)
+
+    def view(self) -> str:
+        return self._view
 
     def set_view(self, view: str) -> None:
         """The view on screen: tools for other views are disabled (and left)."""
@@ -420,6 +426,9 @@ class PlotArea(QWidget):
 
     def current_view(self) -> str:
         return VIEWS[self.tabs.currentIndex()]
+
+    def set_current_view(self, view: str) -> None:
+        self.tabs.setCurrentIndex(VIEWS.index(view))
 
     def scale_panels(self) -> dict[str, SlidePanel]:
         return {"map": self.map_scale, "reference": self.reference_scale}

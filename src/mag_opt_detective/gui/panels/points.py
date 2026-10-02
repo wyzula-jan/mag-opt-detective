@@ -161,15 +161,18 @@ def install(window) -> None:
         on_click=lambda click: on_pick(window, click),
     )
 
-    # click mode <-> pick tool
+    # click mode <-> pick tool (Record or Remove shows the map, where the tool works)
     def on_mode(_button, checked: bool) -> None:
         if not checked:
             return
         if panel.point_off.isChecked():
             if tools.active() == PICK:
                 tools.set_active(tools.default())
-        else:
-            tools.set_active(PICK)
+            return
+        if tools.view() not in tools.tool(PICK).views:
+            window.plot_area.set_current_view("map")
+        if not tools.set_active(PICK):
+            on_tool(tools.active())
 
     def on_tool(name: str) -> None:
         with QSignalBlocker(panel.point_group):
