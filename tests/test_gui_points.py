@@ -9,6 +9,7 @@ from PySide6.QtTest import QTest
 import gui_helpers
 from gui_helpers import (
     click_map,
+    click_stacked,
     current_marker_energies,
     load_sweep,
     open_from,
@@ -204,7 +205,7 @@ def test_markers_and_curve_name_are_remembered(qtbot, tmp_path):
 
 
 # ---------------------------------------------------------------------- pick tool
-def test_pick_on_the_map(processed, errors):
+def test_pick_on_the_map_and_on_the_stacked_plot(processed, errors):
     w = processed
     c, tools = w.controller, w.tools
     w.panels["points"].pick_button.click()
@@ -215,6 +216,19 @@ def test_pick_on_the_map(processed, errors):
     np.testing.assert_allclose(c.points.points("LL 1")[0], [1.0])
     click_map(w, 2.0, 500.0, ALT)  # nothing there
     np.testing.assert_allclose(c.points.points("LL 1")[0], [1.0])
+
+    w.plot_area.set_current_view("stacked")
+    assert tools.active() == "pick"
+    assert click_stacked(w, 2.0, 500.0)  # on the 2 T trace, at the clicked energy
+    b, e = c.points.points("LL 1")
+    np.testing.assert_allclose(b, [1.0, 2.0])
+    np.testing.assert_allclose(e, [300.0, 500.0])
+    click_stacked(w, 1.0, 650.0, ALT)  # Alt on the 1 T trace removes its point
+    np.testing.assert_allclose(c.points.points("LL 1")[0], [2.0])
+    stacked = w.plots.stacked
+    tools.click("stacked", 500.0, stacked.trace_y(3, 500.0) + 1.0)  # far above every trace
+    tools.click("stacked", 5000.0, 1.0)  # outside the spectra
+    np.testing.assert_allclose(c.points.points("LL 1")[0], [2.0])
     assert not errors
 
 
@@ -228,12 +242,14 @@ def test_pick_toggle_follows_the_tool_and_shows_a_hint(shown):
     assert area.current_view() == "map" and tools.active() == "pick"
     assert panel.pick_button.isChecked() and tools.tool("pick").button.isChecked()
     assert hint.isVisible() and hint.text().startswith("Picking LL 1 · click to record")
-    view = w.plots.map.view
+    area.set_current_view("stacked")
+    assert tools.active() == "pick" and "click a trace to record" in hint.text()
+    view = w.plots.stacked.view
     view.setFocus()
     QTest.keyClick(view, Qt.Key.Key_Escape)
     assert tools.active() == "navigate" and not panel.pick_button.isChecked()
     assert hint.isHidden()
-    QTest.keyClick(view, Qt.Key.Key_P)
+    QTest.keyClick(view, Qt.Key.Key_P)  # P works on the stacked tab
     assert tools.active() == "pick" and panel.pick_button.isChecked()
     w.controller.add_curve()
     assert hint.text().startswith("Picking LL 2")
@@ -323,12 +339,39 @@ def test_map_markers_current_filled_others_open_in_curve_colours(processed):
     assert ring.points()[0].brush().style() == Qt.BrushStyle.NoBrush
     assert current.points()[0].brush().color().name() == CURVE_COLORS[1]
     np.testing.assert_allclose(current_marker_energies(w), [400.0, 500.0])
+    stacked = w.plots.stacked.layer("points")
     panel.markers.set_value("current")
     assert [len(x) for x, _y in layer.point_data()] == [2]
+    assert [len(x) for x, _y in stacked.point_data()] == [2]
     panel.markers.set_value("hidden")
-    assert layer.point_data() == []
+    assert layer.point_data() == [] and stacked.point_data() == []
     panel.markers.set_value("all")
-    assert [len(x) for x, _y in layer.point_data()] == [1, 1, 2]
+    assert [len(x) for x, _y in stacked.point_data()] == [1, 1, 2]
+
+
+def test_stacked_markers_sit_on_their_traces(processed):
+    w = processed
+    c, stacked = w.controller, w.plots.stacked
+    c.record_points([0.5, 1.0, 2.0], [300.0, 400.0, 500.0], unit="cm-1")
+    c.add_curve()
+    c.record_point(1.5, 700.0)
+    layer = stacked.layer("points")
+
+    def check(others: list[tuple[int, float]], current: list[tuple[int, float]]) -> None:
+        data = layer.point_data()
+        for (x, y), expected in ((data[0], others), (data[-1], current)):
+            np.testing.assert_allclose(x, [e for _j, e in expected])
+            np.testing.assert_allclose(y, [stacked.trace_y(j, e) for j, e in expected])
+
+    check([(0, 300.0), (1, 400.0), (3, 500.0)], [(2, 700.0)])
+    y_before = layer.point_data()[-1][1][0]
+    c.set_view(stacked_offset=0.5)  # the markers follow the offset
+    check([(0, 300.0), (1, 400.0), (3, 500.0)], [(2, 700.0)])
+    assert layer.point_data()[-1][1][0] == pytest.approx(y_before + 2 * (0.5 - 0.01))
+    stacked.set_trace_options(every=2)  # traces 0 and 2 shown: the others' markers go
+    check([(0, 300.0)], [(2, 700.0)])
+    set_unit(w, "meV")
+    check([(0, 300.0 / MEV)], [(2, 700.0 / MEV)])
 
 
 def test_stacked_plot_signals_redrawn_traces(qtbot):

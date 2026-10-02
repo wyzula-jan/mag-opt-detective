@@ -1,7 +1,7 @@
 """Picked points on the plots: the curve colours, the markers and the hint shown while picking.
 
-Curve *i* of ``controller.curve_names()`` gets ``CURVE_COLORS[i % 6]`` everywhere: on the map
-and in the chips of the Points panel. The current curve is drawn filled
+Curve *i* of ``controller.curve_names()`` gets ``CURVE_COLORS[i % 6]`` everywhere: on the map,
+on the stacked plot and in the chips of the Points panel. The current curve is drawn filled
 and the others as open rings; a dark outline keeps every colour readable on all colour maps
 and on the light and dark plot backgrounds.
 """
@@ -17,7 +17,7 @@ from PySide6.QtGui import QColor, QPainter, QPen
 from PySide6.QtWidgets import QWidget
 
 from mag_opt_detective.core.units import from_cm1
-from mag_opt_detective.gui.plots import OverlayLayer
+from mag_opt_detective.gui.plots import OverlayLayer, StackedPlot
 from mag_opt_detective.gui.theme import current_tokens
 
 CURVE_COLORS = ("#ffffff", "#5ad1ff", "#a6e35f", "#ffd166", "#ff86d9", "#ff9b6b")
@@ -28,7 +28,7 @@ SHOW_MODES = (  # value, label, tooltip
     (SHOW_ALL, "All", "Markers of all curves (the current one filled)"),
     (SHOW_NONE, "Hidden", "No markers"),
 )
-MAP_SIZE = 9.0  # marker diameter in pixels
+MAP_SIZE, STACKED_SIZE = 9.0, 8.0  # marker diameters in pixels
 
 
 def curve_color(index: int) -> QColor:
@@ -81,6 +81,38 @@ def map_markers(controller, mode: str) -> list[MarkerSet]:
     for name, color, current in shown_curves(controller, mode):
         b, e = controller.points.points(name)
         sets.append(MarkerSet(b, from_cm1(e, controller.unit), color, current))
+    return sets
+
+
+def field_index(field: np.ndarray, b: float) -> int | None:
+    """Index of the value of *field* that *b* lies on (within half the smallest step)."""
+    if field.size == 0:
+        return None
+    j = int(np.abs(field - b).argmin())
+    steps = np.diff(np.unique(field))
+    tolerance = steps.min() / 2 if steps.size else 1e-9 * max(1.0, abs(float(b)))
+    return j if abs(field[j] - b) <= tolerance else None
+
+
+def stacked_markers(controller, stacked: StackedPlot, mode: str) -> list[MarkerSet]:
+    """Markers on the stacked plot: each point on its field's trace (energy, trace y).
+
+    Points on traces that are not shown (every n-th spectrum) or outside them are left out.
+    """
+    if controller.result is None:
+        return []
+    field = controller.result.ratio.field
+    sets = []
+    for name, color, current in shown_curves(controller, mode):
+        b, e = controller.points.points(name)
+        x, y = [], []
+        for bk, ek in zip(b, from_cm1(e, controller.unit), strict=True):
+            j = field_index(field, bk)
+            yk = None if j is None else stacked.trace_y(j, float(ek))
+            if yk is not None:
+                x.append(float(ek))
+                y.append(yk)
+        sets.append(MarkerSet(np.array(x), np.array(y), color, current))
     return sets
 
 

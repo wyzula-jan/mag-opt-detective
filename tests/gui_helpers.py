@@ -83,6 +83,13 @@ def click_map(window, b: float, energy: float, modifiers=Qt.KeyboardModifier.NoM
     return window.tools.click("map", b, energy, modifiers)
 
 
+def click_stacked(window, b: float, energy: float, modifiers=Qt.KeyboardModifier.NoModifier):
+    """A click on the stacked plot on the trace of field *b* at *energy* (display unit)."""
+    stacked = window.plots.stacked
+    j = int(np.abs(window.controller.result.ratio.field - b).argmin())
+    return window.tools.click("stacked", energy, stacked.trace_y(j, energy), modifiers)
+
+
 def save_to(monkeypatch, path) -> None:
     monkeypatch.setattr(QFileDialog, "getSaveFileName", lambda *a, **k: (str(path), ""))
 

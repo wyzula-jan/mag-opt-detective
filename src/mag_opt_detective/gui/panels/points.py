@@ -1,8 +1,9 @@
 """Points panel: the curves of picked points, their table, the Pick tool and Undo/Redo.
 
 Picked energies are kept in cm^-1 by the controller; the table, the markers and the files use
-the display unit. The Pick tool (P) works on the map: a click records the current curve's point
-at the nearest field and Alt-click removes the nearest point. Every point edit is a step of
+the display unit. The Pick tool (P) works on the map, where a click records the current
+curve's point at the nearest field and Alt-click removes the nearest point, and on the stacked
+plot, where a click near a trace records at that trace's field. Every point edit is a step of
 ``controller.points_undo``, undone with Edit > Undo (Ctrl+Z) and redone with Ctrl+Shift+Z.
 """
 
@@ -54,10 +55,12 @@ from mag_opt_detective.gui.points_view import (
     MAP_SIZE,
     SHOW_ALL,
     SHOW_MODES,
+    STACKED_SIZE,
     PickHint,
     curve_color,
     draw_markers,
     map_markers,
+    stacked_markers,
 )
 from mag_opt_detective.gui.theme import current_tokens
 from mag_opt_detective.gui.widgets import FlowLayout, open_file, save_file
@@ -512,12 +515,35 @@ def nearest_point(window, b: float, energy: float) -> float | None:
     return float(row_field) if np.any(fields == row_field) else None
 
 
+def trace_field(window, energy: float, y: float) -> float | None:
+    """Field of the stacked trace a click at (*energy*, *y*) is on or near, or None.
+
+    The nearest trace counts if the click is within one offset (or a few pixels) of it.
+    """
+    c, stacked = window.controller, window.plots.stacked
+    j = stacked.trace_at(energy, y)
+    if j is None or c.result is None:
+        return None
+    trace_y = stacked.trace_y(j, energy)
+    pixel_h = abs(stacked.plot.vb.viewPixelSize()[1])
+    reach = max(abs(c.view.stacked_offset), REMOVE_RADIUS * pixel_h)
+    if trace_y is None or abs(trace_y - y) > reach:
+        return None
+    return float(c.result.ratio.field[j])
+
+
 @user_action("Pick point")
 def on_pick(window, click: PlotClick) -> None:
     """Record the clicked point of the current curve; Alt-click removes one."""
     c = window.controller
     remove = bool(click.modifiers & ALT)
-    if remove:
+    if click.view == "stacked":
+        b = trace_field(window, click.x, click.y)
+        if b is not None and remove:
+            c.remove_point(b)
+        elif b is not None:
+            c.record_point(b, click.x)
+    elif remove:
         b = nearest_point(window, click.x, click.y)
         if b is not None:
             c.remove_point(b)
@@ -600,13 +626,13 @@ def install(window) -> None:
         "crosshair",
         "Pick points: click records, Alt-click removes",
         "P",
-        views=("map",),
+        views=("map", "stacked"),
         on_click=lambda click: on_pick(window, click),
     )
     install_undo(window)
     hint = PickHint(window.plot_area.plot_box, window.infobar)
 
-    # the pick toggle <-> the tool (it shows the map first)
+    # the pick toggle <-> the tool (on the Reference tab it shows the map first)
     def on_pick_button(checked: bool) -> None:
         if checked:
             if tools.view() not in tools.tool(PICK).views:
@@ -620,10 +646,9 @@ def install(window) -> None:
         picking = tools.active() == PICK
         panel.pick_button.setChecked(picking)
         if picking:
+            where = "click a trace to record" if tools.view() == "stacked" else "click to record"
             curve = c.curve or "(no curve)"
-            hint.set_text(
-                f"Picking {curve} · click to record · {ALT_TEXT}-click to remove · Esc to stop"
-            )
+            hint.set_text(f"Picking {curve} · {where} · {ALT_TEXT}-click to remove · Esc to stop")
         hint.setVisible(picking)
 
     panel.pick_button.clicked.connect(on_pick_button)
@@ -635,7 +660,13 @@ def install(window) -> None:
         sets = map_markers(c, panel.markers.value())
         draw_markers(window.plots.map.layer("points"), sets, MAP_SIZE)
 
-    panel.markers.valueChanged.connect(lambda _value: draw_map())
+    def draw_stacked() -> None:
+        stacked = window.plots.stacked
+        sets = stacked_markers(c, stacked, panel.markers.value())
+        draw_markers(stacked.layer("points"), sets, STACKED_SIZE)
+
+    window.plots.stacked.tracesChanged.connect(draw_stacked)
+    panel.markers.valueChanged.connect(lambda _value: (draw_map(), draw_stacked()))
 
     # state -> widgets
     def points_of(name: str) -> tuple[np.ndarray, np.ndarray]:
@@ -666,6 +697,7 @@ def install(window) -> None:
         with QSignalBlocker(panel.new_table):
             panel.new_table.setChecked(c.new_table)
         draw_map()
+        draw_stacked()
         sync_tool()
 
     # widgets -> state
@@ -698,7 +730,7 @@ def install(window) -> None:
 
     def on_unit(_old, new) -> None:
         panel.model.set_unit(new)
-        draw_map()
+        draw_map()  # the stacked markers follow the redrawn traces
 
     c.unitChanged.connect(on_unit)
     panel.model.set_unit(c.unit)
