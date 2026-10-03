@@ -2,13 +2,11 @@
 
 from __future__ import annotations
 
-import html
 import logging
 import time
-from collections import deque
 
 from PySide6.QtCore import QObject, QRectF, QSize, Qt, Signal
-from PySide6.QtGui import QFontDatabase, QIcon, QPainter
+from PySide6.QtGui import QFontDatabase, QIcon, QPainter, QSyntaxHighlighter
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
@@ -28,6 +26,7 @@ from mag_opt_detective.gui.widgets import Separator
 logger = logging.getLogger("mag_opt_detective")
 
 MAX_LINES = 5000
+SEPARATOR = "  "  # between the time and the text of a line
 
 
 def level_token(level: int) -> str:
@@ -37,9 +36,28 @@ def level_token(level: int) -> str:
     return "warn" if level >= logging.WARNING else "fg"
 
 
+class _LineColors(QSyntaxHighlighter):
+    """Colours a log line from the theme: the time faint, the text by the line's level (kept
+    as the line's block state)."""
+
+    def __init__(self, document):
+        super().__init__(document)
+        self.level = logging.INFO  # of the line being added
+
+    def highlightBlock(self, text: str) -> None:
+        level = self.currentBlockState()
+        if level < 0:  # a new line
+            level = self.level
+            self.setCurrentBlockState(level)
+        tokens = current_tokens()
+        stamp = max(text.find(SEPARATOR), 0)
+        self.setFormat(0, stamp, tokens["faint"])
+        self.setFormat(stamp, len(text) - stamp, tokens[level_token(level)])
+
+
 class ConsoleWidget(QPlainTextEdit):
     """The log lines: the time dimmed, errors and warnings in their colours (as the mockup's
-    ``.log``). :meth:`recolor` paints them again in the current theme."""
+    ``.log``). :meth:`recolor` paints them again in the current theme, in place."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -47,26 +65,14 @@ class ConsoleWidget(QPlainTextEdit):
         self.setMaximumBlockCount(MAX_LINES)
         self.setFont(QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont))
         self.setFrameShape(QPlainTextEdit.Shape.NoFrame)
-        self._lines: deque[tuple[str, str, int]] = deque(maxlen=MAX_LINES)
+        self._colors = _LineColors(self.document())
 
     def append_line(self, stamp: str, text: str, level: int = logging.INFO) -> None:
-        self._lines.append((stamp, text, level))
-        self.appendHtml(self._html(stamp, text, level))
+        self._colors.level = level
+        self.appendPlainText(f"{stamp}{SEPARATOR}{text}")
 
     def recolor(self) -> None:
-        self.clear()
-        for line in self._lines:
-            self.appendHtml(self._html(*line))
-
-    @staticmethod
-    def _html(stamp: str, text: str, level: int) -> str:
-        tokens = current_tokens()
-        return (
-            f"<span style='white-space:pre-wrap'>"
-            f"<span style='color:{tokens['faint'].name()}'>{stamp}</span>  "
-            f"<span style='color:{tokens[level_token(level)].name()}'>{html.escape(text)}</span>"
-            "</span>"
-        )
+        self._colors.rehighlight()
 
 
 class _Emitter(QObject):

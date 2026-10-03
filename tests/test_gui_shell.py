@@ -111,6 +111,12 @@ def test_log_badge_sits_inside_the_button(shown, qtbot):
     assert abs(badge.geometry().center().y() - button.rect().center().y()) <= 1
 
 
+def line_colors(console, line: int) -> list[str]:
+    """The colours of a log line's parts: its time, then its text."""
+    formats = console.document().findBlockByNumber(line).layout().formats()
+    return [part.format.foreground().color().name() for part in formats]
+
+
 def test_log_lines_are_coloured_by_level(window):
     logger = logging.getLogger("mag_opt_detective")
     logger.info("fine")
@@ -119,8 +125,29 @@ def test_log_lines_are_coloured_by_level(window):
     text = window.console.toPlainText().splitlines()
     assert text[-1].endswith("broken <file>  [error]")  # the level also in words, for copies
     tokens = current_tokens()
-    html = window.console.document().toHtml()
-    assert tokens["err"].name() in html and tokens["faint"].name() in html
+    count = window.console.blockCount()
+    assert line_colors(window.console, count - 1) == [tokens["faint"].name(), tokens["err"].name()]
+    assert line_colors(window.console, count - 2)[1] == tokens["fg"].name()
+
+
+def test_log_recolours_in_place(shown, qtbot, monkeypatch):
+    """A theme change colours the lines again without adding them again: quick for a full
+    log, and the log stays where it was scrolled to."""
+    console = shown.console
+    shown.log_panel.set_open(True, animate=False)
+    first = console.blockCount() if console.toPlainText() else 0  # where the lines start
+    for i in range(400):
+        console.append_line("12:00:00", f"line {i}", logging.ERROR if i % 2 else logging.INFO)
+    bar = console.verticalScrollBar()
+    qtbot.waitUntil(lambda: bar.maximum() > 0)
+    bar.setValue(bar.maximum() // 2)
+    position, lines = bar.value(), console.toPlainText()
+    dark = theme.tokens_for(True)
+    monkeypatch.setattr("mag_opt_detective.gui.console.current_tokens", lambda: dark)
+    console.recolor()
+    assert bar.value() == position and console.toPlainText() == lines
+    assert line_colors(console, first + 1) == [dark["faint"].name(), dark["err"].name()]
+    assert line_colors(console, first + 2)[1] == dark["fg"].name()
 
 
 def test_colour_scale_style_switch_applies_to_every_map(shown, sweep, errors, qtbot):
