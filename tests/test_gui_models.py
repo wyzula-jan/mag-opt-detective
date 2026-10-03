@@ -6,7 +6,7 @@ import threading
 
 import numpy as np
 import pytest
-from PySide6.QtCore import QEvent, QSettings
+from PySide6.QtCore import QSettings
 from PySide6.QtWidgets import QApplication, QLabel, QStyle
 
 import gui_helpers
