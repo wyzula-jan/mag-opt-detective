@@ -1,0 +1,43 @@
+# MANUAL ONLY: this workflow runs only when started by hand (workflow_dispatch, under
+# Actions > Docs site > Run workflow). It has no push, pull request, tag or schedule trigger,
+# so pushing to main never builds or publishes the site.
+#
+# It builds the documentation and download site (docs/site) and deploys it to GitHub Pages.
+# Before the first run, set Settings > Pages > Source to "GitHub Actions".
+name: Docs site
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# one deployment at a time; a running one is allowed to finish
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      # standard library only: the runner's Python is enough; the build fails on a broken link
+      - run: python3 docs/site/build.py
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: docs/site/_build
+
+  deploy:
+    name: Deploy
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5
