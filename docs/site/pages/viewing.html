@@ -15,13 +15,13 @@ description: Plot kinds, derivatives per data point or per unit, the live energy
   <dt>Derivative</dt>
   <dd>Off, 1st or 2nd (<kbd>Alt</kbd>+<kbd>1</kbd>, <kbd>2</kbd>, <kbd>3</kbd>), along the energy (<b>d/dE</b>) or along the field (<b>d/dB</b>).</dd>
   <dt>per unit</dt>
-  <dd>Off: the derivative is taken per data point, as in the old versions. On: it is divided by the real step, so d/dE is per cm⁻¹, meV or THz and d/dB is per tesla. An energy derivative per unit therefore changes its values with the unit; one per data point or along the field does not.</dd>
+  <dd>Off: the derivative is taken per data point. On: it is divided by the real step, so d/dE is per cm⁻¹, meV or THz and d/dB is per tesla. An energy derivative per unit therefore changes its values with the unit; one per data point or along the field does not.</dd>
 </dl>
 <p>The plot tabs are <b>Map</b>, <b>Stacked</b> and <b>Reference</b>; the line next to them describes the map shown, e.g. <i>R(B)/R(0) · 2nd derivative d/dE per meV</i>.</p>
 
 <h2 id="unit">The energy unit</h2>
 <p>The <b>Unit</b> switch in the toolbar (cm⁻¹ | meV | THz) converts everything at once: the maps and their axes, the view ranges, the colour levels of per-unit derivatives, the picked points, the model parameters and curves, the journal figure window and every export. Nothing is processed again, and switching back gives exactly the numbers you had.</p>
-<p>Inside, energies are kept in cm⁻¹, the unit of the files, with 1 meV = 8.0656 cm⁻¹ and 1 THz = 33.35641 cm⁻¹ (the factors of the earlier versions).</p>
+<p>Inside, energies are kept in cm⁻¹, the unit of the files, with the fixed factors 1 meV = 8.0656 cm⁻¹ and 1 THz = 33.35641 cm⁻¹.</p>
 
 <h2 id="ranges">View ranges</h2>
 <p>The <b>inspector › View</b> holds the ranges of the plot on screen: <b>Field B</b> and <b>Energy E</b>, shared by the map and the stacked plot, and the <b>Intensity</b> of the stacked plot. Each range is <b>Auto</b>, which fits the data, or <b>Fixed</b>, with a slider and two fields; the note below it gives the range of the data. Drag a slider handle to move one end, or the bar between the handles to move the whole range at its width, as far as the slider goes (<kbd>Shift</kbd>+arrow keys do the same); both fix the range.</p>

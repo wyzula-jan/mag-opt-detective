@@ -19,7 +19,7 @@ description: Where Magneto-Optical Detective keeps its settings and cache, and t
     <tr><td>Linux</td><td class="wrap-ok"><code>~/.config/mag-opt-detective/mag-opt-detective.conf</code></td></tr>
   </tbody>
 </table></div>
-<p>Version 5 stores its settings afresh, so choices saved by its early development builds are ignored once.</p>
+<p>After an update that changes what the stored settings mean, the app starts once from the defaults; your figure presets stay.</p>
 
 <h3 id="folders">The font cache</h3>
 <p>The standalone app keeps matplotlib's font cache, which the first <a href="figures.html#first-export">journal figure</a> builds, in:</p>
@@ -39,8 +39,8 @@ description: Where Magneto-Optical Detective keeps its settings and cache, and t
   <tbody>
     <tr><td>OPUS binary (<code>*.0</code>, <code>*.1</code>, …)</td><td class="wrap-ok">Bruker OPUS files; the single-channel sample spectrum (<code>ScSm</code>) is read</td></tr>
     <tr><td>Text (<code>*.txt</code>, …)</td><td class="wrap-ok">two columns separated by spaces or tabs: wavenumber in cm⁻¹, intensity; Windows line ends and a falling wavenumber order are fine</td></tr>
-    <tr><td>Data tables</td><td class="wrap-ok">maps exported by this app or by the old versions, loaded into the <a href="library.html">library</a></td></tr>
-    <tr><td>Point tables</td><td class="wrap-ok">picked points exported by this app or by the old versions, imported in the Points panel</td></tr>
+    <tr><td>Data tables</td><td class="wrap-ok">maps in the <a href="#data-tables">data table format</a>, loaded into the <a href="library.html">library</a></td></tr>
+    <tr><td>Point tables</td><td class="wrap-ok">picked points in the <a href="#point-tables">point table format</a>, imported in the Points panel</td></tr>
   </tbody>
 </table></div>
 <p>The field of a spectrum comes from its file name, <code>_a01p250T</code> for 1.25 T (the last such tag counts), or from a custom range (<a href="getting-started.html#fields">details</a>).</p>
@@ -49,7 +49,7 @@ description: Where Magneto-Optical Detective keeps its settings and cache, and t
 <p>Every table is plain text with tab-separated columns. Energies are written in the unit shown, and the first header cell names it: <code>Energy (cm-1)</code>, <code>Energy (meV)</code> or <code>Energy (THz)</code>.</p>
 
 <h3 id="data-tables">Data tables</h3>
-<p><b>Export › Data table…</b> (<kbd>Ctrl</kbd>+<kbd>E</kbd>) writes the map shown: one row per energy, one column per field. The format is the one the old versions wrote, so their tables load here and the other way round.</p>
+<p><b>Export › Data table…</b> (<kbd>Ctrl</kbd>+<kbd>E</kbd>) writes the map shown: one row per energy, one column per field. The <a href="library.html">library</a> loads these tables back; one without the unit in the first header cell is read in the unit shown.</p>
 <pre><code>Energy (meV)	0.25T	0.50T	...
 12.5	1.0012	0.9987	...
 12.6	1.0009	0.9991	...</code></pre>
@@ -60,7 +60,7 @@ description: Where Magneto-Optical Detective keeps its settings and cache, and t
 <pre><code>Energy (meV)	LL 1	LL 2
 0.5	12.398
 1.0		24.797</code></pre>
-<p>Tables without the unit in the first header cell, written before version 5, are read in the unit shown.</p>
+<p>Tables without the unit in the first header cell are read in the unit shown.</p>
 
 <h3 id="fit-results">Fit results</h3>
 <p><b>Export…</b> in a model's fit area writes <code>#</code> lines that describe the fit (model, assignment of the curves, number of points and degrees of freedom, χ² and reduced χ², and the model's structure), then one row per parameter, in the unit shown. Fixed parameters have an empty sigma. The Dirac fit from the <a href="models.html#fitting">Models page</a>, in meV:</p>
