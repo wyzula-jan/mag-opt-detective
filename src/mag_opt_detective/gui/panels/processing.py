@@ -5,9 +5,10 @@ panel is open, the map shows the window as guides (overlay layer "guides": dashe
 ends), and the map and the stacked plot show the baseline region as a band to drag by its edges
 or body with the Pan tool (:class:`BaselineRegion`); *Edit on plot* keeps the band there when the
 panel is closed. The band and the fields follow each other. With *Live* on, a new region is
-applied to the maps of the last Process at once (:meth:`AppController.apply_baseline`), at most
-about ten times a second while it is dragged (:class:`LiveApply`); otherwise it waits for the
-next Process. A library map keeps the baseline it was plotted with: the band only shows there.
+applied to the maps of the last Process at once (:meth:`AppController.apply_baseline`), paced
+while it is dragged so that the window stays responsive (:class:`LiveApply`); otherwise it waits
+for the next Process. A library map keeps the baseline it was plotted with: the band only shows
+there.
 """
 
 from __future__ import annotations
@@ -316,12 +317,15 @@ def default_region(lo: float, hi: float, width: float) -> tuple[float, float]:
 class LiveApply(QObject):
     """Runs *apply* for a stream of changes (the baseline region dragged or typed).
 
-    The first change runs it at once. Later ones wait INTERVAL ms, or twice as long as the
-    last run took if that is longer, counted from its end, so the window keeps at least half
-    of the time to follow the mouse. A run longer than SLOW seconds makes it slow: changes made
-    while the region is dragged then wait until the drag ends (:meth:`flush`), and typed ones
-    until the typing pauses (SETTLE ms). It is fast again only after a run shorter than FAST
-    seconds, so a map that takes about SLOW to update behaves the same in every drag.
+    A run costs more than *apply* itself: what it changed is drawn after it returns (on the
+    stacked plot that takes longer than the run). So its cost is counted until the window is
+    idle again, found with zero timers: the first that comes back within IDLE seconds (at most
+    SETTLE_MAX seconds after the start). The first change runs at once. Later ones wait, from
+    that point, INTERVAL ms or twice the cost if that is longer, so the window keeps at least
+    two thirds of the time to follow the mouse. A cost above SLOW seconds makes it slow:
+    changes made while the region is dragged then wait until the drag ends (:meth:`flush`),
+    and typed ones until the typing pauses (SETTLE ms). It is fast again only after a cost
+    below FAST seconds, so a map that takes about SLOW to update behaves the same in every drag.
 
     *apply* returns False when it had nothing to do; such a run does not count. *clock* gives
     the time in seconds (tests may pass their own).
@@ -331,6 +335,8 @@ class LiveApply(QObject):
     SETTLE = 300  # ms
     SLOW = 0.05  # s
     FAST = 0.03  # s
+    IDLE = 0.02  # s: a zero timer back this soon finds the window idle
+    SETTLE_MAX = 1.0  # s: the longest a run's cost is measured
 
     def __init__(
         self,
@@ -343,25 +349,39 @@ class LiveApply(QObject):
         self._clock = clock
         self._timer = QTimer(self)
         self._timer.setSingleShot(True)
+        self._timer.setTimerType(Qt.TimerType.PreciseTimer)  # (a coarse one may fire 5 % early)
         self._timer.timeout.connect(self.flush)
         self._pending = False
-        self._done = -math.inf  # clock() at the end of the last run
+        self._dragging = False  # the waiting change was made while dragging
+        self._busy = False  # the last run's cost is still being measured
+        self._start = 0.0  # clock() at the start of the last run
+        self._probe_at = 0.0  # clock() when the last zero timer was started
+        self._done = -math.inf  # clock() when the window was idle after the last run
         self.slow = False  # see the class docstring
         self.runs = 0  # how many times *apply* did something
-        self.last_duration = 0.0  # s, of the last run
+        self.last_duration = 0.0  # s, the cost of the last run
 
     def is_pending(self) -> bool:
         return self._pending
 
+    def is_busy(self) -> bool:
+        """The last run's cost is still being measured (what it changed is being drawn)."""
+        return self._busy
+
     def gap(self) -> float:
-        """How long (ms) a change waits after the end of the last run while not slow."""
+        """How long (ms) a change waits after the last run's cost while not slow."""
         return max(self.INTERVAL, 2000 * self.last_duration)
 
     def request(self, dragging: bool = False) -> None:
         """A change: run now, or as soon as the rules above allow."""
         self._pending = True
+        self._dragging = dragging
+        if not self._busy:
+            self._schedule()
+
+    def _schedule(self) -> None:
         if self.slow:
-            if dragging:
+            if self._dragging:
                 self._timer.stop()
             else:
                 self._timer.start(self.SETTLE)
@@ -383,10 +403,26 @@ class LiveApply(QObject):
         start = self._clock()
         if self._apply() is False:
             return
-        self._done = self._clock()
-        self.last_duration = self._done - start
-        self.slow = self.last_duration > (self.FAST if self.slow else self.SLOW)
         self.runs += 1
+        self._start = start
+        self._busy = True
+        self._probe()
+
+    def _probe(self) -> None:
+        self._probe_at = self._clock()
+        QTimer.singleShot(0, self, self._probed)
+
+    def _probed(self) -> None:
+        now = self._clock()
+        if now - self._probe_at > self.IDLE and now - self._start < self.SETTLE_MAX:
+            self._probe()  # the window was busy (drawing what the run changed): look again
+            return
+        self._busy = False
+        self._done = now
+        self.last_duration = now - self._start
+        self.slow = self.last_duration > (self.FAST if self.slow else self.SLOW)
+        if self._pending:
+            self._schedule()
 
     def cancel(self) -> None:
         self._timer.stop()

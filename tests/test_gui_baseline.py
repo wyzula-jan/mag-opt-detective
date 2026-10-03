@@ -8,7 +8,7 @@ import time
 import numpy as np
 import pyqtgraph as pg
 import pytest
-from PySide6.QtCore import QCoreApplication, QEvent, QPoint, QPointF, QSettings, Qt
+from PySide6.QtCore import QCoreApplication, QEvent, QPoint, QPointF, QSettings, Qt, QTimer
 from PySide6.QtGui import QColor
 from PySide6.QtTest import QTest
 
@@ -390,13 +390,19 @@ class FakeClock:
         self.now += self.cost
 
 
+def settled(qtbot, live) -> None:
+    """Wait until *live* has measured its last run (the event loop came back idle)."""
+    qtbot.waitUntil(lambda: not live.is_busy(), timeout=3000)
+
+
 def test_live_apply_coalesces_a_burst(qtbot):
     clock = FakeClock()
     live = LiveApply(clock.run, clock=clock)
     for _ in range(20):  # at once, then once the interval is over
         live.request()
-    assert clock.calls == 1 and live.is_pending()
+    assert clock.calls == 1 and live.is_pending() and live.is_busy()
     qtbot.waitUntil(lambda: clock.calls == 2, timeout=2000)
+    settled(qtbot, live)
     assert not live.is_pending() and not live.slow and live.runs == 2
     live.flush()  # nothing waits
     assert clock.calls == 2
@@ -407,29 +413,56 @@ def test_live_apply_coalesces_a_burst(qtbot):
 
 
 def test_live_apply_is_slow_with_hysteresis(qtbot):
+    slow, fast = LiveApply.SLOW, LiveApply.FAST
     clock = FakeClock()
     live = LiveApply(clock.run, clock=clock)
-    clock.cost = 0.06  # a run longer than SLOW ...
+    clock.cost = 1.2 * slow  # a run longer than SLOW ...
     live.request()
-    assert live.slow and live.gap() == pytest.approx(120)
+    settled(qtbot, live)
+    assert live.slow and live.gap() == pytest.approx(2400 * slow)
     live.request(dragging=True)  # ... makes a drag wait for its end
     qtbot.wait(2 * LiveApply.INTERVAL)
     assert clock.calls == 1 and live.is_pending()
-    clock.cost = 0.04  # between FAST and SLOW: still slow
+    clock.cost = (slow + fast) / 2  # between FAST and SLOW: still slow
     live.flush()
+    settled(qtbot, live)
     assert clock.calls == 2 and live.slow
     live.request()  # typed: once the typing pauses
     live.request()
     assert clock.calls == 2
     qtbot.waitUntil(lambda: clock.calls == 3, timeout=3000)
-    clock.cost = 0.02  # below FAST: fast again
+    settled(qtbot, live)
+    clock.cost = fast / 2  # below FAST: fast again
     live.request(dragging=True)
     live.flush()
+    settled(qtbot, live)
     assert not live.slow and clock.calls == 4
-    clock.cost = 0.04  # between FAST and SLOW: still fast
+    clock.cost = (slow + fast) / 2  # between FAST and SLOW: still fast
     clock.now += 1.0
     live.request(dragging=True)
+    settled(qtbot, live)
     assert clock.calls == 5 and not live.slow
+
+
+def test_live_apply_counts_the_drawing_a_run_leaves(qtbot):
+    """What a run changed is drawn after it returns: that time counts as its cost."""
+    clock = FakeClock()
+
+    def run():
+        clock.run()
+        QTimer.singleShot(0, draw)  # (posted by the run, as a redraw is)
+
+    def draw():
+        clock.now += 2 * LiveApply.IDLE
+
+    live = LiveApply(run, clock=clock)
+    clock.cost = LiveApply.IDLE / 2
+    live.request()
+    assert live.is_busy()
+    settled(qtbot, live)
+    assert live.last_duration == pytest.approx(2.5 * LiveApply.IDLE)
+    live.request()  # waits twice the cost after the drawing, not after the run
+    assert clock.calls == 1 and live.is_pending()
 
 
 def test_live_apply_counts_only_runs_that_did_something(qtbot):
@@ -441,9 +474,47 @@ def test_live_apply_counts_only_runs_that_did_something(qtbot):
 
     live = LiveApply(nothing, clock=clock)
     live.request()
-    assert live.runs == 0 and not live.slow and not live.is_pending()
+    assert live.runs == 0 and not live.slow and not live.is_pending() and not live.is_busy()
     live.request()  # not held back by a run that did nothing
     assert live.runs == 0
+
+
+@pytest.mark.parametrize("share", [0.0, 0.4, 0.9, 1.5])  # of SLOW: a run and its drawing
+def test_live_paces_a_drag_whatever_a_run_costs(processed, qtbot, monkeypatch, share):
+    """While the band is dragged, apply_baseline runs at most once per INTERVAL or per its
+    cost plus twice that cost of idle time, the drawing it leaves for later included (that
+    drawing takes twice as long as the run, as on the stacked plot)."""
+    w, c = processed, processed.controller
+    panel = w.panels["processing"]
+    w.resize(1400, 900)
+    w.show()
+    qtbot.waitExposed(w)
+    cost = share * LiveApply.SLOW
+    starts = []
+    original = c.apply_baseline
+
+    def costly():
+        starts.append(time.perf_counter())
+        time.sleep(cost / 3)
+        QTimer.singleShot(0, lambda: time.sleep(2 * cost / 3))  # what the run leaves to draw
+        return original()
+
+    monkeypatch.setattr(c, "apply_baseline", costly)
+    panel.baseline_live.setChecked(True)
+    plot = w.plots.map
+    steps = [(1.2, 550.0 + 10 * k) for k in range(31)]  # the upper edge, up by 300 cm-1
+    start = time.perf_counter()
+    mouse_drag(qtbot, plot, steps, release=False)
+    elapsed = time.perf_counter() - start
+    spacing = 0.98 * (cost + max(LiveApply.INTERVAL / 1000, 2 * cost))  # (timer precision)
+    assert 1 <= len(starts) <= 1 + elapsed / spacing
+    assert all(b - a >= spacing for a, b in itertools.pairwise(starts))
+    QTest.mouseRelease(plot.view.viewport(), LEFT, PLAIN, viewport_pos(plot, *steps[-1]))
+    assert c.result.baseline_region == c.processing.baseline  # applied when let go
+    assert c.processing.baseline[1] == pytest.approx(850, abs=5)
+    settled(qtbot, panel.live)
+    if cost < LiveApply.FAST / 2 or cost > LiveApply.SLOW:  # (the drawing adds a little)
+        assert panel.live.slow == (cost > LiveApply.SLOW)
 
 
 def test_live_logs_the_region_once_it_rests(processed, qtbot, caplog):
