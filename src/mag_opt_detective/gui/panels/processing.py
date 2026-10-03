@@ -337,8 +337,8 @@ class LiveApply(QObject):
 
     INTERVAL = 100  # ms
     SETTLE = 300  # ms
-    SLOW = 0.2  # s (the 7726 x 64 sweep costs about 0.05 on the map, 0.08-0.12 stacked)
-    FAST = 0.15  # s
+    SLOW = 0.12  # s (the 7726 x 64 sweep costs about 0.05 on the map, 0.07-0.1 stacked)
+    FAST = 0.08  # s
     IDLE = 0.02  # s: a zero timer back this soon finds the window idle
     SETTLE_MAX = 1.0  # s: the longest a run's cost is measured
     HISTORY = 3  # costs the slow and fast decisions (and the typical cost) look at
