@@ -8,9 +8,14 @@ its place in the list ("models" for the first, then "models 2", ...); a fit is p
 are edited and on unit switches, and each visible model is registered with
 ``controller.set_overlay(key, fn(unit))`` so ``figure_state()`` (and the export) include it.
 
-The list is saved under ``models/list`` (JSON, energies in meV). The keys of the former
-Overlays section (``models/show_dirac``, ``velocity``, ``delta``, ``n_lines``) are taken over
-by the Dirac card once.
+Every continuous parameter has a slider (a kit ``NudgeSlider``); one mode serves them all,
+chosen at the top of the section or in a slider's context menu: Range (the handle spans a range
+of values) or Relative (drag away from the centre to change the value by up to ±1, 10 or 50 %;
+the handle springs back). Curves follow a drag at about 50 Hz.
+
+The list is saved under ``models/list`` (JSON, energies in meV) and the slider mode under
+``models/slider_mode``. The keys of the former Overlays section (``models/show_dirac``,
+``velocity``, ``delta``, ``n_lines``) are taken over by the Dirac card once.
 """
 
 from __future__ import annotations
@@ -24,9 +29,9 @@ from pathlib import Path
 
 import numpy as np
 import pyqtgraph as pg
-from PySide6.QtCore import QObject, Qt, Signal
+from PySide6.QtCore import QObject, Qt, QTimer, Signal
 from PySide6.QtGui import QColor
-from PySide6.QtWidgets import QApplication, QMenu, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QApplication, QHBoxLayout, QMenu, QVBoxLayout, QWidget
 
 from mag_opt_detective.core.fitting import FitResult, Model, Observation, apply
 from mag_opt_detective.core.units import Unit, from_cm1
@@ -35,7 +40,9 @@ from mag_opt_detective.gui.controller import EXPECTED_ERRORS, AppController, use
 from mag_opt_detective.gui.inspector import model_state as ms
 from mag_opt_detective.gui.inspector.model_cards import ModelCard
 from mag_opt_detective.gui.inspector.model_fit import FitArea
+from mag_opt_detective.gui.inspector.model_widgets import SliderMode, muted_label
 from mag_opt_detective.gui.inspector.view import update_sections
+from mag_opt_detective.gui.kit.nudge_slider import mode_text
 from mag_opt_detective.gui.panels.common import LinkButton, hint
 from mag_opt_detective.gui.points_view import curve_color
 from mag_opt_detective.gui.settings import PREFIX
@@ -45,9 +52,15 @@ logger = logging.getLogger("mag_opt_detective")
 
 LAYER, PREVIEW_LAYER = "models", "models fit"
 SETTINGS_KEY = "models/list"
+MODE_KEY = "models/slider_mode"
 LEGACY_KEYS = ("models/show_dirac", "models/velocity", "models/delta", "models/n_lines")
 SHADOW_PEN = pg.mkPen((0, 0, 0, 110), width=3)  # as the processing guides
 FIT_WAIT = 0.25  # s: a fit that takes longer goes on in the background (busy, cancellable)
+DRAW_INTERVAL = 20  # ms: curves follow a slider drag at about 50 Hz
+MODE_TIP = (
+    "How the parameter sliders change a value: across a range, or relative to the value "
+    "(drag away from the centre; the handle springs back). Also on a right-click on a slider."
+)
 NO_MODELS = (
     "No models. Add one to draw transition energies over the map and fit them to the picked points."
 )
@@ -97,6 +110,15 @@ class ModelsPage(QWidget):
             )
         )
         self.empty = hint(NO_MODELS)
+        self.mode_button = LinkButton("", MODE_TIP)
+        self.mode_row = QWidget()
+        mode_label = muted_label("Sliders", 0.94)
+        mode_label.setToolTip(MODE_TIP)
+        row = QHBoxLayout(self.mode_row)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.addWidget(mode_label)
+        row.addStretch(1)
+        row.addWidget(self.mode_button)
         self.cards_layout = QVBoxLayout()
         self.cards_layout.setContentsMargins(0, 0, 0, 0)
         self.cards_layout.setSpacing(8)
@@ -104,6 +126,7 @@ class ModelsPage(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(8)
         layout.addWidget(self.empty)
+        layout.addWidget(self.mode_row)
         layout.addLayout(self.cards_layout)
         self.models: Models | None = None  # set by install()
 
@@ -194,6 +217,14 @@ class Models(QObject):
         self._registered: set[str] = set()
         self._slots = 0  # model layers in use
         self._previews: set[str] = set()  # preview layers created
+        self._draw_timer = QTimer(self)  # coalesces the redraws of a slider drag
+        self._draw_timer.setSingleShot(True)
+        self._draw_timer.setInterval(DRAW_INTERVAL)
+        self._draw_timer.timeout.connect(self.draw)
+        self._slider_mode = SliderMode(self)
+        self._slider_mode.changed.connect(self._show_slider_mode)
+        page.mode_button.clicked.connect(self._choose_slider_mode)
+        self._show_slider_mode(self._slider_mode.mode, self._slider_mode.span)
         page.models = self
         for kind, action in page.add_actions.items():
             action.triggered.connect(lambda _checked=False, k=kind: self.add(k))
@@ -202,6 +233,21 @@ class Models(QObject):
     @property
     def unit(self) -> Unit:
         return self.c.unit
+
+    @property
+    def slider_mode(self) -> SliderMode:
+        """The mode of every parameter slider (one for the whole section)."""
+        return self._slider_mode
+
+    def _show_slider_mode(self, mode: str, span: float) -> None:
+        button = self.page.mode_button
+        button.setText(mode_text(mode, span))
+        button.setAccessibleName(f"Slider mode: {mode_text(mode, span)}")
+        button.updateGeometry()
+
+    def _choose_slider_mode(self) -> None:
+        button = self.page.mode_button
+        self._slider_mode.menu(button).exec(button.mapToGlobal(button.rect().bottomLeft()))
 
     # --- the list -------------------------------------------------------------------------
     def rebuild(self) -> None:
@@ -216,8 +262,12 @@ class Models(QObject):
         self.results = {}
         for entry in self.entries:
             self._add_card(entry)
-        self.page.empty.setVisible(not self.entries)
+        self._show_empty()
         self.draw()
+
+    def _show_empty(self) -> None:
+        self.page.empty.setVisible(not self.entries)
+        self.page.mode_row.setVisible(bool(self.entries))
 
     def _add_card(self, entry: ms.ModelEntry) -> ModelCard:
         card = ModelCard(entry, self, FitArea(entry, self))
@@ -236,7 +286,7 @@ class Models(QObject):
         entry = ms.new_entry(kind, self.entries, self.energy_span())
         self.entries.append(entry)
         card = self._add_card(entry)
-        self.page.empty.hide()
+        self._show_empty()
         self.draw()
         logger.info("Model added: %s", entry.name)
         if kind == ms.CUSTOM:
@@ -253,7 +303,7 @@ class Models(QObject):
         self.page.cards_layout.removeWidget(card)
         card.hide()
         card.deleteLater()
-        self.page.empty.setVisible(not self.entries)
+        self._show_empty()
         self.draw()
         logger.info("Model removed: %s", entry.name)
 
@@ -272,14 +322,19 @@ class Models(QObject):
         return (float(energy.min()), float(energy.max())) if energy.size else None
 
     # --- edits from the cards -------------------------------------------------------------
-    def edited(self, entry: ms.ModelEntry, structure: bool = False) -> None:
-        """*entry*'s parameters changed; *structure*: its branches or parameters did."""
+    def edited(self, entry: ms.ModelEntry, structure: bool = False, live: bool = False) -> None:
+        """*entry*'s parameters changed; *structure*: its branches or parameters did; *live*: a
+        slider is being dragged (the curves follow within :data:`DRAW_INTERVAL`)."""
         card = self.cards.get(entry)
         if structure:
             self.cancel_fit(entry)
             self.results.pop(entry, None)
             if card is not None:
                 card.refresh()
+        if live:
+            if not self._draw_timer.isActive():
+                self._draw_timer.start()
+            return
         if card is not None:
             card.fit_area.refresh()
         self.draw()
@@ -332,6 +387,7 @@ class Models(QObject):
 
     def draw(self) -> None:
         """Draw every model in its layer, the fit previews, and register the overlays."""
+        self._draw_timer.stop()
         plot = self.window.plots.map
         unit = self.c.unit
         for slot, entry in enumerate(self.entries):
@@ -595,3 +651,4 @@ def install(window) -> None:
     c.pointsChanged.connect(models.points_changed)
     if window.persistence is not None:
         window.persistence.bind(SETTINGS_KEY, setting)
+        window.persistence.bind(MODE_KEY, models.slider_mode)

@@ -6,7 +6,7 @@ import threading
 
 import numpy as np
 import pytest
-from PySide6.QtCore import QSettings
+from PySide6.QtCore import QPoint, QSettings, Qt
 from PySide6.QtWidgets import QApplication, QLabel, QStyle
 
 import gui_helpers
@@ -20,6 +20,8 @@ from mag_opt_detective.core.zeeman import MU_B, Form, branch_energy
 from mag_opt_detective.gui.controller import AppController
 from mag_opt_detective.gui.inspector import model_state as ms
 from mag_opt_detective.gui.inspector import models as models_module
+from mag_opt_detective.gui.inspector.model_widgets import FIELD_HEIGHT, ParamRow
+from mag_opt_detective.gui.kit.nudge_slider import jog_fraction
 from mag_opt_detective.gui.main_window import INSPECTOR_MIN_WIDTH, MainWindow
 from mag_opt_detective.gui.settings import PREFIX
 
@@ -165,25 +167,25 @@ def test_energy_parameters_are_shown_in_the_display_unit(window, sweep, errors):
     zcard.editor.add_button.click()
     zcard.editor.coupled.setChecked(True)
     row = zcard.editor.rows[0]
-    row.e0.edit.setText("161.312")  # 20 meV in cm-1
+    row.e0.field.edit.setText("161.312")  # 20 meV in cm-1
     assert ms.params(zeeman)["e0_0"].value == pytest.approx(20.0)
 
     set_unit(window, "meV")
     assert c.result is result  # nothing processed again
     assert card.editor.delta.field.text() == "10"
     assert card.editor.delta.field.unit_label.text() == "meV"
-    assert zcard.editor.rows[0].e0.text() == "20"
-    assert zcard.editor.couplings[(0, 1)].text() == "1"  # a new coupling starts at 1 meV
+    assert zcard.editor.rows[0].e0.field.text() == "20"
+    assert zcard.editor.couplings[(0, 1)].field.text() == "1"  # a new coupling starts at 1 meV
     field, energy = models.curve_data()["dirac"][1]
     np.testing.assert_allclose(energy, dirac_interband(field, 5.0, 10.0, 5)[1])
 
     set_unit(window, "THz")
     assert float(card.editor.delta.field.text()) == pytest.approx(10 * MEV / THZ, rel=1e-5)
-    assert float(zcard.editor.couplings[(0, 1)].text()) == pytest.approx(MEV / THZ, rel=1e-5)
+    assert float(zcard.editor.couplings[(0, 1)].field.text()) == pytest.approx(MEV / THZ, rel=1e-5)
     field, energy = models.curve_data()["dirac"][1]
     expected = convert(dirac_interband(field, 5.0, 10.0, 5)[1], "meV", "THz")
     np.testing.assert_allclose(energy, expected)
-    zcard.editor.rows[1].e0.edit.setText("12")  # THz
+    zcard.editor.rows[1].e0.field.edit.setText("12")  # THz
     assert ms.params(zeeman)["e0_1"].value == pytest.approx(12 * THZ / MEV)
     assert ms.params(dirac)["delta"].value == pytest.approx(10.0)  # kept in meV
     assert not errors
@@ -203,7 +205,7 @@ def test_zeeman_branches_and_couplings(window, errors):
     editor.coupled.setChecked(True)
     assert zeeman.model.coupled and not editor.coupling_box.isHidden()
     assert ms.params(zeeman)["delta_0_1"].value == 1.0  # meV, not 0
-    editor.couplings[(0, 1)].edit.setText(f"{2 * MEV:g}")  # 2 meV typed in cm-1
+    editor.couplings[(0, 1)].field.edit.setText(f"{2 * MEV:g}")  # 2 meV typed in cm-1
     assert ms.params(zeeman)["delta_0_1"].value == pytest.approx(2.0)
     assert zeeman.branch_names() == ["Mode 1", "Mode 2"]
 
@@ -250,8 +252,8 @@ def test_custom_expression_validates_as_you_type(window, sweep, errors):
 
     editor.code.edit.setPlainText("E0 + g*muB*B")
     assert list(editor.rows) == ["E0", "g"]
-    editor.rows["E0"].value.edit.setText("40")
-    editor.rows["g"].value.edit.setText("2")
+    editor.rows["E0"].value.field.edit.setText("40")
+    editor.rows["g"].value.field.edit.setText("2")
     editor.rows["g"].fixed.setChecked(True)
     editor.rows["E0"].lo.edit.setText("10")
     assert ms.params(entry)["E0"].lo == 10.0
@@ -275,14 +277,14 @@ def test_custom_expression_validates_as_you_type(window, sweep, errors):
     editor.code.edit.setPlainText("E0 + g*muB*B\nE1 - g*muB*B  # lower")
     assert editor.message.level() == "muted" and not editor.code.is_invalid()
     assert list(editor.rows) == ["E0", "g", "E1"]
-    assert editor.rows["E0"].value.text() == "40"
+    assert editor.rows["E0"].value.field.text() == "40"
     assert editor.rows["g"].fixed.isChecked()
     assert entry.branch_names() == ["E0 + g*muB*B", "lower"]
 
     editor.code.edit.setPlainText("E0 + h*B")
     assert list(editor.rows) == ["E0", "h"]
     editor.code.edit.setPlainText("E0 + g*muB*B")  # g comes back as it was
-    assert editor.rows["g"].value.text() == "2" and editor.rows["g"].fixed.isChecked()
+    assert editor.rows["g"].value.field.text() == "2" and editor.rows["g"].fixed.isChecked()
     assert ms.params(entry)["E0"].lo == 10.0
     assert "h" not in entry.memory  # never set by the user: forgotten
     text = "E0 + amplitude*B"
@@ -327,10 +329,10 @@ def test_fit_zeeman_branches_to_picked_points(window, sweep, tmp_path, errors):
     card = card_of(window, entry)
     editor = card.editor
     editor.add_button.click()
-    editor.rows[0].e0.edit.setText(f"{18 * MEV:g}")
-    editor.rows[1].e0.edit.setText(f"{37 * MEV:g}")
+    editor.rows[0].e0.field.edit.setText(f"{18 * MEV:g}")
+    editor.rows[1].e0.field.edit.setText(f"{37 * MEV:g}")
     editor.rows[1].m.edit.setText("-1")
-    editor.rows[1].g.edit.setText("1")
+    editor.rows[1].g.field.edit.setText("1")
     start = {p.name: p.value for p in entry.model.params}
 
     card.fit_button.click()
@@ -374,9 +376,12 @@ def test_fit_zeeman_branches_to_picked_points(window, sweep, tmp_path, errors):
     assert models.result(entry) is None and area.results.isHidden()
     for p in entry.model.params:
         assert p.value == pytest.approx(fitted[p.name])
-    shown_e0 = float(editor.rows[0].e0.text())  # five significant digits
+    shown_e0 = float(editor.rows[0].e0.field.text())  # five significant digits
     assert shown_e0 == pytest.approx(fitted["e0_0"] * MEV, rel=1e-4)
-    assert float(editor.rows[1].g.text()) == pytest.approx(fitted["g_1"], rel=1e-5)
+    assert float(editor.rows[1].g.field.text()) == pytest.approx(fitted["g_1"], rel=1e-5)
+    # the sliders follow (energies in the display unit)
+    assert editor.rows[0].e0.slider.value() == pytest.approx(fitted["e0_0"] * MEV, rel=1e-4)
+    assert editor.rows[1].g.slider.value() == pytest.approx(fitted["g_1"])
     assert not errors
 
 
@@ -400,8 +405,8 @@ def test_fit_a_custom_expression(window, sweep, tmp_path, errors):
     editor = card.editor
     editor.unit.set_value("THz")
     editor.code.edit.setPlainText("E0 + a*B**2  # parabola")
-    editor.rows["E0"].value.edit.setText("1")
-    editor.rows["a"].value.edit.setText("0.02")
+    editor.rows["E0"].value.field.edit.setText("1")
+    editor.rows["a"].value.field.edit.setText("0.02")
 
     card.fit_button.click()
     area = card.fit_area
@@ -424,7 +429,7 @@ def test_fit_a_custom_expression(window, sweep, tmp_path, errors):
     area.fit_button.click()  # the noise points pull the curve away
     assert models.result(entry).chi2 > result.chi2
     area.apply_button.click()
-    assert float(editor.rows["E0"].value.text()) == pytest.approx(
+    assert float(editor.rows["E0"].value.field.text()) == pytest.approx(
         ms.params(entry)["E0"].value, rel=1e-5
     )
     assert not errors
@@ -640,7 +645,7 @@ def test_visible_models_are_overlays_of_the_figure(window, sweep, qtbot, errors)
     e0 = ms.params(zeeman)["e0_0"].value
     np.testing.assert_allclose(energy, convert(branch_energy(field, e0, 2.0, 1.0), "meV", "THz"))
     with qtbot.waitSignal(c.overlaysChanged, timeout=1000):
-        card_of(window, zeeman).editor.rows[0].g.edit.setText("3")
+        card_of(window, zeeman).editor.rows[0].g.field.edit.setText("3")
     card_of(window, zeeman).visible_switch.setChecked(False)
     assert set(c.figure_state().overlays) == {"dirac"}
     card_of(window, dirac).remove_button.click()
@@ -690,7 +695,7 @@ def test_zeeman_energies_fit_their_fields_in_a_narrow_window(window, sweep, qtbo
     assert window.inspector_panel.width() >= 280 and window.side_panel.is_open()
     texts = []
     for row in editor.rows:
-        edit = row.e0.edit
+        edit = row.e0.field.edit
         texts.append(edit.text())
         assert edit.width() >= edit.fontMetrics().horizontalAdvance(edit.text())
         assert edit.cursorPosition() == 0  # a longer number would show its start
@@ -713,18 +718,18 @@ def test_models_are_remembered(qtbot, tmp_path):
     zeeman = add(w, "zeeman")
     zcard = card_of(w, zeeman)
     zcard.editor.add_button.click()
-    zcard.editor.rows[0].e0.edit.setText("12")
+    zcard.editor.rows[0].e0.field.edit.setText("12")
     zcard.editor.rows[1].label.edit.setText("magnon")
     zcard.editor.rows[1].form.click()
     zcard.editor.coupled.setChecked(True)
-    zcard.editor.couplings[(0, 1)].edit.setText("2.5")
+    zcard.editor.couplings[(0, 1)].field.edit.setText("2.5")
     zcard.editor.coupled.setChecked(False)  # the 2.5 meV is kept aside
     zcard.swatch.colorChosen.emit(ms.MODEL_COLORS[3])
     custom = add(w, "custom")
     ccard = card_of(w, custom)
     ccard.editor.code.edit.setPlainText("E0 + a*B")
     ccard.editor.unit.set_value("THz")
-    ccard.editor.rows["a"].value.edit.setText("0.25")
+    ccard.editor.rows["a"].value.field.edit.setText("0.25")
     ccard.editor.rows["a"].fixed.setChecked(True)
     ccard.editor.rows["E0"].hi.edit.setText("5")
     ccard.chevron.click()  # collapsed
@@ -755,7 +760,7 @@ def test_models_are_remembered(qtbot, tmp_path):
     assert ms.params(x)["E0"].hi == 5.0 and x.edited == {"E0", "a"}
     assert x.fit.assignment == "sorted"
     zcard2 = card_of(w2, z)
-    assert zcard2.editor.rows[0].e0.text() == "12"  # shown in meV, the restored unit
+    assert zcard2.editor.rows[0].e0.field.text() == "12"  # shown in meV, the restored unit
     zcard2.editor.coupled.setChecked(True)
     assert ms.params(z)["delta_0_1"].value == 2.5
     assert card_of(w2, x).body.isHidden()
@@ -785,3 +790,265 @@ def test_invalid_stored_models_keep_the_defaults(qtbot, tmp_path):
     w = MainWindow(settings=QSettings(ini, QSettings.Format.IniFormat))
     qtbot.addWidget(w)
     assert [e.kind for e in models_of(w).entries] == ["dirac"]
+
+
+# ---------------------------------------------------------------------- parameter rows
+def shown_window(window, qtbot, size=(1100, 800)):
+    window.resize(*size)
+    window.show()
+    qtbot.waitExposed(window)
+
+
+def settle(qtbot) -> None:
+    QApplication.processEvents()
+    qtbot.wait(30)
+
+
+def every_model(window) -> None:
+    """Dirac (shown), a coupled Zeeman model with three branches and a custom expression with
+    five parameters, every card open."""
+    models = models_of(window)
+    models.set_visible(models.entries[0], True)
+    zeeman = add(window, "zeeman")
+    editor = card_of(window, zeeman).editor
+    editor.add_button.click()
+    editor.add_button.click()
+    editor.coupled.setChecked(True)
+    custom = add(window, "custom")
+    card_of(window, custom).editor.code.edit.setPlainText(
+        "E0 + amplitude*sqrt(B) + b*B  # LL\nE1 + g*muB*B"
+    )
+
+
+def shown_in(widget, ancestor) -> bool:
+    """Whether *widget* shows with *ancestor* (nothing between them was hidden)."""
+    explicit = Qt.WidgetAttribute.WA_WState_ExplicitShowHide
+    while widget is not ancestor:
+        if widget.isHidden() and widget.testAttribute(explicit):
+            return False
+        widget = widget.parentWidget()
+    return True
+
+
+def param_rows(window) -> list[ParamRow]:
+    """The parameter rows of every card that are not hidden (e.g. uncoupled couplings)."""
+    return [
+        row
+        for card in models_of(window).cards.values()
+        for row in card.findChildren(ParamRow)
+        if shown_in(row, card)
+    ]
+
+
+@pytest.mark.parametrize(
+    ("size", "inspector"), [((1100, 800), None), ((1400, 900), "narrowest"), ((1400, 900), 480)]
+)
+def test_value_fields_share_one_column(window, sweep, qtbot, size, inspector, errors):
+    """In every card the number fields share x and width (the same column in every card), at
+    1100 px, with the inspector dragged to its narrowest and wide; captions sit level with
+    their fields, and the slider moves under them when the inspector is narrow."""
+    shown_window(window, qtbot, size)
+    load_sweep(window, sweep)
+    process(window)
+    every_model(window)
+    if inspector is not None:
+        splitter = window.body_splitter
+        sizes = splitter.sizes()
+        width = INSPECTOR_MIN_WIDTH if inspector == "narrowest" else inspector
+        splitter.setSizes([sizes[0], sum(sizes) - sizes[0] - width, width])
+    settle(qtbot)
+    width = INSPECTOR_MIN_WIDTH if inspector in (None, "narrowest") else inspector
+    assert window.inspector_panel.width() == width
+    section = window.inspector["models"]
+    rows = param_rows(window)
+    assert len(rows) == 3 + 6 + 3 + 5  # Dirac v, Δ, N; E₀ and g of 3 branches; Δij; custom
+    qtbot.waitUntil(  # the new rows are laid out (one line or two)
+        lambda: all(r.height() == r.heightForWidth(r.width()) for r in rows), timeout=5000
+    )
+    boxes = {(r.field.mapTo(section, QPoint(0, 0)).x(), r.field.width()) for r in rows}
+    assert len(boxes) == 1, boxes
+    wide = inspector == 480
+    for row in rows:
+        field, caption, slider = row.field.geometry(), row.caption.geometry(), row.slider.geometry()
+        assert field.height() == FIELD_HEIGHT and caption.center().y() == field.center().y()
+        assert row.is_wide() == wide
+        if wide:  # caption | slider | field on one line
+            assert caption.right() < slider.left() and slider.right() < field.left()
+            assert abs(slider.center().y() - field.center().y()) <= 1
+        else:  # caption and field, the slider under them across the row
+            assert slider.top() > field.bottom() and slider.width() == row.width()
+        edit = row.field.edit
+        assert edit.width() >= edit.fontMetrics().horizontalAdvance(edit.text())
+    # captions share their column too (wide: the slider column starts in one place)
+    assert len({r.slider.mapTo(section, QPoint(0, 0)).x() for r in rows}) == 1
+    scrollbar = window.style().pixelMetric(QStyle.PixelMetric.PM_ScrollBarExtent)
+    assert section.minimumSizeHint().width() <= INSPECTOR_MIN_WIDTH - scrollbar
+    assert not errors
+
+
+def drag_by(qtbot, slider, offsets, release=True) -> None:
+    """Press a slider in its centre and move by *offsets* (of the half track)."""
+    x0, x1 = slider.track()
+    y = slider.height() // 2
+    centre = round(slider.centre_x())
+    qtbot.mousePress(slider, Qt.MouseButton.LeftButton, pos=QPoint(centre, y))
+    for offset in offsets:
+        qtbot.mouseMove(slider, QPoint(round(centre + offset * (x1 - x0) / 2), y))
+    if release:
+        end = round(centre + offsets[-1] * (x1 - x0) / 2)
+        qtbot.mouseRelease(slider, Qt.MouseButton.LeftButton, pos=QPoint(end, y))
+
+
+def test_g_has_a_slider_that_drags_the_zeeman_curve(window, sweep, qtbot, errors):
+    shown_window(window, qtbot)
+    load_sweep(window, sweep)
+    process(window)
+    models = models_of(window)
+    zeeman = add(window, "zeeman")
+    row = card_of(window, zeeman).editor.rows[0]
+    p = ms.params(zeeman)
+    e0 = p["e0_0"].value
+    assert p["g_0"].value == 2.0 and row.g.slider.mode() == "relative"  # ±10 % by default
+    assert row.g.slider.accessibleName() == "g factor of Branch 1"
+    before = models.curve_data()["zeeman"][0][1].copy()
+
+    drag_by(qtbot, row.g.slider, [0.5, 1.2], release=False)  # past the end: the whole span
+    assert p["g_0"].value == pytest.approx(2.2) and row.g.field.text() == "2.2"  # at once
+    qtbot.waitUntil(lambda: not np.allclose(models.curve_data()["zeeman"][0][1], before))
+    x1 = row.g.slider.track()[1]
+    qtbot.mouseRelease(row.g.slider, Qt.MouseButton.LeftButton, pos=QPoint(round(x1), 10))
+    field, energy = models.curve_data()["zeeman"][0]  # drawn on release, without waiting
+    np.testing.assert_allclose(energy, convert(branch_energy(field, e0, 2.2, 1.0), "meV", "cm-1"))
+    qtbot.waitUntil(lambda: not row.g.slider.is_springing(), timeout=2000)
+    assert row.g.slider.handle_offset() == 0.0 and p["g_0"].value == pytest.approx(2.2)
+
+    # E₀ is dragged in the display unit (cm⁻¹) and kept in meV
+    drag_by(qtbot, row.e0.slider, [-0.5])
+    expected = e0 * (1 - 0.1 * jog_fraction(0.5))
+    assert p["e0_0"].value == pytest.approx(expected, rel=2e-3)
+    assert float(row.e0.field.text()) == pytest.approx(p["e0_0"].value * MEV, rel=1e-4)
+    assert row.e0.slider.value() == pytest.approx(p["e0_0"].value * MEV, rel=1e-6)
+    field, energy = models.curve_data()["zeeman"][0]
+    np.testing.assert_allclose(
+        energy, convert(branch_energy(field, p["e0_0"].value, 2.2, 1.0), "meV", "cm-1")
+    )
+
+    # range mode: the handle spans 0 … 10 for g
+    inspector_page(window, "models").models.slider_mode.set("range", 10.0)
+    slider = row.g.slider
+    assert slider.mode() == "range" and slider.range() == (0.0, 10.0)
+    assert slider.handle_x() == pytest.approx(slider.x_for(2.2))
+    qtbot.mouseClick(slider, Qt.MouseButton.LeftButton, pos=QPoint(round(slider.x_for(5)), 10))
+    assert p["g_0"].value == pytest.approx(5.0, abs=0.05)
+    assert float(row.g.field.text()) == pytest.approx(p["g_0"].value)
+    field, energy = models.curve_data()["zeeman"][0]
+    np.testing.assert_allclose(
+        energy,
+        convert(branch_energy(field, p["e0_0"].value, p["g_0"].value, 1.0), "meV", "cm-1"),
+    )
+    assert not errors
+
+
+def test_every_continuous_parameter_has_a_slider(window, sweep, qtbot, errors):
+    shown_window(window, qtbot)
+    load_sweep(window, sweep)
+    process(window)
+    every_model(window)
+    models = models_of(window)
+    dirac, zeeman, custom = models.entries
+    names = {row.slider.accessibleName() for row in param_rows(window)}
+    assert {"Fermi velocity v", "Half-gap Δ", "Transitions shown"} <= names
+    assert {"E₀ of Branch 3", "g factor of Branch 2", "Coupling Δ 1–3"} <= names
+    assert {"E0", "amplitude", "b", "E1", "g"} <= names
+    transitions = card_of(window, dirac).editor.n_lines.slider
+    assert transitions.mode() == "range" and transitions.modes() == ("range",)  # whole numbers
+
+    coupling = card_of(window, zeeman).editor.couplings[(0, 2)]
+    drag_by(qtbot, coupling.slider, [1.0])  # 1 meV + 10 %
+    assert ms.params(zeeman)["delta_0_2"].value == pytest.approx(1.1, rel=1e-3)
+    row = card_of(window, custom).editor.rows["amplitude"].value
+    drag_by(qtbot, row.slider, [1.0])  # a new parameter is 1: +10 %
+    assert ms.params(custom)["amplitude"].value == pytest.approx(1.1)
+    assert "amplitude" in custom.edited  # remembered as a value the user set
+    row.set_value(0.0)
+    ms.params(custom)["amplitude"].value = 0.0
+    drag_by(qtbot, row.slider, [-1.0])  # zero is not a dead end: 10 % of 1
+    assert ms.params(custom)["amplitude"].value == pytest.approx(-0.1)
+    assert not errors
+
+
+def test_one_slider_mode_for_every_card_is_remembered(qtbot, tmp_path):
+    ini = str(tmp_path / "settings.ini")
+    w = MainWindow(settings=QSettings(ini, QSettings.Format.IniFormat))
+    qtbot.addWidget(w)
+    page = inspector_page(w, "models")
+    models = page.models
+    zeeman = add(w, "zeeman")
+    assert page.mode_button.text() == "Relative ±10 %" and not page.mode_row.isHidden()
+    g = card_of(w, zeeman).editor.rows[0].g.slider
+    g.mode_menu().actions()[3].trigger()  # a slider's context menu: Relative ±50 %
+    sliders = [row.slider for row in param_rows(w) if row.slider.modes() != ("range",)]
+    assert len(sliders) >= 4
+    assert {(s.mode(), s.span()) for s in sliders} == {("relative", 50.0)}
+    assert page.mode_button.text() == "Relative ±50 %"
+    menu = models.slider_mode.menu(page.mode_button)  # the section's control
+    assert [a.text() for a in menu.actions() if a.isChecked()] == ["Relative ±50 %"]
+    menu.actions()[0].trigger()
+    assert {s.mode() for s in sliders} == {"range"} and page.mode_button.text() == "Range"
+    custom = add(w, "custom")  # rows made later take the mode
+    card_of(w, custom).editor.code.edit.setPlainText("E0 + a*B")
+    assert card_of(w, custom).editor.rows["a"].value.slider.mode() == "range"
+    menu.actions()[2].trigger()  # Relative ±10 %
+    menu = models.slider_mode.menu(page.mode_button)
+    menu.actions()[1].trigger()  # Relative ±1 %
+    w.close()
+    assert QSettings(ini, QSettings.Format.IniFormat).value(f"{PREFIX}/models/slider_mode") == (
+        "relative-1"
+    )
+
+    w2 = MainWindow(settings=QSettings(ini, QSettings.Format.IniFormat))
+    qtbot.addWidget(w2)
+    assert inspector_page(w2, "models").mode_button.text() == "Relative ±1 %"
+    assert {(r.slider.mode(), r.slider.span()) for r in param_rows(w2)} >= {("relative", 1.0)}
+    w2.close()
+    s = QSettings(ini, QSettings.Format.IniFormat)
+    s.setValue(f"{PREFIX}/models/slider_mode", "sideways")
+    s.sync()
+    w3 = MainWindow(settings=QSettings(ini, QSettings.Format.IniFormat))
+    qtbot.addWidget(w3)
+    assert inspector_page(w3, "models").mode_button.text() == "Relative ±10 %"  # the default
+
+
+def test_a_unit_switch_keeps_values_suffixes_and_sliders(window, sweep, qtbot, errors):
+    shown_window(window, qtbot)
+    load_sweep(window, sweep)
+    process(window)
+    every_model(window)
+    models = models_of(window)
+    dirac, zeeman, _custom = models.entries
+    zeditor = card_of(window, zeeman).editor
+    ms.params(zeeman)["e0_0"].value = 20.0
+    ms.params(dirac)["delta"].value = 10.0
+    models.refresh()
+    models.slider_mode.set("range", 10.0)
+    rows = {
+        "E₀": (zeditor.rows[0].e0, lambda: ms.params(zeeman)["e0_0"].value),
+        "Δ": (card_of(window, dirac).editor.delta, lambda: ms.params(dirac)["delta"].value),
+        "Δ 1–2": (zeditor.couplings[(0, 1)], lambda: zeeman.model.couplings[(0, 1)]),
+    }
+    for unit, text in (("meV", "meV"), ("THz", "THz"), ("cm-1", "cm⁻¹")):
+        set_unit(window, unit)
+        settle(qtbot)
+        for name, (row, stored) in rows.items():
+            shown = float(convert(stored(), "meV", unit))
+            assert row.field.unit_label.text() == text, name
+            assert float(row.field.text()) == pytest.approx(shown, rel=1e-4), name
+            assert row.slider.value() == pytest.approx(shown), name
+            lo, hi = row.slider.range()
+            assert lo <= shown <= hi, name  # the range follows the unit
+            edit = row.field.edit
+            assert edit.width() >= edit.fontMetrics().horizontalAdvance(edit.text()), name
+    assert ms.params(zeeman)["e0_0"].value == pytest.approx(20.0)  # kept in meV
+    hi = zeditor.rows[0].e0.slider.range()[1]
+    assert hi >= sweep["x"][-1]  # E₀ spans the processed map (cm⁻¹ now)
+    assert not errors

@@ -1,15 +1,20 @@
-"""Small widgets of the model cards: number fields, slider rows, the expression editor, the
-colour swatch and compact grids. They are painted from the theme tokens (light and dark)."""
+"""Small widgets of the model cards: number fields, parameter rows (caption, slider and field on
+shared columns), the slider mode, the expression editor, the colour swatch and compact grids.
+They are painted from the theme tokens (light and dark)."""
 
 from __future__ import annotations
 
 import math
+from dataclasses import dataclass
+from typing import ClassVar
 
-from PySide6.QtCore import QEvent, QPointF, QRectF, QSignalBlocker, QSize, Qt, Signal
+from PySide6.QtCore import QEvent, QObject, QPointF, QRectF, QSignalBlocker, QSize, Qt, Signal
 from PySide6.QtGui import (
+    QActionGroup,
     QColor,
     QFont,
     QFontDatabase,
+    QFontMetrics,
     QIcon,
     QPainter,
     QPalette,
@@ -28,7 +33,6 @@ from PySide6.QtWidgets import (
     QMenu,
     QPlainTextEdit,
     QSizePolicy,
-    QSlider,
     QTextEdit,
     QToolButton,
     QVBoxLayout,
@@ -37,11 +41,22 @@ from PySide6.QtWidgets import (
 
 from mag_opt_detective.gui import icons
 from mag_opt_detective.gui.inspector.model_state import COLOR_NAMES, MODEL_COLORS
-from mag_opt_detective.gui.panels.common import UnitField, mono_font, scaled_font
+from mag_opt_detective.gui.kit.nudge_slider import (
+    DEFAULT_SPAN,
+    RANGE,
+    RELATIVE,
+    SPANS,
+    NudgeSlider,
+    mode_text,
+)
+from mag_opt_detective.gui.panels.common import ElidedLabel, UnitField, mono_font, scaled_font
 from mag_opt_detective.gui.theme import current_tokens
 from mag_opt_detective.gui.widgets import parse_float
 
 SHADOW = QColor(10, 6, 14, 150)  # data colour: the dark shadow of curves and dots
+UNIT_SCALE = 0.88  # the unit inside a number field (as UnitField draws it)
+FIELD_HEIGHT = 24  # number fields and the controls beside them (the kit's compact height)
+FIELD_PADDING = 22  # a number field's margins, spacing and border around number and unit
 
 
 def muted_label(text: str, factor: float = 0.88) -> QLabel:
@@ -106,7 +121,8 @@ def compact(field: UnitField) -> UnitField:
 
 
 class NumberField(UnitField):
-    """A number (C locale, scientific notation allowed) in a rounded box with its unit.
+    """A number (C locale, scientific notation allowed), right-aligned in a rounded box with its
+    unit.
 
     ``valueEdited`` fires while the user types a valid number (None for an empty *optional*
     field); invalid text (or a number outside *minimum* .. *maximum*) marks the box.
@@ -130,6 +146,8 @@ class NumberField(UnitField):
         edit = QLineEdit()
         super().__init__(edit, unit)
         compact(self)
+        self.setFixedHeight(FIELD_HEIGHT)
+        edit.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         self._optional = optional
         self._minimum = minimum
         self._maximum = maximum
@@ -195,120 +213,278 @@ class NumberField(UnitField):
             self._show(self._value)
 
 
-class _Slider(QSlider):
-    """A slider that the mouse wheel turns only while it has the focus (the inspector
-    scrolls)."""
-
-    def wheelEvent(self, event) -> None:
-        if self.hasFocus():
-            super().wheelEvent(event)
-        else:
-            event.ignore()
+# ---------------------------------------------------------------------- parameter rows
+LINE_GAP = 2  # caption line to slider (narrow rows)
+CAPTION_SCALE = 0.94
+WIDE_CAPTIONS = ("Transitions N", "Half-gap Δ", "Velocity v")  # what the caption column holds
+WIDEST_NUMBERS = (("-0000.00", "cm⁻¹"), ("0.00000", "×10⁵ m/s"))  # (number, unit) to fit
 
 
-class SliderField(QWidget):
-    """A caption, then a slider for quick live changes and a number field (as in the mockup).
+@dataclass(frozen=True)
+class Columns:
+    """The columns every parameter row shares: caption, slider and number field (px)."""
 
-    The slider spans ``[lo, hi]``; the field also takes values beyond it (the slider then sits
-    at its end) within *minimum* .. *maximum*. ``valueChanged`` fires on user edits only.
+    label: int
+    value: int
+    gap: int = 8
+    slider: int = 110  # the narrowest slider of a one-line row
+
+    def wide_width(self) -> int:
+        """The narrowest row that holds caption, slider and field on one line."""
+        return self.label + self.slider + self.value + 2 * self.gap
+
+
+_COLUMNS: dict[str, Columns] = {}
+
+
+def columns(widget: QWidget) -> Columns:
+    """The shared columns for *widget*'s font: the number field fits an energy in any unit and
+    the velocity with its unit, the caption column the built-in captions."""
+    key = widget.font().key()
+    if key not in _COLUMNS:
+        caption = QFontMetrics(scaled_font(widget, CAPTION_SCALE))
+        mono = QFontMetrics(mono_font())
+        unit = QFontMetrics(scaled_font(widget, UNIT_SCALE))
+        room = max(mono.horizontalAdvance(n) + unit.horizontalAdvance(u) for n, u in WIDEST_NUMBERS)
+        label = max(caption.horizontalAdvance(text) for text in WIDE_CAPTIONS) + 4
+        _COLUMNS[key] = Columns(label, room + FIELD_PADDING)
+    return _COLUMNS[key]
+
+
+def default_range(value: float) -> tuple[float, float]:
+    """A slider range around *value*: from 0 to about twice it (-1 … 1 for 0)."""
+    if value == 0 or not math.isfinite(value):
+        return -1.0, 1.0
+    end = nice_ceil(2 * abs(value))
+    return (0.0, end) if value > 0 else (-end, 0.0)
+
+
+def fixed_range(lo: float, hi: float):
+    """A slider range of ``[lo, hi]``, widened for a value beyond it."""
+
+    def range_for(value: float) -> tuple[float, float]:
+        if value > hi:
+            return lo, nice_ceil(1.5 * value)
+        if value < lo:
+            return (-nice_ceil(1.5 * abs(value)) if value < 0 else 0.0), hi
+        return lo, hi
+
+    return range_for
+
+
+def nice_ceil(value: float) -> float:
+    """The next 1, 2 or 5 times a power of ten at or above *value* (> 0)."""
+    if not (math.isfinite(value) and value > 0):
+        return 1.0
+    power = 10.0 ** math.floor(math.log10(value))
+    for step in (1, 2, 5, 10):
+        if step * power >= value * (1 - 1e-12):
+            return float(f"{step * power:.12g}")
+    return 10 * power
+
+
+class SliderMode(QObject):
+    """The mode every model slider uses: Range, or Relative with a span in %. ``changed`` fires
+    when it is switched (:meth:`menu`, or a slider's context menu). Its setting is a key:
+    ``range``, ``relative-1``, ``relative-10`` or ``relative-50``."""
+
+    changed = Signal(str, float)
+    KEYS: ClassVar[dict[str, tuple[str, float]]] = {
+        "range": (RANGE, 0.0),
+        **{f"relative-{s:g}": (RELATIVE, s) for s in SPANS},
+    }
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.mode, self.span = RELATIVE, DEFAULT_SPAN
+
+    def key(self) -> str:
+        return "range" if self.mode == RANGE else f"relative-{self.span:g}"
+
+    def set(self, mode: str, span: float) -> None:
+        """Switch to *mode* (the range mode keeps the last relative span)."""
+        span = self.span if mode == RANGE else float(span)
+        if (mode, span) != (self.mode, self.span):
+            self.mode, self.span = mode, span
+            self.changed.emit(mode, span)
+
+    def menu(self, parent: QWidget) -> QMenu:
+        """The modes as checkable entries; a choice switches every slider."""
+        menu = QMenu(parent)
+        group = QActionGroup(menu)
+        for key, (mode, span) in self.KEYS.items():
+            action = menu.addAction(mode_text(mode, span))
+            action.setCheckable(True)
+            action.setActionGroup(group)
+            action.setChecked(key == self.key())
+            action.triggered.connect(lambda _on=False, m=mode, s=span: self.set(m, s))
+        return menu
+
+    def apply_to(self, slider: NudgeSlider) -> None:
+        """Keep *slider* in this mode (and let its context menu switch every slider)."""
+        slider.set_mode(self.mode, self.span)
+        self.changed.connect(slider.set_mode)
+        slider.modeChanged.connect(self.set)
+
+    # settings protocol
+    def settings_value(self) -> str:
+        return self.key()
+
+    def set_settings_value(self, value) -> bool:
+        if value not in self.KEYS:
+            return False
+        self.set(*self.KEYS[value])
+        return True
+
+
+class ParamRow(QWidget):
+    """One parameter on the shared :func:`columns`: caption, slider and number field.
+
+    Wide enough, all three sit on one line; narrower, the caption and the field share the
+    first line and the slider takes the whole second line, so nothing is squeezed. The field is
+    right-aligned with its unit inside; the slider moves the value live (``valueEdited(value,
+    True)`` while dragging, then ``(value, False)`` on release) and typing in the field emits
+    ``(value, False)``. In the range mode the slider spans *range_for(value)* (re-derived when
+    a value falls outside it or the unit changes); the relative span is taken of at least
+    *floor*. :meth:`set_value` is silent.
     """
 
-    valueChanged = Signal(float)
-    STEPS = 1000
+    valueEdited = Signal(float, bool)
 
     def __init__(
         self,
         caption: str,
-        lo: float,
-        hi: float,
         unit: str = "",
         *,
+        name: str = "",
+        digits: int = 6,
         integer: bool = False,
         minimum: float | None = None,
         maximum: float | None = None,
-        digits: int = 6,
+        mode: SliderMode | None = None,
+        range_for=default_range,
+        floor: float = 0.0,
+        mono: bool = False,
+        parent=None,
     ):
-        super().__init__()
-        self._lo, self._hi = lo, hi
-        self._integer = integer
-        self._value = lo
-        self.caption = muted_label(caption, 0.94)
-        self.slider = _Slider(Qt.Orientation.Horizontal)
-        self.slider.setAccessibleName(caption)
-        self.slider.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        super().__init__(parent)
+        name = name or caption
+        self._range_for = range_for
+        self._range_stale = True
+        self._wide: bool | None = None
+        self.caption = ElidedLabel(caption)
+        self.caption.setProperty("kit", "muted")
+        self.caption.setFont(mono_font(0.88) if mono else scaled_font(self, CAPTION_SCALE))
+        self.caption.setToolTip(name)
         self.field = NumberField(
             unit,
-            name=f"{caption} value",
+            name=f"{name} value",
             minimum=minimum,
             maximum=maximum,
             integer=integer,
             digits=digits,
         )
-        self.field.setFixedWidth(92)
-        self.slider.setMinimumWidth(40)
-        self._set_slider_range()
-        grid = QGridLayout(self)
-        grid.setContentsMargins(0, 0, 0, 0)
-        grid.setHorizontalSpacing(8)
-        grid.setVerticalSpacing(3)
-        grid.addWidget(self.caption, 0, 0, 1, 2)
-        grid.addWidget(self.slider, 1, 0)
-        grid.addWidget(self.field, 1, 1)
-        grid.setColumnStretch(0, 1)
+        self.caption.setBuddy(self.field.edit)
+        self.slider = NudgeSlider()
+        self.slider.setAccessibleName(name)
+        self.slider.set_bounds(minimum, maximum)
+        self.slider.set_floor(floor)
+        if integer:
+            self.slider.set_step(1.0)
+            self.slider.set_modes((RANGE,))
+        elif mode is not None:
+            mode.apply_to(self.slider)
+        for child in (self.caption, self.field, self.slider):
+            child.setParent(self)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         self.slider.valueChanged.connect(self._on_slider)
+        self.slider.editingFinished.connect(
+            lambda: self.valueEdited.emit(self.slider.value(), False)
+        )
         self.field.valueEdited.connect(self._on_field)
 
-    def value(self) -> float:
-        return self._value
-
-    def set_unit(self, unit: str) -> None:
-        self.field.set_unit(unit)
-
-    def set_range(self, lo: float, hi: float) -> None:
-        """The slider's span (the value is kept)."""
-        self._lo, self._hi = lo, hi
-        self._set_slider_range()
-        self._place_slider()
+    # --- values --------------------------------------------------------------------------
+    def value(self) -> float | None:
+        return self.field.value()
 
     def set_value(self, value: float) -> None:
-        """Show *value* without emitting."""
-        self._value = float(value)
-        self.field.set_value(self._value)
-        self._place_slider()
-
-    def _set_slider_range(self) -> None:
-        with QSignalBlocker(self.slider):
-            if self._integer:
-                self.slider.setRange(round(self._lo), round(self._hi))
-            else:
-                self.slider.setRange(0, self.STEPS)
-
-    def _place_slider(self) -> None:
-        with QSignalBlocker(self.slider):
-            if self._integer:
-                self.slider.setValue(round(self._value))
-            elif self._hi > self._lo:
-                t = (self._value - self._lo) / (self._hi - self._lo)
-                self.slider.setValue(round(min(max(t, 0.0), 1.0) * self.STEPS))
-
-    def _on_slider(self, position: int) -> None:
-        if self._integer:
-            value = float(position)
-        else:
-            value = self._lo + (self._hi - self._lo) * position / self.STEPS
-            step = (self._hi - self._lo) / self.STEPS
-            value = round(value / step) * step if step > 0 else value
-            value = float(f"{value:.4g}")
-        self._value = value
+        """Show *value* in the field and on the slider without emitting."""
         self.field.set_value(value)
-        self.valueChanged.emit(value)
+        self.slider.set_value(value)
+        self._fit_range(value)
+
+    def set_unit(self, text: str) -> None:
+        if text != self.field.unit_label.text():
+            self._range_stale = True
+        self.field.set_unit(text)
+
+    def set_floor(self, floor: float) -> None:
+        self.slider.set_floor(floor)
+
+    def set_range_for(self, range_for) -> None:
+        self._range_for = range_for
+        self._range_stale = True
+
+    def _fit_range(self, value: float) -> None:
+        lo, hi = self.slider.range()
+        if self._range_stale or not lo <= value <= hi:
+            self.slider.set_range(*self._range_for(value))
+            self._range_stale = False
+
+    def _on_slider(self, value: float) -> None:
+        self.field.set_value(value)
+        self.valueEdited.emit(value, self.slider.is_dragging())
 
     def _on_field(self, value) -> None:
         if value is None:
             return
-        self._value = float(value)
-        self._place_slider()
-        self.valueChanged.emit(self._value)
+        self.slider.set_value(value)
+        self._fit_range(value)
+        self.valueEdited.emit(float(value), False)
+
+    # --- layout --------------------------------------------------------------------------
+    def is_wide(self) -> bool:
+        """Whether caption, slider and field share one line."""
+        return self.width() >= columns(self).wide_width()
+
+    def _height(self, wide: bool) -> int:
+        return FIELD_HEIGHT if wide else FIELD_HEIGHT + LINE_GAP + self.slider.sizeHint().height()
+
+    def hasHeightForWidth(self) -> bool:
+        return True
+
+    def heightForWidth(self, width: int) -> int:
+        return self._height(width >= columns(self).wide_width())
+
+    def sizeHint(self) -> QSize:
+        c = columns(self)
+        return QSize(c.wide_width(), self._height(True))
+
+    def minimumSizeHint(self) -> QSize:
+        c = columns(self)
+        return QSize(self.caption.minimumSizeHint().width() + c.gap + c.value, self._height(True))
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._place()
+
+    def _place(self) -> None:
+        c = columns(self)
+        width = self.width()
+        wide = self.is_wide()
+        self.field.setGeometry(width - c.value, 0, c.value, FIELD_HEIGHT)
+        slider_height = self.slider.sizeHint().height()
+        if wide:
+            self.caption.setGeometry(0, 0, c.label, FIELD_HEIGHT)
+            left = c.label + c.gap
+            top = (FIELD_HEIGHT - slider_height) // 2
+            self.slider.setGeometry(left, top, width - c.value - c.gap - left, slider_height)
+        else:
+            self.caption.setGeometry(0, 0, width - c.value - c.gap, FIELD_HEIGHT)
+            self.slider.setGeometry(0, FIELD_HEIGHT + LINE_GAP, width, slider_height)
+        if wide != self._wide:
+            self._wide = wide
+            self.updateGeometry()
 
 
 class CodeBox(QWidget):

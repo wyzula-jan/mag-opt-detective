@@ -13,7 +13,6 @@ from typing import Protocol
 from PySide6.QtCore import QRectF, QSignalBlocker, Qt
 from PySide6.QtGui import QFont, QPainter, QPen
 from PySide6.QtWidgets import (
-    QGridLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -28,15 +27,20 @@ from mag_opt_detective.gui import icons
 from mag_opt_detective.gui.display import unit_text
 from mag_opt_detective.gui.inspector import model_state as ms
 from mag_opt_detective.gui.inspector.model_widgets import (
+    FIELD_HEIGHT,
     CodeBox,
     ColorSwatch,
     IconButton,
     NumberField,
-    SliderField,
+    ParamRow,
+    SliderMode,
     TableBox,
+    columns,
     compact,
-    mono_label,
+    default_range,
+    fixed_range,
     muted_label,
+    nice_ceil,
     tool_button,
 )
 from mag_opt_detective.gui.kit import SegmentedControl, Switch
@@ -57,7 +61,11 @@ from mag_opt_detective.gui.panels.common import (
 )
 from mag_opt_detective.gui.theme import current_tokens
 
-DELTA_SPAN = 200.0  # meV: the half-gap slider's end
+DELTA_SPAN = 200.0  # meV: the half-gap slider's end (range mode)
+COUPLING_SPAN = 20.0  # meV: the couplings' slider end (range mode)
+VELOCITY_SPAN = (0.0, 30.0)  # 10⁵ m/s
+G_SPAN = (0.0, 10.0)
+ENERGY_FLOOR = 1.0  # meV: the relative span of a smaller energy is taken of this
 # no-break spaces: the formula wraps only between its terms
 DIRAC_FORMULA = (
     "E\u00a0=\u00a0√(2eħv²Bn\u00a0+\u00a0Δ²)\u00a0+ √(2eħv²B(n+1)\u00a0+\u00a0Δ²), "
@@ -73,7 +81,8 @@ FORMS = {
     Form.HYPERBOLIC: ("hyp", "Hyperbolic: E = √(E₀² + (m g μB B)²)"),
 }
 OUTPUT_UNITS = ((Unit.MEV, "meV"), (Unit.CM1, "cm⁻¹"), (Unit.THZ, "THz"))
-E0_WIDEST = "-0000.00"  # five significant digits of an energy, with a sign
+M_WIDEST = "-0.50"  # the multiplier m as typed
+LIMIT_MIN_WIDTH = 48  # a fit limit's field in a narrow inspector
 
 
 class Owner(Protocol):
@@ -82,7 +91,12 @@ class Owner(Protocol):
     @property
     def unit(self) -> Unit: ...
 
-    def edited(self, entry: ms.ModelEntry, structure: bool = False) -> None: ...
+    @property
+    def slider_mode(self) -> SliderMode: ...
+
+    def energy_span(self) -> tuple[float, float] | None: ...
+
+    def edited(self, entry: ms.ModelEntry, structure: bool = False, live: bool = False) -> None: ...
 
     def set_visible(self, entry: ms.ModelEntry, visible: bool) -> None: ...
 
@@ -99,54 +113,95 @@ def column_label(text: str) -> QLabel:
     return label
 
 
+def in_unit(mev: float, unit: Unit) -> float:
+    return float(convert(mev, Unit.MEV, unit))
+
+
+def energy_range(owner: Owner, span_mev: float | None = None):
+    """The range-mode span of an energy in the display unit: 0 to *span_mev*, else to the top
+    of the processed map, else around the value."""
+    if span_mev is not None:
+        return fixed_range(0.0, in_unit(span_mev, owner.unit))
+    span = owner.energy_span()
+    if span is None:
+        return default_range
+    return fixed_range(0.0, nice_ceil(in_unit(span[1], owner.unit)))
+
+
+def stack(*widgets: QWidget, spacing: int = 8) -> QVBoxLayout:
+    layout = QVBoxLayout()
+    layout.setContentsMargins(0, 0, 0, 0)
+    layout.setSpacing(spacing)
+    for widget in widgets:
+        layout.addWidget(widget)
+    return layout
+
+
 # ---------------------------------------------------------------------- Dirac
 class DiracEditor(QWidget):
-    """Fermi velocity, half-gap (display unit) and number of transitions: sliders and fields."""
+    """Fermi velocity, half-gap (display unit) and number of transitions as parameter rows."""
 
     def __init__(self, entry: ms.ModelEntry, owner: Owner, parent=None):
         super().__init__(parent)
         self.entry, self.owner = entry, owner
-        self.velocity = SliderField("Fermi velocity v", 0.1, 30.0, "×10⁵ m/s", minimum=0.0)
-        self.delta = SliderField("Half-gap Δ", 0.0, DELTA_SPAN, "meV", minimum=0.0)
-        most = ms.DIRAC_MAX_LINES
-        self.n_lines = SliderField(
-            "Transitions shown", 1, most, integer=True, minimum=1, maximum=most
+        mode = owner.slider_mode
+        self.velocity = ParamRow(
+            "Velocity v",
+            "×10⁵ m/s",
+            name="Fermi velocity v",
+            minimum=0.0,
+            mode=mode,
+            range_for=fixed_range(*VELOCITY_SPAN),
+            floor=1.0,
         )
-        self.n_lines.field.edit.setToolTip(f"Transitions shown (1 to {most})")
+        self.delta = ParamRow("Half-gap Δ", "meV", name="Half-gap Δ", minimum=0.0, mode=mode)
+        most = ms.DIRAC_MAX_LINES
+        self.n_lines = ParamRow(
+            "Transitions N",
+            name="Transitions shown",
+            integer=True,
+            minimum=1,
+            maximum=most,
+            range_for=fixed_range(1.0, float(most)),
+        )
+        self.n_lines.field.edit.setToolTip(f"Transitions shown, N (1 to {most})")
         formula = QLabel(DIRAC_FORMULA)
         formula.setProperty("kit", "muted")
         formula.setWordWrap(True)
         formula.setFont(mono_font(0.85))
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(8)
-        for widget in (self.velocity, self.delta, self.n_lines, formula):
-            layout.addWidget(widget)
-        self.velocity.valueChanged.connect(self._on_velocity)
-        self.delta.valueChanged.connect(self._on_delta)
-        self.n_lines.valueChanged.connect(self._on_n_lines)
+        layout = stack(self.velocity, self.delta, self.n_lines, formula)
+        self.setLayout(layout)
+        self.velocity.valueEdited.connect(self._on_velocity)
+        self.delta.valueEdited.connect(self._on_delta)
+        self.n_lines.valueEdited.connect(self._on_n_lines)
+
+    def rows(self) -> list[ParamRow]:
+        return [self.velocity, self.delta, self.n_lines]
 
     def refresh(self) -> None:
         unit = self.owner.unit
         p = ms.params(self.entry)
         self.velocity.set_value(p["velocity"].value)
         self.delta.set_unit(unit_text(unit))
-        self.delta.set_range(0.0, float(convert(DELTA_SPAN, Unit.MEV, unit)))
+        self.delta.set_range_for(energy_range(self.owner, DELTA_SPAN))
+        self.delta.set_floor(in_unit(ENERGY_FLOOR, unit))
         self.delta.set_value(ms.shown(self.entry, p["delta"], p["delta"].value, unit))
         self.n_lines.set_value(self.entry.model.n_lines)
 
-    def _on_velocity(self, value: float) -> None:
+    def _on_velocity(self, value: float, live: bool) -> None:
         ms.params(self.entry)["velocity"].value = value
-        self.owner.edited(self.entry)
+        self.owner.edited(self.entry, live=live)
 
-    def _on_delta(self, value: float) -> None:
+    def _on_delta(self, value: float, live: bool) -> None:
         p = ms.params(self.entry)["delta"]
         p.value = ms.stored(self.entry, p, value, self.owner.unit)
-        self.owner.edited(self.entry)
+        self.owner.edited(self.entry, live=live)
 
-    def _on_n_lines(self, value: float) -> None:
-        self.entry.model.n_lines = ms.dirac_lines(value)
-        self.owner.edited(self.entry, structure=True)
+    def _on_n_lines(self, value: float, live: bool) -> None:
+        n = ms.dirac_lines(value)
+        if n != self.entry.model.n_lines or not live:
+            self.entry.model.n_lines = n
+            self.owner.edited(self.entry, structure=True, live=live)
 
 
 # ---------------------------------------------------------------------- Zeeman
@@ -158,8 +213,7 @@ class FormButton(QToolButton):
         self.form = Form.LINEAR
         self.setFont(scaled_font(self, 0.9))
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setFixedHeight(24)
-        self.setMinimumWidth(34)
+        self.setFixedSize(36, FIELD_HEIGHT)
 
     def set_form(self, form: Form | str) -> None:
         self.form = Form(form)
@@ -184,7 +238,7 @@ class FormButton(QToolButton):
 
 
 def captioned(field: UnitField, caption: str) -> UnitField:
-    """*field* with a muted *caption* inside its box, before the number (E₀, g, m)."""
+    """*field* with a muted *caption* inside its box, before the number (m)."""
     label = muted_label(caption, 0.9)
     field.layout().insertWidget(0, label)
     field.caption = label
@@ -192,45 +246,43 @@ def captioned(field: UnitField, caption: str) -> UnitField:
 
 
 class BranchRow(QWidget):
-    """One branch in two lines: label and E₀ (display unit); then g, m, form and remove."""
+    """One branch: its label, m, form and remove on the first line, then E₀ (display unit) and
+    g as parameter rows."""
 
-    def __init__(self, parent=None):
+    def __init__(self, mode: SliderMode, parent=None):
         super().__init__(parent)
         self.label = compact(UnitField(QLineEdit()))
+        self.label.setFixedHeight(FIELD_HEIGHT)
         self.label.edit.setMaxLength(24)
         self.label.edit.setAccessibleName("Branch label")
-        self.e0 = captioned(NumberField(name="E₀", digits=5), "E₀")
-        # room for any energy in any unit, so the first digit never hides behind the caption
-        metrics = self.e0.edit.fontMetrics()
-        self.e0.edit.setMinimumWidth(metrics.horizontalAdvance(E0_WIDEST) + 6)
-        self.g = captioned(NumberField(name="g factor"), "g")
+        self.label.setToolTip("Label of the branch")
         self.m = captioned(NumberField(name="m, the multiplier of g μB B"), "m")
-        self.e0.setToolTip("Energy at zero field")
-        self.g.setToolTip("g factor")
         self.m.setToolTip("Multiplier of g μB B (e.g. ±1, or 0 for a field-independent line)")
+        room = self.m.edit.fontMetrics().horizontalAdvance(M_WIDEST) + 6
+        self.m.setFixedWidth(self.m.caption.sizeHint().width() + room + 14)
         self.form = FormButton()
         self.remove = tool_button("x", "Remove branch", "faint")
-        first = QHBoxLayout()
-        first.setContentsMargins(0, 0, 0, 0)
-        first.setSpacing(4)
-        first.addWidget(self.label, stretch=4)
-        first.addWidget(self.e0, stretch=5)
-        second = QHBoxLayout()
-        second.setContentsMargins(0, 0, 0, 0)
-        second.setSpacing(4)
-        second.addWidget(self.g, stretch=3)
-        second.addWidget(self.m, stretch=2)
-        second.addWidget(self.form)
-        second.addWidget(self.remove)
+        self.e0 = ParamRow("E₀", name="E₀", digits=5, mode=mode)
+        self.e0.setToolTip("Energy at zero field")
+        self.g = ParamRow("g", name="g factor", mode=mode, range_for=fixed_range(*G_SPAN), floor=1)
+        head = QHBoxLayout()
+        head.setContentsMargins(0, 0, 0, 0)
+        head.setSpacing(4)
+        head.addWidget(self.label, stretch=1)
+        head.addWidget(self.m)
+        head.addWidget(self.form)
+        head.addWidget(self.remove)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(4)
-        layout.addLayout(first)
-        layout.addLayout(second)
+        layout.setSpacing(6)
+        layout.addLayout(head)
+        layout.addWidget(self.e0)
+        layout.addWidget(self.g)
 
 
 class ZeemanEditor(QWidget):
-    """Branches (label, E0, g, m, form), the coupling switch and the couplings Δij."""
+    """Branches (label, m, form; E₀ and g with sliders), the coupling switch and the couplings
+    Δij (sliders)."""
 
     def __init__(self, entry: ms.ModelEntry, owner: Owner, parent=None):
         super().__init__(parent)
@@ -242,27 +294,26 @@ class ZeemanEditor(QWidget):
         head.addWidget(section_label("Branches"))
         head.addStretch(1)
         head.addWidget(self.add_button)
-        self.table = TableBox(rows=True)
+        self.branches = QVBoxLayout()
+        self.branches.setContentsMargins(0, 0, 0, 0)
+        self.branches.setSpacing(10)
         self.coupled_row = SwitchRow(
             "Coupled", "Avoided crossings: the energies are the eigenvalues of diag(Eᵢ) + Δ."
         )
         self.coupled = self.coupled_row.switch
         self.coupling_title = section_label("Couplings")
         self.coupling_box = QWidget()
-        self.coupling_grid = QGridLayout(self.coupling_box)
-        self.coupling_grid.setContentsMargins(0, 0, 0, 0)
-        self.coupling_grid.setHorizontalSpacing(8)
-        self.coupling_grid.setVerticalSpacing(6)
-        self.coupling_grid.setColumnStretch(0, 1)
-        self.coupling_grid.setColumnStretch(1, 1)
-        self.couplings: dict[tuple[int, int], NumberField] = {}
+        self.coupling_rows = QVBoxLayout(self.coupling_box)
+        self.coupling_rows.setContentsMargins(0, 0, 0, 0)
+        self.coupling_rows.setSpacing(8)
+        self.couplings: dict[tuple[int, int], ParamRow] = {}
         self.coupling_note = hint("Add a second branch to couple branches.")
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(7)
+        layout.setSpacing(8)
         layout.addLayout(head)
-        layout.addWidget(self.table)
+        layout.addLayout(self.branches)
         layout.addSpacing(4)
         layout.addWidget(self.coupled_row)
         layout.addWidget(self.coupling_note)
@@ -270,6 +321,10 @@ class ZeemanEditor(QWidget):
         layout.addWidget(self.coupling_box)
         self.add_button.clicked.connect(self._on_add)
         self.coupled.toggled.connect(self._on_coupled)
+
+    def param_rows(self) -> list[ParamRow]:
+        rows = [row for branch in self.rows for row in (branch.e0, branch.g)]
+        return rows + list(self.couplings.values())
 
     # --- showing --------------------------------------------------------------------------
     def refresh(self) -> None:
@@ -279,32 +334,38 @@ class ZeemanEditor(QWidget):
         if len(self.rows) != len(branches):
             self._build_rows(len(branches))
         p = ms.params(self.entry)
+        e0_range = energy_range(self.owner)
         for i, (row, branch) in enumerate(zip(self.rows, branches, strict=True)):
             if row.label.edit.text() != branch.label:
                 with QSignalBlocker(row.label.edit):
                     row.label.edit.setText(branch.label)
             e0 = p[f"e0_{i}"]
             row.e0.set_unit(unit_text(unit))
+            row.e0.set_range_for(e0_range)
+            row.e0.set_floor(in_unit(ENERGY_FLOOR, unit))
             row.e0.set_value(ms.shown(self.entry, e0, e0.value, unit))
             row.g.set_value(p[f"g_{i}"].value)
             row.m.set_value(branch.m)
             row.form.set_form(branch.form)
             row.remove.setEnabled(len(branches) > 1)
-            row.e0.edit.setAccessibleName(f"E₀ of {branch.label}")
+            row.e0.field.edit.setAccessibleName(f"E₀ of {branch.label}")
+            row.e0.slider.setAccessibleName(f"E₀ of {branch.label}")
+            row.g.field.edit.setAccessibleName(f"g factor of {branch.label}")
+            row.g.slider.setAccessibleName(f"g factor of {branch.label}")
         self._refresh_couplings()
 
     def _build_rows(self, n: int) -> None:
-        clear_layout(self.table.rows)
+        clear_layout(self.branches)
         self.rows = []
         for i in range(n):
-            row = BranchRow()
+            row = BranchRow(self.owner.slider_mode)
             if i:
-                self.table.rows.addWidget(Divider())
-            self.table.rows.addWidget(row)
+                self.branches.addWidget(Divider())
+            self.branches.addWidget(row)
             row.label.edit.textChanged.connect(lambda text, k=i: self._on_label(k, text))
             row.label.edit.editingFinished.connect(lambda r=row, k=i: self._tidy_label(r, k))
-            row.e0.valueEdited.connect(lambda v, k=i: self._on_e0(k, v))
-            row.g.valueEdited.connect(lambda v, k=i: self._on_param(f"g_{k}", v))
+            row.e0.valueEdited.connect(lambda v, live, k=i: self._on_e0(k, v, live))
+            row.g.valueEdited.connect(lambda v, live, k=i: self._on_param(f"g_{k}", v, live))
             row.m.valueEdited.connect(lambda v, k=i: self._on_m(k, v))
             row.form.clicked.connect(lambda _checked=False, k=i: self._on_form(k))
             row.remove.clicked.connect(lambda _checked=False, k=i: self._on_remove(k))
@@ -320,25 +381,29 @@ class ZeemanEditor(QWidget):
         show = model.coupled and n > 1
         pairs = sorted(model.couplings)
         if sorted(self.couplings) != pairs:
-            clear_layout(self.coupling_grid)
+            clear_layout(self.coupling_rows)
             self.couplings = {}
-            for k, (i, j) in enumerate(pairs):
-                field = NumberField(unit_text(unit), name=f"Coupling Δ {i + 1}–{j + 1}", digits=5)
-                field.valueEdited.connect(lambda v, pair=(i, j): self._on_coupling(pair, v))
-                box = QWidget()
-                box_layout = QVBoxLayout(box)
-                box_layout.setContentsMargins(0, 0, 0, 0)
-                box_layout.setSpacing(2)
-                box_layout.addWidget(muted_label(f"Δ {i + 1}–{j + 1}", 0.85))
-                box_layout.addWidget(field)
-                self.coupling_grid.addWidget(box, k // 2, k % 2)
-                self.couplings[(i, j)] = field
+            for i, j in pairs:
+                row = ParamRow(
+                    f"Δ {i + 1}–{j + 1}",
+                    unit_text(unit),
+                    name=f"Coupling Δ {i + 1}–{j + 1}",
+                    digits=5,
+                    mode=self.owner.slider_mode,
+                )
+                row.valueEdited.connect(
+                    lambda v, live, pair=(i, j): self._on_coupling(pair, v, live)
+                )
+                self.coupling_rows.addWidget(row)
+                self.couplings[(i, j)] = row
         p = ms.params(self.entry)
-        for (i, j), field in self.couplings.items():
-            field.set_unit(unit_text(unit))
+        coupling_range = energy_range(self.owner, COUPLING_SPAN)
+        for (i, j), row in self.couplings.items():
+            row.set_unit(unit_text(unit))
+            row.set_range_for(coupling_range)
+            row.set_floor(in_unit(ENERGY_FLOOR, unit))
             delta = p[f"delta_{i}_{j}"]
-            value = model.couplings[(i, j)]
-            field.set_value(ms.shown(self.entry, delta, value, unit))
+            row.set_value(ms.shown(self.entry, delta, model.couplings[(i, j)], unit))
         self.coupling_title.setVisible(show)
         self.coupling_box.setVisible(show)
 
@@ -364,14 +429,14 @@ class ZeemanEditor(QWidget):
                 with QSignalBlocker(row.label.edit):
                     row.label.edit.setText(label)
 
-    def _on_e0(self, index: int, value) -> None:
+    def _on_e0(self, index: int, value: float, live: bool) -> None:
         p = ms.params(self.entry)[f"e0_{index}"]
         p.value = ms.stored(self.entry, p, value, self.owner.unit)
-        self.owner.edited(self.entry)
+        self.owner.edited(self.entry, live=live)
 
-    def _on_param(self, name: str, value) -> None:
+    def _on_param(self, name: str, value: float, live: bool) -> None:
         ms.params(self.entry)[name].value = float(value)
-        self.owner.edited(self.entry)
+        self.owner.edited(self.entry, live=live)
 
     def _on_m(self, index: int, value) -> None:
         if float(value) == self.entry.model.branches[index].m:  # e.g. "1." typed after "1"
@@ -390,34 +455,41 @@ class ZeemanEditor(QWidget):
         self.entry.model.set_coupled(on)
         self.owner.edited(self.entry, structure=True)
 
-    def _on_coupling(self, pair: tuple[int, int], value) -> None:
+    def _on_coupling(self, pair: tuple[int, int], value: float, live: bool) -> None:
         i, j = pair
         p = ms.params(self.entry)[f"delta_{i}_{j}"]
         p.value = ms.stored(self.entry, p, value, self.owner.unit)
-        self.owner.edited(self.entry)
+        self.owner.edited(self.entry, live=live)
 
 
 # ---------------------------------------------------------------------- custom expression
-class ParamRow:
-    """The cells of one expression parameter: name, value, fixed, min and max."""
+class ExpressionParam:
+    """One expression parameter: its row (name, slider, value) and its fit limits (fixed, min
+    and max)."""
 
-    def __init__(self, name: str):
+    def __init__(self, name: str, mode: SliderMode):
         self.name = name
-        self.label = mono_label(name)
+        self.value = ParamRow(name, name=name, mode=mode, mono=True)
+        self.label = ElidedLabel(name)  # a long name must not widen the table
+        self.label.setFont(mono_font(0.88))
         self.label.setToolTip(name)
-        self.value = NumberField(name=f"{name} value")
         self.fixed = CheckBox()
         self.fixed.setToolTip(f"Hold {name} fixed in fits")
         self.fixed.setAccessibleName(f"{name} fixed")
         self.lo = NumberField(name=f"{name} minimum", optional=True, placeholder="-∞")
         self.hi = NumberField(name=f"{name} maximum", optional=True, placeholder="∞")
+        width = columns(self.lo).value
+        for field in (self.lo, self.hi):  # as wide as the value fields, narrower if need be
+            field.setMaximumWidth(width)
+            field.setMinimumWidth(LIMIT_MIN_WIDTH)
 
-    def widgets(self) -> list[QWidget]:
-        return [self.label, self.value, self.fixed, self.lo, self.hi]
+    def limits(self) -> list[QWidget]:
+        return [self.label, self.fixed, self.lo, self.hi]
 
 
 class ExpressionEditor(QWidget):
-    """The expression (validated as you type), its output unit and its parameters."""
+    """The expression (validated as you type), its output unit, its parameters (sliders) and
+    their fit limits."""
 
     def __init__(self, entry: ms.ModelEntry, owner: Owner, parent=None):
         super().__init__(parent)
@@ -438,27 +510,44 @@ class ExpressionEditor(QWidget):
         unit_row.addWidget(unit_label)
         unit_row.addStretch(1)
         unit_row.addWidget(self.unit)
+        self.params_title = section_label("Parameters")
+        self.param_rows = QVBoxLayout()
+        self.param_rows.setContentsMargins(0, 0, 0, 0)
+        self.param_rows.setSpacing(8)
+        self.limits_title = section_label("Fit limits")
         self.table = TableBox()
-        for column, text in enumerate(("Name", "Value", "Fix", "Min", "Max")):
-            self.table.grid.addWidget(column_label(text), 0, column)
-        for column, stretch in enumerate((3, 5, 0, 4, 4)):
-            self.table.grid.setColumnStretch(column, stretch)
-        self.rows: dict[str, ParamRow] = {}
+        for column, text in enumerate(("Name", "Fixed", "Min", "Max")):
+            label = column_label(text)
+            if column:  # over a tick box or right-aligned numbers
+                label.setAlignment(
+                    (Qt.AlignmentFlag.AlignHCenter if column == 1 else Qt.AlignmentFlag.AlignRight)
+                    | Qt.AlignmentFlag.AlignVCenter
+                )
+            self.table.grid.addWidget(label, 0, column)
+        self.table.grid.setColumnStretch(0, 1)  # the limits keep the number fields' width
+        self.table.grid.setHorizontalSpacing(8)
+        self.rows: dict[str, ExpressionParam] = {}
         self.empty = hint(NO_PARAMETERS)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(7)
+        layout.setSpacing(8)
         layout.addWidget(section_label("Branches in B"))
         layout.addWidget(self.code)
         layout.addWidget(self.message)
         layout.addLayout(unit_row)
         layout.addSpacing(2)
-        layout.addWidget(section_label("Parameters"))
-        layout.addWidget(self.table)
+        layout.addWidget(self.params_title)
+        layout.addLayout(self.param_rows)
         layout.addWidget(self.empty)
+        layout.addSpacing(2)
+        layout.addWidget(self.limits_title)
+        layout.addWidget(self.table)
         self.code.textChanged.connect(self._on_text)
         self.unit.valueChanged.connect(self._on_unit)
+
+    def param_rows_shown(self) -> list[ParamRow]:
+        return [row.value for row in self.rows.values()]
 
     def refresh(self) -> None:
         entry = self.entry
@@ -479,7 +568,8 @@ class ExpressionEditor(QWidget):
                 row.fixed.setChecked(param.fixed)
             row.lo.set_value(param.lo)
             row.hi.set_value(param.hi)
-        self.table.setVisible(bool(self.rows))
+        for widget in (self.table, self.limits_title):
+            widget.setVisible(bool(self.rows))
         self.empty.setVisible(not self.rows)
 
     def _show_message(self) -> None:
@@ -494,18 +584,20 @@ class ExpressionEditor(QWidget):
 
     def _build_rows(self, names: list[str]) -> None:
         grid = self.table.grid
+        clear_layout(self.param_rows)
         for row in self.rows.values():
-            for widget in row.widgets():
+            for widget in row.limits():
                 grid.removeWidget(widget)
                 widget.hide()
                 widget.deleteLater()
         self.rows = {}
         for i, name in enumerate(names):
-            row = ParamRow(name)
-            for column, widget in enumerate(row.widgets()):
-                align = Qt.AlignmentFlag.AlignCenter if column == 2 else Qt.AlignmentFlag(0)
+            row = ExpressionParam(name, self.owner.slider_mode)
+            self.param_rows.addWidget(row.value)
+            for column, widget in enumerate(row.limits()):
+                align = Qt.AlignmentFlag.AlignCenter if column == 1 else Qt.AlignmentFlag(0)
                 grid.addWidget(widget, i + 1, column, alignment=align)
-            row.value.valueEdited.connect(lambda v, n=name: self._on_value(n, v))
+            row.value.valueEdited.connect(lambda v, live, n=name: self._on_value(n, v, live))
             row.fixed.toggled.connect(lambda on, n=name: self._on_fixed(n, on))
             row.lo.valueEdited.connect(lambda v, n=name: self._on_bound(n, "lo", v))
             row.hi.valueEdited.connect(lambda v, n=name: self._on_bound(n, "hi", v))
@@ -520,10 +612,10 @@ class ExpressionEditor(QWidget):
         ms.set_output_unit(self.entry, value)
         self.owner.edited(self.entry, structure=True)  # the fitted values were in the old unit
 
-    def _on_value(self, name: str, value) -> None:
+    def _on_value(self, name: str, value: float, live: bool) -> None:
         ms.params(self.entry)[name].value = float(value)
         self.entry.edited.add(name)
-        self.owner.edited(self.entry)
+        self.owner.edited(self.entry, live=live)
 
     def _on_fixed(self, name: str, fixed: bool) -> None:
         ms.params(self.entry)[name].fixed = fixed
