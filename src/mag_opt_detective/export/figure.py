@@ -26,6 +26,7 @@ from matplotlib.backends.backend_svg import FigureCanvasSVG
 from matplotlib.cm import ScalarMappable
 from matplotlib.colors import Colormap, LinearSegmentedColormap, ListedColormap, Normalize
 from matplotlib.figure import Figure
+from matplotlib.lines import Line2D
 from matplotlib.ticker import AutoMinorLocator
 from PIL import Image
 from PIL.PngImagePlugin import PngInfo
@@ -34,7 +35,7 @@ from mag_opt_detective import __version__
 from mag_opt_detective.core import colormaps
 from mag_opt_detective.core.units import Unit
 from mag_opt_detective.export.presets import JournalPreset, get_preset
-from mag_opt_detective.export.state import FigureState, Range
+from mag_opt_detective.export.state import Curve, FigureState, PointSet, Range
 from mag_opt_detective.export.style import MINOR_WIDTH, FigureStyle, TickStyle
 
 logger = logging.getLogger(__name__)
@@ -69,6 +70,10 @@ _FIELD_COLOURS = (0.1, 0.82)
 _MARKERS = ("o", "s", "^", "D", "v", "p")
 _OUTLINE = "#1a1a1a"  # dark edge around light overlays on a map
 _DASHES = (0, (3.0, 2.0))  # in pt, not scaled with the line width
+# dashes of the models drawn, in turn (the first as before), so a legend can tell them apart
+_MODEL_DASHES = (_DASHES, (0, (7.0, 2.0)), (0, (5.0, 1.5, 1.5, 1.5)), (0, (1.5, 1.5)))
+_INK = "black"  # legend samples on a white ground; points on stacked spectra
+_LEGEND_ALPHA = 0.85  # of the legend's white ground
 _PAD_IN = 1.0 / 72.0  # constrained-layout padding around the axes and labels
 _COLORBAR_PAD = 0.02  # gap between the axes and the colour bar (share of the axes)
 _COLORBAR_ASPECT = 25  # length / thickness of a colour bar beside the axes
@@ -353,7 +358,7 @@ def _draw_map(
             curve.y,
             color="white",
             linewidth=lw,
-            linestyle=_DASHES if curve.style == "model" else "-",
+            linestyle=_line_style(curve, state.curves),
             dash_capstyle="butt",
             path_effects=stroke,
             label=curve.label or "_nolegend_",
@@ -378,6 +383,69 @@ def _draw_map(
         )
     if state.colorbar:
         _colorbar(fig, ax, image, state.colorbar_label, lw, style)
+    if style.legend:
+        _legend(ax, state.points, state.curves, fs, lw, framed=True)
+
+
+def _line_style(curve: Curve, curves: list[Curve]):
+    """Solid for a "plain" curve; the dashes of its model (label) for a "model" curve."""
+    if curve.style != "model":
+        return "-"
+    models = list(dict.fromkeys(c.label for c in curves if c.style == "model"))
+    return _MODEL_DASHES[models.index(curve.label) % len(_MODEL_DASHES)]
+
+
+def _legend(
+    ax: Axes, points: list[PointSet], curves: list[Curve], fs: float, lw: float, framed: bool
+) -> None:
+    """A legend of the labelled point sets (their markers, the current one filled) and curves
+    (one row per label: the curves of a model share it), where it covers the fewest of them.
+
+    Its ground is translucent white, with a thin frame over a map (none on spectra).
+    """
+    rows = [(_marker_sample(p, k, fs, lw), p.label) for k, p in enumerate(points) if p.label]
+    for label in dict.fromkeys(c.label for c in curves if c.label):
+        curve = next(c for c in curves if c.label == label)
+        sample = Line2D([], [], color=_INK, linewidth=lw, dash_capstyle="butt")
+        sample.set_linestyle(_line_style(curve, curves))
+        rows.append((sample, label))
+    if not rows:
+        return
+    samples, labels = zip(*rows, strict=True)
+    legend = ax.legend(
+        samples,
+        ["-"] * len(rows),  # the labels follow: matplotlib leaves out one starting with "_"
+        loc="best",
+        fontsize=fs,
+        frameon=True,
+        fancybox=False,
+        facecolor="white",
+        edgecolor=_INK if framed else "none",
+        framealpha=_LEGEND_ALPHA,
+        borderpad=0.4,
+        labelspacing=0.3,
+        handlelength=2.0,
+        handletextpad=0.6,
+        borderaxespad=0.5,
+        numpoints=1,
+    )
+    for text, label in zip(legend.get_texts(), labels, strict=True):
+        text.set_text(label)
+    legend.get_frame().set_linewidth(lw)
+
+
+def _marker_sample(points: PointSet, k: int, fs: float, lw: float) -> Line2D:
+    """The marker of the *k*-th point set: filled for the current curve, open otherwise."""
+    return Line2D(
+        [],
+        [],
+        linestyle="none",
+        marker=_MARKERS[k % len(_MARKERS)],
+        markersize=0.55 * fs,
+        markeredgewidth=lw,
+        markerfacecolor=_INK if points.current else "white",
+        markeredgecolor=_INK,
+    )
 
 
 def _field_norm(field: np.ndarray) -> Normalize:
@@ -453,6 +521,8 @@ def _draw_stacked(
     if state.colorbar and options.color_by_field:
         mappable = ScalarMappable(_field_norm(fmap.field), _field_cmap(state.cmap))
         _colorbar(fig, ax, mappable, state.colorbar_label or FIELD_LABEL, lw, style)
+    if style.legend:
+        _legend(ax, state.points, [], fs, lw, framed=False)  # curves are not drawn here
 
 
 # ---------------------------------------------------------------------- output

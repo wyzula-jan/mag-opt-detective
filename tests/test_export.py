@@ -761,6 +761,86 @@ def test_style_checks_and_round_trip():
         FigureStyle.from_dict({"ticks": {"direction": 3}})
 
 
+# ---------------------------------------------------------------------- legend
+def _legend_rows(ax) -> list[tuple[str, object]]:
+    """(text, sample) of each legend row, top first."""
+    legend = ax.get_legend()
+    pairs = zip(legend.get_texts(), legend.legend_handles, strict=True)
+    return [(text.get_text(), sample) for text, sample in pairs]
+
+
+def _dashes(line) -> tuple:
+    """The dash pattern a line is drawn with (offset, on-off lengths in pt)."""
+    return line._unscaled_dash_pattern  # matplotlib has no public getter
+
+
+def test_the_legend_lists_the_curves_and_the_models_once(map_state):
+    b = np.linspace(0.0, 16.0, 50)
+    zeeman = [Curve(b, 40.0 + k * b, "model", "Zeeman / magnon") for k in (1, -1)]
+    state = dataclasses.replace(map_state, curves=[*map_state.curves, *zeeman])
+    assert nature_single(state).axes[0].get_legend() is None  # off by default
+    fig = _drawn(nature_single(state, style=FigureStyle(legend=True)))
+    ax = fig.axes[0]
+    rows = _legend_rows(ax)
+    assert [text for text, _sample in rows] == ["L0", "L1", "n=0", "Zeeman / magnon"]
+    (_, current), (_, other), (_, dirac), (_, model) = rows
+    assert current.get_marker() == "o" and other.get_marker() == "s"  # as drawn on the map
+    assert current.get_markerfacecolor() == "black" and other.get_markerfacecolor() == "white"
+    assert dirac.get_linestyle() == "--" and model.get_linestyle() == "--"
+    assert _dashes(dirac) != _dashes(model)  # the models drawn apart
+    n0, plain, z1, z2, *_markers = ax.lines
+    assert _dashes(z1) == _dashes(z2) == _dashes(model) != _dashes(n0) == _dashes(dirac)
+    assert plain.get_linestyle() == "-"  # an unlabelled curve: drawn, not listed
+    legend = ax.get_legend()
+    frame = legend.get_frame()
+    assert frame.get_linewidth() == 0.5 and frame.get_edgecolor()[:3] == (0.0, 0.0, 0.0)
+    assert legend.get_texts()[0].get_fontsize() == 7.0  # the figure's text size
+    box = legend.get_window_extent()
+    assert ax.get_window_extent().contains(box.x0, box.y0)  # inside the plot
+    assert ax.get_window_extent().contains(box.x1, box.y1)
+    assert layout_problem(fig) == ""
+
+
+def test_the_legend_of_stacked_spectra_lists_the_points(map_state):
+    state = dataclasses.replace(map_state, kind="stacked", stacked=StackedOptions(0.05, 2))
+    style = FigureStyle(legend=True)
+    ax = render(state, preset=APS, width_mm=86, height_mm=60, style=style).axes[0]
+    rows = _legend_rows(ax)
+    assert [text for text, _sample in rows] == ["L0", "L1"]  # curves are not drawn here
+    assert ax.get_legend().get_frame().get_edgecolor()[3] == 0.0  # no frame on spectra
+    assert ax.get_legend().get_texts()[0].get_fontsize() == 8.0
+
+
+def test_a_legend_needs_labels(map_state):
+    unnamed = dataclasses.replace(
+        map_state,
+        curves=[Curve([0.0, 1.0], [20.0, 30.0])],
+        points=[PointSet([4.0], [30.0], current=True)],
+    )
+    assert nature_single(unnamed, style=FigureStyle(legend=True)).axes[0].get_legend() is None
+    odd = dataclasses.replace(map_state, points=[PointSet([4.0], [30.0], "_x", current=True)])
+    ax = nature_single(odd, style=FigureStyle(legend=True)).axes[0]
+    assert _legend_rows(ax)[0][0] == "_x"  # matplotlib would leave it out
+
+
+def test_the_legend_in_the_style_and_in_presets():
+    style = FigureStyle(legend=True)
+    assert style.to_dict()["legend"] is True and FigureStyle().legend is False
+    assert FigureStyle.from_dict(style.to_dict()) == style
+    assert FigureStyle.from_dict({"colorbar_location": "top"}).legend is False  # older presets
+    for bad in ("upper right", 1, None):
+        with pytest.raises(ValueError, match="legend"):
+            FigureStyle.from_dict({"legend": bad})
+    preset = _preset(style=FigureStyle("top", legend=True))
+    text = presets_to_json([preset])
+    assert json.loads(text)["version"] == 1 and json.loads(text)["presets"][0]["legend"] is True
+    (read,) = presets_from_json(text)
+    assert read == preset and read.style.legend
+    old = {key: value for key, value in _preset().to_dict().items() if key != "legend"}
+    (read,) = presets_from_json(json.dumps({"version": 1, "presets": [old]}))
+    assert not read.style.legend  # a preset saved before the legend existed
+
+
 # ---------------------------------------------------------------------- user presets
 def _preset(name="Thesis", **changes) -> UserPreset:
     values = dict(
@@ -894,13 +974,13 @@ def test_stored_presets_keep_what_they_cannot_read():
 def test_keys_this_version_does_not_know_are_written_back():
     data = {
         **_preset().to_dict(),
-        "legend": "upper right",  # e.g. a setting of a newer app
+        "grid": "major",  # e.g. a setting of a newer app
         "ticks": {"direction": "out", "label_size_pt": 6},
     }
     (preset,) = presets_from_json(json.dumps({"version": 1, "presets": [data]}))
     assert preset.style.ticks.direction == "out" and preset == _preset(style=preset.style)
     renamed = dataclasses.replace(preset, name="Renamed").to_dict()
-    assert renamed["name"] == "Renamed" and renamed["legend"] == "upper right"
+    assert renamed["name"] == "Renamed" and renamed["grid"] == "major"
     assert renamed["ticks"]["label_size_pt"] == 6  # kept beside the known tick settings
     assert renamed["ticks"]["minor_intervals"] == 2
 

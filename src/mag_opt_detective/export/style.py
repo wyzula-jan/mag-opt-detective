@@ -1,9 +1,11 @@
-"""How a figure is drawn beyond its journal preset: where the colour bar goes and the ticks.
+"""How a figure is drawn beyond its journal preset: where the colour bar goes, the ticks and
+the legend.
 
 :class:`FigureStyle` collects these choices, so a new one is one more field (with a default
 that keeps today's look) and one more key in :meth:`FigureStyle.to_dict`. The defaults draw
 exactly what the presets drew before they existed: outward ticks on the bottom and left axes,
-sized from the text size and line width, no minor ticks, the colour bar on the right.
+sized from the text size and line width, no minor ticks, the colour bar on the right and no
+legend.
 """
 
 from __future__ import annotations
@@ -115,20 +117,29 @@ class FigureStyle:
     """Style choices of a figure that no journal prescribes.
 
     *colorbar_location*: "right" (a vertical bar) or "top" (a horizontal bar above the plot,
-    its ticks and label on top). The figure keeps its size: the axes make room.
+    its ticks and label on top). The figure keeps its size: the axes make room. *legend* lists
+    the picked curves (as their markers) and the model curves (one row per model) inside the
+    plot, where it covers the fewest of them.
     """
 
     colorbar_location: str = "right"
     ticks: TickStyle = field(default_factory=TickStyle)
+    legend: bool = False
 
     def __post_init__(self) -> None:
         if self.colorbar_location not in COLORBAR_LOCATIONS:
             raise ValueError(f"colour bar location must be one of {COLORBAR_LOCATIONS}")
         if not isinstance(self.ticks, TickStyle):
             raise ValueError("ticks must be a TickStyle")
+        if not isinstance(self.legend, bool):
+            raise ValueError("legend must be true or false")
 
     def to_dict(self) -> dict:
-        return {"colorbar_location": self.colorbar_location, "ticks": self.ticks.to_dict()}
+        return {
+            "colorbar_location": self.colorbar_location,
+            "ticks": self.ticks.to_dict(),
+            "legend": self.legend,
+        }
 
     @classmethod
     def from_dict(cls, data) -> FigureStyle:
@@ -139,4 +150,4 @@ class FigureStyle:
         if not isinstance(location, str):
             raise ValueError("the colour bar location must be text")
         ticks = TickStyle.from_dict(data["ticks"]) if "ticks" in data else TickStyle()
-        return cls(colorbar_location=location, ticks=ticks)
+        return cls(colorbar_location=location, ticks=ticks, legend=data.get("legend", False))
