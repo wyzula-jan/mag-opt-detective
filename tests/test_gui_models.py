@@ -898,8 +898,10 @@ def test_value_fields_share_one_column(window, sweep, qtbot, size, inspector, wi
             assert caption.width() >= row.caption.fontMetrics().horizontalAdvance(text)
             assert len(text) <= 3 and len(row.slider.accessibleName()) > len(text)
     assert {r.caption.text() for r in rows} >= {"v", "Δ", "N", "E₀", "g", "Δ₁₂", "Δ₂₃"}
-    # the captions and the sliders share their columns too
-    assert len({r.slider.mapTo(section, QPoint(0, 0)).x() for r in rows}) == 1
+    # the sliders share a column too: one for the symbols, one for the expression's names
+    built_in = {r.slider.mapTo(section, QPoint(0, 0)).x() for r in rows if r not in custom}
+    named = {r.slider.mapTo(section, QPoint(0, 0)).x() for r in custom}
+    assert len(built_in) == 1 and len(named) == 1
     scrollbar = window.style().pixelMetric(QStyle.PixelMetric.PM_ScrollBarExtent)
     assert section.minimumSizeHint().width() <= INSPECTOR_MIN_WIDTH - scrollbar
     assert not errors
@@ -1214,4 +1216,44 @@ def test_the_mode_menu_is_deleted_after_use(window, qtbot, errors):
         page.mode_button.click()
     QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
     assert page.mode_button.findChildren(QMenu) == []
+    assert not errors
+
+
+def test_expression_names_are_read_in_their_own_column(window, sweep, qtbot, errors):
+    """An expression's names get a caption column as wide as the widest (whole at 480 px,
+    names of up to 6 characters whole at 280 px; the slider keeps its least width); built-in
+    models keep the shared symbol column and every field stays in the shared column."""
+    shown_window(window, qtbot, (1400, 900))
+    load_sweep(window, sweep)
+    process(window)
+    zeeman = add(window, "zeeman")
+    custom = add(window, "custom")
+    editor = card_of(window, custom).editor
+    editor.code.edit.setPlainText("E0 + amplitude*sqrt(B) + gap*B\nE1 + offset + mass*B**2")
+    section = window.inspector["models"]
+    splitter = window.body_splitter
+    least = columns(editor.rows["E0"].value).slider
+    for width in (480, INSPECTOR_MIN_WIDTH):
+        sizes = splitter.sizes()
+        splitter.setSizes([sizes[0], sum(sizes) - sizes[0] - width, width])
+        settle(qtbot)
+        assert window.inspector_panel.width() == width
+        captions = {r.value.caption.width() for r in editor.rows.values()}
+        assert len(captions) == 1  # one column for the card
+        for name, row in editor.rows.items():
+            caption, slider = row.value.caption, row.value.slider
+            whole = caption.fontMetrics().horizontalAdvance(name) <= caption.width()
+            limit = row.label.fontMetrics().horizontalAdvance(name) <= row.label.width()
+            assert slider.width() >= least and caption.toolTip() == name
+            if width == 480 or len(name) <= 6:
+                assert whole and limit, (width, name)
+        if width == INSPECTOR_MIN_WIDTH:  # too long for 280 px: elided, the tooltip has it
+            caption = editor.rows["amplitude"].value.caption
+            assert caption.width() < caption.fontMetrics().horizontalAdvance("amplitude")
+        zrow = card_of(window, zeeman).editor.rows[0].g
+        assert zrow.caption.width() == columns(zrow).label  # symbols keep theirs
+        fields = [r.value.field for r in editor.rows.values()] + [zrow.field]
+        assert len({(f.mapTo(section, QPoint(0, 0)).x(), f.width()) for f in fields}) == 1
+    scrollbar = window.style().pixelMetric(QStyle.PixelMetric.PM_ScrollBarExtent)
+    assert section.minimumSizeHint().width() <= INSPECTOR_MIN_WIDTH - scrollbar
     assert not errors

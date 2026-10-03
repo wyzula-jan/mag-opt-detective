@@ -401,6 +401,7 @@ class ParamRow(QWidget):
         self._range_stale = True
         self._floor_share = floor_share
         self._scale = 1.0  # the size of the value (floor_share)
+        self._label_width: int | None = None  # a caption column of its own (set_label_width)
         self._wide: bool | None = None
         self.caption = ElidedLabel(caption)
         self.caption.setProperty("kit", "muted")
@@ -455,6 +456,21 @@ class ParamRow(QWidget):
 
     def set_floor(self, floor: float) -> None:
         self.slider.set_floor(floor)
+
+    def set_label_width(self, width: int | None) -> None:
+        """A caption column of *width* (e.g. the widest name of a card) instead of the shared
+        symbol column; it gives way down to the symbol column so the slider keeps its least
+        width. None: the shared column."""
+        self._label_width = width
+        self._place()
+
+    def caption_width(self) -> int:
+        """The caption column at the row's width (one line)."""
+        c = columns(self)
+        if self._label_width is None:
+            return c.label
+        room = self.width() - c.value - 2 * c.gap - c.slider
+        return max(c.label, min(self._label_width, room))
 
     def set_range_for(self, range_for) -> None:
         self._range_for = range_for
@@ -520,8 +536,9 @@ class ParamRow(QWidget):
         self.field.setGeometry(width - c.value, 0, c.value, FIELD_HEIGHT)
         slider_height = self.slider.sizeHint().height()
         if wide:
-            self.caption.setGeometry(0, 0, c.label, FIELD_HEIGHT)
-            left = c.label + c.gap
+            label = self.caption_width()
+            self.caption.setGeometry(0, 0, label, FIELD_HEIGHT)
+            left = label + c.gap
             top = (FIELD_HEIGHT - slider_height) // 2
             self.slider.setGeometry(left, top, width - c.value - c.gap - left, slider_height)
         else:

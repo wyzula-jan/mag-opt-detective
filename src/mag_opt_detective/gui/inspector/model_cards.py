@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QSizePolicy,
     QToolButton,
     QVBoxLayout,
     QWidget,
@@ -86,6 +87,7 @@ FORMS = {
 OUTPUT_UNITS = ((Unit.MEV, "meV"), (Unit.CM1, "cm⁻¹"), (Unit.THZ, "THz"))
 M_WIDEST = "-0.50"  # the multiplier m as typed
 LIMIT_MIN_WIDTH = 48  # a fit limit's field in a narrow inspector
+LIMIT_NAME_WIDTH = 40  # a fit limit's name keeps this much (or less if shorter), else elided
 
 
 class Owner(Protocol):
@@ -485,16 +487,20 @@ class ExpressionParam:
     def __init__(self, name: str, mode: SliderMode):
         self.name = name
         self.value = ParamRow(name, name=name, mode=mode, mono=True, floor_share=EXPRESSION_FLOOR)
-        self.label = ElidedLabel(name)  # a long name must not widen the table
+        self.label = ElidedLabel(name)  # whole if the table has room, else elided
         self.label.setFont(mono_font(0.88))
         self.label.setToolTip(name)
+        self.label.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
+        whole = self.label.fontMetrics().horizontalAdvance(name) + 2
+        self.label.setMinimumWidth(min(whole, LIMIT_NAME_WIDTH))
         self.fixed = CheckBox()
         self.fixed.setToolTip(f"Hold {name} fixed in fits")
         self.fixed.setAccessibleName(f"{name} fixed")
         self.lo = NumberField(name=f"{name} minimum", optional=True, placeholder="-∞")
         self.hi = NumberField(name=f"{name} maximum", optional=True, placeholder="∞")
         width = columns(self.lo).value
-        for field in (self.lo, self.hi):  # as wide as the value fields, narrower if need be
+        for field in (self.lo, self.hi):  # the names first; up to the value fields' width
+            field.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
             field.setMaximumWidth(width)
             field.setMinimumWidth(LIMIT_MIN_WIDTH)
 
@@ -539,7 +545,8 @@ class ExpressionEditor(QWidget):
                     | Qt.AlignmentFlag.AlignVCenter
                 )
             self.table.grid.addWidget(label, 0, column)
-        self.table.grid.setColumnStretch(0, 1)  # the limits keep the number fields' width
+        for column in (0, 2, 3):  # names and limits share the room (limits up to a field)
+            self.table.grid.setColumnStretch(column, 1)
         self.table.grid.setHorizontalSpacing(8)
         self.rows: dict[str, ExpressionParam] = {}
         self.empty = hint(NO_PARAMETERS)
@@ -617,6 +624,13 @@ class ExpressionEditor(QWidget):
             row.lo.valueEdited.connect(lambda v, n=name: self._on_bound(n, "lo", v))
             row.hi.valueEdited.connect(lambda v, n=name: self._on_bound(n, "hi", v))
             self.rows[name] = row
+        # the names get a caption column as wide as the widest (the symbols' is too narrow)
+        rows = [row.value for row in self.rows.values()]
+        if rows:
+            metrics = rows[0].caption.fontMetrics()
+            widest = max(metrics.horizontalAdvance(name) for name in names) + 4
+            for row in rows:
+                row.set_label_width(widest)
 
     def _on_text(self, text: str) -> None:
         ms.set_expression(self.entry, text)
