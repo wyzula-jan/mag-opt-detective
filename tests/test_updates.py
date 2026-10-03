@@ -2,7 +2,7 @@
 
 No test makes a network request: the feed comes from a fake transport with a sample answer of
 GitHub's list-releases API (``tests/data/github_releases.json``, written by hand from its
-documentation), and ``urlopen`` fails the test if anything calls it.
+documentation), and conftest's guard fails any test that tries.
 """
 
 import http.client
@@ -13,6 +13,7 @@ import ssl
 import subprocess
 import sys
 import urllib.request
+from email.message import Message
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 
@@ -33,18 +34,9 @@ from mag_opt_detective.updates import (
 
 ROOT = Path(__file__).resolve().parents[1]
 SAMPLE = Path(__file__).parent / "data" / "github_releases.json"
-DOWNLOAD = "https://github.com/wyzula-jan/mag-opt-detective/releases/download"
-
-
-@pytest.fixture(autouse=True)
-def no_network(monkeypatch):
-    """Any real request fails the test."""
-
-    def refuse(*_args, **_kwargs):
-        raise AssertionError("a test tried to reach the network")
-
-    monkeypatch.setattr(urllib.request, "urlopen", refuse)
-    monkeypatch.setattr(updates, "urlopen", refuse)
+REPO = "https://github.com/wyzula-jan/mag-opt-detective"
+DOWNLOAD = f"{REPO}/releases/download"
+OPEN_GITHUB = updates.open_github  # the real one: conftest's guard replaces it in every test
 
 
 class FakeResponse(io.BytesIO):
@@ -93,9 +85,11 @@ def item(tag: str, prerelease: bool = False, draft: bool = False, **fields) -> d
         ("v1.2.0-rc.1", Version(1, 2, 0, ("rc", 1))),
         ("1.0.0-alpha.beta", Version(1, 0, 0, ("alpha", "beta"))),
         ("v1.0.0+20261003", Version(1, 0, 0)),  # build metadata is ignored
-        ("0.3.0.dev0", Version(0, 3, 0, ("dev", 0))),  # PEP 440: a version in development
-        ("0.3.0.dev", Version(0, 3, 0, ("dev", 0))),
+        ("0.3.0.dev0", Version(0, 3, 0, dev=0)),  # PEP 440: a version in development
+        ("0.3.0.dev", Version(0, 3, 0, dev=0)),
         ("0.3.0rc2", Version(0, 3, 0, ("rc", 2))),
+        ("1.0.0rc1.dev0", Version(1, 0, 0, ("rc", 1), dev=0)),
+        ("0.3.0.post1", Version(0, 3, 0)),  # a post-release counts as its release
         ("0.2.0+g1a2b3c4", Version(0, 2, 0)),  # a local (git) build of 0.2.0
     ],
 )
@@ -103,7 +97,9 @@ def test_versions_are_parsed(text, parsed):
     assert Version.parse(text) == parsed
 
 
-@pytest.mark.parametrize("text", ["", "v1.2", "1.2.3.4", "01.2.3", "nightly", "v1.2.3-", None, 3])
+@pytest.mark.parametrize(
+    "text", ["", "v1.2", "1.2.3.4", "01.2.3", "nightly", "v1.2.3-", "1.\u0662.3", None, 3]
+)
 def test_other_text_is_no_version(text):
     with pytest.raises(ValueError):
         Version.parse(text)
@@ -132,11 +128,17 @@ def test_a_version_in_development_lies_between_releases():
     dev = Version.parse("0.3.0.dev0")
     assert Version.parse("0.2.0") < dev < Version.parse("0.3.0")
     assert dev.is_prerelease and not Version.parse("0.3.0").is_prerelease
+    chain = ["1.0.0.dev0", "1.0.0a1", "1.0.0rc1.dev0", "1.0.0rc1", "1.0.0"]  # as PEP 440
+    versions = [Version.parse(text) for text in chain]
+    assert sorted(reversed(versions)) == versions
+    assert Version.parse("1.0.0rc1") == Version.parse("v1.0.0-rc.1")
+    assert Version.parse("0.9.9") < Version.parse("1.0.0.dev0")
 
 
 def test_versions_print_as_semantic_versions():
     assert str(Version.parse("v0.3.0")) == "0.3.0"
     assert str(Version.parse("v1.2.0-rc.1")) == "1.2.0-rc.1"
+    assert str(Version.parse("1.2.0rc1.dev3")) == "1.2.0-rc.1.dev3"
 
 
 def test_pre_releases_count_before_1_0_0_only():
@@ -209,6 +211,44 @@ def test_odd_releases_are_left_out_or_made_safe():
         parse_releases({"message": "Not Found"})
 
 
+@pytest.mark.parametrize(
+    "link",
+    [
+        f"{DOWNLOAD}/../../../../attacker/repo/releases/download/v0.7.0/app.zip",
+        f"{DOWNLOAD}/%2e%2e/%2e%2e/%2e%2e/%2e%2e/attacker/repo/app.zip",
+        f"{DOWNLOAD}/v0.7.0\\..\\..\\..\\..\\attacker\\app.zip",
+        f"{DOWNLOAD}/v0.7.0/./app.zip",
+        f"{DOWNLOAD}//example.com/app.zip",
+        f"{DOWNLOAD}/v0.7.0/app.zip?next=https://example.com",
+        f"{DOWNLOAD}/v0.7.0/app.zip#top",
+        f"{DOWNLOAD}/v0.7.0/app zip",
+        "http://github.com/wyzula-jan/mag-opt-detective/releases/download/v0.7.0/app.zip",
+        "https://github.com.example.com/wyzula-jan/mag-opt-detective/releases/download/v0.7.0/a",
+        "https://user@github.com/wyzula-jan/mag-opt-detective/releases/download/v0.7.0/app.zip",
+        "https://github.com:8443/wyzula-jan/mag-opt-detective/releases/download/v0.7.0/app.zip",
+        "https://github.com/wyzula-jan/other-repo/releases/download/v0.7.0/app.zip",
+        "https://github.com/wyzula-jan/mag-opt-detective/releases-download/v0.7.0/app.zip",
+    ],
+)
+def test_links_that_leave_the_releases_are_refused(link):
+    page = link.replace("/download/", "/tag/")
+    asset = {"name": "mag-opt-detective-macos.zip", "browser_download_url": link}
+    [release] = parse_releases([item("v0.7.0", html_url=page, assets=[asset])])
+    assert release.assets == {}  # Download opens the release page instead
+    assert release.page == f"{REPO}/releases/tag/v0.7.0"
+
+
+def test_a_tag_is_used_without_its_spaces_and_odd_assets_are_skipped():
+    payload = [
+        item(" v0.7.0 ", html_url=None, assets=5),
+        item("v0.6.0", assets="mag-opt-detective-macos.zip"),
+        item("v0.5.0", assets={"name": "mag-opt-detective-macos.zip"}),
+    ]
+    seven, six, five = parse_releases(payload)
+    assert seven.tag == "v0.7.0" and seven.page == f"{REPO}/releases/tag/v0.7.0"
+    assert seven.assets == six.assets == five.assets == {}
+
+
 def test_newer_equal_and_older_versions():
     releases = parse_releases(sample())
     assert update_for(releases, Version.parse("0.2.0"), PRERELEASE).tag == "v0.3.0"
@@ -268,7 +308,9 @@ def test_failures_raise_a_short_reason(error, message):
     assert info.value.__cause__ is error  # the details stay for the log
 
 
-@pytest.mark.parametrize("body", [b"<html>Bad gateway</html>", b'{"message": "Not Found"}'])
+@pytest.mark.parametrize(
+    "body", [b"<html>Bad gateway</html>", b'{"message": "Not Found"}', b"[" * 200_000]
+)
 def test_an_answer_that_is_no_release_list_fails(body):
     with pytest.raises(UpdateCheckError, match="cannot read"):
         fetch_releases("0.2.0", opener=FakeTransport(body))
@@ -280,10 +322,47 @@ def test_a_huge_answer_is_not_read_to_the_end(monkeypatch):
         fetch_releases("0.2.0", opener=FakeTransport(b"[" + b" " * 200 + b"]"))
 
 
-def test_without_a_transport_urlopen_is_used():
-    """(The fixture's urlopen refuses: no test reaches the network.)"""
+def test_redirects_stay_within_githubs_api():
+    handler, request = updates.ApiRedirects(), updates.releases_request("0.2.0")
+    moved = "https://api.github.com/repositories/1234/releases?per_page=10"  # a renamed repo
+    new = handler.redirect_request(request, io.BytesIO(), 301, "Moved", Message(), moved)
+    assert new.full_url == moved and new.get_header("User-agent") == "mag-opt-detective/0.2.0"
+    for elsewhere in (
+        "https://example.com/releases",
+        "http://api.github.com/repos/wyzula-jan/mag-opt-detective/releases",
+        "https://github.com/wyzula-jan/mag-opt-detective/releases",
+    ):
+        answer = io.BytesIO()
+        with pytest.raises(UpdateCheckError, match="another address"):
+            handler.redirect_request(request, answer, 302, "Found", Message(), elsewhere)
+        assert answer.closed
+
+
+def test_the_request_goes_through_urllib_without_cookies(monkeypatch):
+    sent = []
+
+    def offline(director, request, timeout=None):
+        sent.append(([type(h) for h in director.handlers], request, timeout))
+        raise URLError(OSError(51, "Network is unreachable"))
+
+    monkeypatch.setattr(urllib.request.OpenerDirector, "open", offline)
+    with pytest.raises(UpdateCheckError, match="no connection"):
+        fetch_releases("0.2.0", opener=OPEN_GITHUB)
+    [(handlers, request, timeout)] = sent
+    assert updates.ApiRedirects in handlers
+    assert urllib.request.HTTPRedirectHandler not in handlers
+    assert urllib.request.HTTPCookieProcessor not in handlers
+    assert request.full_url == updates.RELEASES_API and timeout == 5
+
+
+def test_no_test_reaches_the_network():
+    """conftest's guard: the update check, urllib and http.client all refuse."""
     with pytest.raises(AssertionError, match="network"):
         fetch_releases("0.2.0")
+    with pytest.raises(AssertionError, match="network"):
+        urllib.request.urlopen("https://api.github.com/", timeout=1)
+    with pytest.raises(AssertionError, match="network"):
+        http.client.HTTPSConnection("api.github.com", timeout=1).request("GET", "/")
 
 
 def test_the_module_does_not_import_qt():

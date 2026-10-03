@@ -1,5 +1,7 @@
+import http.client
 import os
 import sys
+import urllib.request
 from pathlib import Path
 
 import numpy as np
@@ -10,6 +12,26 @@ from helpers import sweep_name, write_text
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 DATA_DIR = Path(__file__).resolve().parents[1] / "Data_to_test"
+
+
+def pytest_configure(config):
+    config.addinivalue_line("markers", "network: the test may reach the network (none does)")
+
+
+@pytest.fixture(autouse=True)
+def _no_network(request, monkeypatch):
+    """No test reaches the network (the update check, any urllib or http.client request)
+    unless it is marked ``network``."""
+    if request.node.get_closest_marker("network") is not None:
+        return
+    from mag_opt_detective import updates
+
+    def refuse(*_args, **_kwargs):
+        raise AssertionError("a test tried to reach the network")
+
+    monkeypatch.setattr(updates, "open_github", refuse)
+    monkeypatch.setattr(urllib.request.OpenerDirector, "open", refuse)
+    monkeypatch.setattr(http.client.HTTPConnection, "connect", refuse)
 
 
 @pytest.fixture(autouse=True)
