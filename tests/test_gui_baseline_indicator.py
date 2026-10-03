@@ -192,7 +192,7 @@ def test_a_changed_region_is_pending_until_processed(processed):
         ("off", f"has the baseline off. Process ({process_key()}) to remove it."),
         ("reversed", "cannot be applied: 700 – 600 cm⁻¹ is reversed"),
         ("incomplete", "cannot be applied: it is incomplete; enter both limits."),
-        ("outside", "cannot be applied: 1300 – 1400 cm⁻¹ holds no data (the map spans 400 –"),
+        ("outside", "cannot be applied: 1300 – 1400 cm⁻¹ holds no data (the data span 400 –"),
     ],
 )
 def test_pending_says_what_the_panel_has(processed, change, says):
@@ -213,6 +213,52 @@ def test_pending_says_what_the_panel_has(processed, change, says):
     if change == "off":
         process(w)
         assert mark(w) is None  # the new map has no baseline
+
+
+APPLIES = "applies"
+
+
+@pytest.mark.parametrize(
+    ("last", "new", "region", "says"),
+    [
+        ((600.0, 1100.0), None, (450.0, 550.0), APPLIES),  # the whole sweep again
+        ((600.0, 1100.0), (900.0, None), (850.0, 950.0), APPLIES),  # reaches into the window
+        ((600.0, 1100.0), (900.0, 1200.0), (450.0, 550.0), "lies outside the energy window"),
+        (None, (600.0, 1100.0), (450.0, 550.0), "holds no data (the data span 600 – 1100"),
+        (None, (400.0, 1100.0), (450.0, 550.0), APPLIES),
+        ((600.0, 1100.0), (600.0, 1100.0), (450.0, 550.0), "holds no data (the data span 600 –"),
+    ],
+)
+@pytest.mark.parametrize("applied", [None, (700.0, 800.0)])
+def test_pending_judges_the_data_the_next_process_loads(
+    window, lines, last, new, region, says, applied
+):
+    w, c = window, window.controller
+    c.set_processing(sample_files=lines, energy_cut=last, baseline=applied)
+    process(w)
+    c.set_processing(energy_cut=new, baseline=region)
+    shown = mark(w)
+    if says == APPLIES:  # also "No baseline" on a map without one
+        assert shown.pending and not shown.problem
+        assert shown.text() == ("No baseline" if applied is None else "Baseline 700 – 800 cm⁻¹")
+        assert f"The Processing panel has {region_text(*region, Unit.CM1)}. Process" in (
+            shown.tooltip()
+        )
+        process(w)
+        assert c.result.baseline_region == region and not mark(w).pending
+    elif applied is None:
+        assert shown is None  # nothing the next Process would apply
+    else:
+        assert shown.pending and says in shown.problem and "Process (" not in shown.tooltip()
+
+
+def test_another_sweep_is_not_judged_by_the_map_shown(window, lines, tmp_path):
+    w, c = window, window.controller
+    c.set_processing(sample_files=lines, baseline=(700.0, 800.0))
+    process(w)
+    other = SweepFiles(lines.zero, lines.field[:-1])
+    c.set_processing(sample_files=other, baseline=(1300.0, 1400.0))
+    assert mark(w).pending and not mark(w).problem  # (Process says it, if it must)
 
 
 def test_live_applies_at_once_and_is_never_pending(processed):

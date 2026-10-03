@@ -19,6 +19,7 @@ from PySide6.QtCore import QRectF, QSize, Qt
 from PySide6.QtGui import QFont, QFontMetrics, QPainter, QPen
 from PySide6.QtWidgets import QAbstractButton, QSizePolicy
 
+from mag_opt_detective.core.spectra import energy_mask
 from mag_opt_detective.core.units import Unit, from_cm1
 from mag_opt_detective.gui import icons
 from mag_opt_detective.gui.display import process_key, unit_text
@@ -138,9 +139,14 @@ def shown(region, unit: Unit) -> tuple:
 
 
 def region_problem(controller, region) -> str:
-    """Why the next Process cannot apply the baseline *region* (cm^-1; None: off) to the
-    data of the map shown, or "" when it can (an approximation: Process checks the data it
-    loads, cut to the energy window)."""
+    """Why the next Process cannot apply the baseline *region* (cm^-1; None: off), or "" when
+    it can (as far as the window knows: Process checks the data it loads, cut to the energy
+    window).
+
+    The data is the map shown, cut to the energy window, while the sweep and the window are
+    those of the last Process or the window is new and the map was not cut. With another
+    sweep nothing is known; with another window only that the region must reach into it.
+    """
     c = controller
     if region is None:
         return ""
@@ -150,13 +156,22 @@ def region_problem(controller, region) -> str:
     text = range_text(shown(region, unit), unit)
     if region[0] >= region[1]:
         return f"{text} is reversed; the first value must be below the second"
+    used, p = c.processed_options(), c.processing
+    if used is None or used.sample_files != p.sample_files:
+        return ""
+    window = p.energy_cut
+    if used.energy_cut not in (None, window):  # data outside the last window is not known
+        lo, hi = (None, None) if window is None else window
+        if (lo is None or region[1] >= lo) and (hi is None or region[0] <= hi):
+            return ""
+        return f"{text} lies outside the energy window ({range_text(shown(window, unit), unit)})"
     energy = c.result.ratio.energy
-    try:
-        c.check_energy_range("baseline region", region, energy, "processing")
-    except ValueError:
-        span = range_text(shown((energy.min(), energy.max()), unit), unit)
-        return f"{text} holds no data (the map spans {span})"
-    return ""
+    if window is not None:
+        energy = energy[energy_mask(energy, *window)]
+    if energy.size == 0 or energy_mask(energy, *region).any():  # (an empty window says so)
+        return ""
+    span = range_text(shown((energy.min(), energy.max()), unit), unit)
+    return f"{text} holds no data (the data span {span})"
 
 
 def distinct_digits(applied, wanted) -> int:
