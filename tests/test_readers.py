@@ -1,8 +1,11 @@
+import os
+
 import numpy as np
 import pytest
 
-from helpers import write_opus, write_text
+from helpers import sweep_name, write_opus, write_text
 from mag_opt_detective.core.readers import (
+    SpectrumCache,
     load_measurement,
     parse_field,
     read_spectrum,
@@ -111,3 +114,56 @@ def test_a_broken_spectrum_names_its_file(sweep, tmp_path, data, message):
     broken.write_bytes(data)
     with pytest.raises(ValueError, match=message):
         load_measurement(sweep["zero"], [*sweep["field"], broken])
+
+
+def _touch(path, seconds: int) -> None:
+    """Give *path* a modification time of its own (a rewrite within one clock tick may not)."""
+    ns = (1_700_000_000 + seconds) * 1_000_000_000
+    os.utime(path, ns=(ns, ns))
+
+
+def test_spectrum_cache_reads_each_file_once_until_it_changes(tmp_path):
+    x = np.linspace(100.0, 200.0, 11)
+    text = write_text(tmp_path / "a.txt", x, x)
+    opus = write_opus(tmp_path / "b.0", x, 2 * x)
+    cache = SpectrumCache()
+    first = cache.read(text)
+    np.testing.assert_allclose(cache.read(opus)[1], 2 * x, rtol=1e-6)
+    assert cache.read(str(text)) is first  # the same arrays, not read again
+    assert cache.reads == 2 and len(cache) == 2 and text in cache
+    with pytest.raises(ValueError, match="read-only"):
+        first[1][0] = 0.0  # shared arrays cannot be changed by accident
+
+    write_text(text, x, 3 * x)
+    _touch(text, 1)
+    np.testing.assert_allclose(cache.read(text)[1], 3 * x)  # changed: read again
+    assert cache.reads == 3
+
+    cache.retain([opus])
+    assert text not in cache and opus in cache
+
+
+def test_spectrum_cache_keeps_neither_broken_nor_missing_files(tmp_path):
+    cache = SpectrumCache()
+    broken = tmp_path / "broken.txt"
+    broken.write_bytes(b"100.0\t1.0\n101.0\tx\n")
+    with pytest.raises(ValueError, match=r"broken\.txt"):
+        cache.read(broken)
+    with pytest.raises(OSError):
+        cache.read(tmp_path / "missing.txt")
+    assert len(cache) == 0
+
+
+def test_load_measurement_through_the_cache_reads_only_new_files(sweep, tmp_path):
+    cache = SpectrumCache()
+    plain = load_measurement(sweep["zero"], sweep["field"])
+    cached = load_measurement(sweep["zero"], sweep["field"], read=cache.read)
+    np.testing.assert_array_equal(cached.spectra.values, plain.spectra.values)
+    np.testing.assert_array_equal(cached.zero, plain.zero)
+    assert cache.reads == 6
+
+    new = write_text(tmp_path / sweep_name(2.5), sweep["x"], 1.25 * sweep["base"])
+    grown = load_measurement(sweep["zero"], [*sweep["field"], new], read=cache.read)
+    assert cache.reads == 7  # only the new file
+    np.testing.assert_allclose(grown.spectra.field, [*sweep["fields"], 2.5])
+    np.testing.assert_allclose(grown.spectra.values[:, -1], 1.25 * sweep["base"])

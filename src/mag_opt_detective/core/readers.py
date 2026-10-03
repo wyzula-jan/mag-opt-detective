@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import os
 import re
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -60,6 +61,64 @@ def read_spectrum(path: str | Path) -> tuple[np.ndarray, np.ndarray]:
     return read_text(path)
 
 
+Reader = Callable[[str], tuple[np.ndarray, np.ndarray]]
+
+
+def _signature(path: str) -> tuple[int, int]:
+    stat = os.stat(path)
+    return stat.st_size, stat.st_mtime_ns
+
+
+class SpectrumCache:
+    """Spectra read before, kept with the size and modification time of their file: a file is
+    read again only when one of them changed (e.g. the growing folder of a running sweep).
+
+    The arrays handed out are shared and read-only. A file that changes while it is read is
+    not kept. :attr:`reads` counts the files actually read.
+    """
+
+    def __init__(self, read: Reader = read_spectrum):
+        self._read = read
+        self._spectra: dict[str, tuple[tuple[int, int], tuple[np.ndarray, np.ndarray]]] = {}
+        self.reads = 0
+
+    def __len__(self) -> int:
+        return len(self._spectra)
+
+    def __contains__(self, path: object) -> bool:
+        return str(path) in self._spectra
+
+    def read(self, path: str | Path) -> tuple[np.ndarray, np.ndarray]:
+        """The spectrum of *path* (as :func:`read_spectrum`), from the cache if unchanged."""
+        path = str(path)
+        try:
+            before = _signature(path)
+        except OSError:
+            self._spectra.pop(path, None)
+            return self._read(path)  # the reader's own error for a missing file
+        kept = self._spectra.pop(path, None)
+        if kept is not None and kept[0] == before:
+            self._spectra[path] = kept
+            return kept[1]
+        spectrum = self._read(path)
+        self.reads += 1
+        for array in spectrum:
+            array.flags.writeable = False
+        try:
+            unchanged = _signature(path) == before
+        except OSError:
+            unchanged = False
+        if unchanged:
+            self._spectra[path] = (before, spectrum)
+        return spectrum
+
+    def retain(self, paths: Iterable[str | Path]) -> None:
+        """Forget the spectra of every file but *paths*."""
+        keep = {str(p) for p in paths}
+        for path in [p for p in self._spectra if p not in keep]:
+            del self._spectra[path]
+
+
 @dataclass(frozen=True, eq=False)
 class Measurement:
     """Field sweep of one sample: spectra in field plus one or two zero-field spectra.
@@ -73,11 +132,11 @@ class Measurement:
     zero: np.ndarray
 
 
-def _read_stack(paths: Sequence[str]) -> tuple[np.ndarray, np.ndarray]:
+def _read_stack(paths: Sequence[str], read: Reader) -> tuple[np.ndarray, np.ndarray]:
     x0: np.ndarray | None = None
     columns = []
     for p in paths:
-        x, y = read_spectrum(p)
+        x, y = read(p)
         if x0 is None:
             x0 = x
         elif x.shape != x0.shape or not np.allclose(x, x0, rtol=0, atol=1e-6):
@@ -95,6 +154,7 @@ def load_measurement(
     field_paths: Sequence[str | Path],
     field: np.ndarray | None = None,
     energy_limits: tuple[float | None, float | None] = (None, None),
+    read: Reader = read_spectrum,
 ) -> Measurement:
     """Load a field sweep; the energy axis stays in cm^-1, the unit of the files.
 
@@ -103,6 +163,7 @@ def load_measurement(
         field_paths: spectra measured in field, sorted with :func:`sort_paths`.
         field: field values; if None they are parsed from the file names.
         energy_limits: optional inclusive energy cut in cm^-1 (None = no limit).
+        read: reads one file (e.g. :meth:`SpectrumCache.read`); :func:`read_spectrum`.
     """
     if not field_paths:
         raise ValueError("no field files loaded")
@@ -129,8 +190,8 @@ def load_measurement(
                 f"but {len(field_paths)} files are loaded"
             )
 
-    x, values = _read_stack(field_paths)
-    x_zero, zero = _read_stack([str(p) for p in zero_paths])
+    x, values = _read_stack(field_paths, read)
+    x_zero, zero = _read_stack([str(p) for p in zero_paths], read)
     if x_zero.shape != x.shape or not np.allclose(x_zero, x, rtol=0, atol=1e-6):
         raise ValueError("zero-field and field spectra have different energy axes")
 
