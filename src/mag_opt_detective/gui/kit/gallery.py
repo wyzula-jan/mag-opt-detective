@@ -28,6 +28,7 @@ from mag_opt_detective.gui import icons
 from mag_opt_detective.gui.kit import (
     CollapsibleSection,
     InfoBar,
+    NudgeSlider,
     RangeControl,
     RangeSlider,
     SegmentedControl,
@@ -204,6 +205,14 @@ class Gallery(QMainWindow):
         muted.set_values(0, 100)
         muted.set_muted(True)
         layout.addWidget(muted)
+        layout.addWidget(_label("NudgeSlider: Range, and Relative ±10 % (right-click)", muted=True))
+        for mode, value in (("range", 30.0), ("relative", 20.0)):
+            nudge = NudgeSlider()
+            nudge.setAccessibleName(f"Example value ({mode})")
+            nudge.set_range(0, 100)
+            nudge.set_value(value)
+            nudge.set_mode(mode)
+            layout.addWidget(nudge)
         layout.addStretch(1)
         return panel
 

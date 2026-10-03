@@ -10,6 +10,7 @@ from mag_opt_detective.gui.kit.button import SmallButton
 from mag_opt_detective.gui.kit.collapsible import CollapsibleSection
 from mag_opt_detective.gui.kit.empty_state import EmptyState
 from mag_opt_detective.gui.kit.infobar import InfoBar
+from mag_opt_detective.gui.kit.nudge_slider import NudgeSlider
 from mag_opt_detective.gui.kit.range_control import RangeControl
 from mag_opt_detective.gui.kit.range_slider import RangeSlider
 from mag_opt_detective.gui.kit.segmented import SegmentedControl
@@ -20,6 +21,7 @@ __all__ = [
     "CollapsibleSection",
     "EmptyState",
     "InfoBar",
+    "NudgeSlider",
     "RangeControl",
     "RangeSlider",
     "SegmentedControl",

@@ -8,6 +8,7 @@ from mag_opt_detective.gui import icons, theme
 from mag_opt_detective.gui.kit import (
     CollapsibleSection,
     InfoBar,
+    NudgeSlider,
     RangeControl,
     RangeSlider,
     SegmentedControl,
@@ -15,6 +16,7 @@ from mag_opt_detective.gui.kit import (
     SmallButton,
     Switch,
 )
+from mag_opt_detective.gui.kit.nudge_slider import jog_fraction
 from mag_opt_detective.gui.kit.range_slider import BOTH, HI, LO
 from mag_opt_detective.gui.settings import PREFIX, Persistence
 
@@ -285,6 +287,175 @@ def test_range_slider_cursor_and_hover_over_the_range(qtbot, slider):
     qtbot.mouseMove(slider, middle)
     slider.set_values(0.0, 100.0)  # the range can no longer move
     assert slider.cursor().shape() == Qt.CursorShape.ArrowCursor
+
+
+# --- NudgeSlider ---------------------------------------------------------------------------
+@pytest.fixture
+def nudge(qtbot):
+    s = NudgeSlider()
+    qtbot.addWidget(s)
+    s.setAccessibleName("g factor")
+    s.resize(221, s.sizeHint().height())  # a track of 200 px: the half track is 100 px
+    s.set_range(0.0, 100.0)
+    s.set_value(20.0)
+    s.duration_ms = 0
+    return s
+
+
+def nudge_record(slider) -> tuple[list, list]:
+    """The values of every valueChanged and a list that grows on every editingFinished."""
+    moves, finished = [], []
+    slider.valueChanged.connect(moves.append)
+    slider.editingFinished.connect(lambda: finished.append(True))
+    return moves, finished
+
+
+def jog(qtbot, slider, *offsets: float, release: bool = True) -> None:
+    """Press at the centre, move the handle *offsets* (of the half track) away, release."""
+    x0, x1 = slider.track()
+    y = slider.height() // 2
+    centre = round(slider.centre_x() - 0.5)
+    qtbot.mousePress(slider, Qt.MouseButton.LeftButton, pos=QPoint(centre, y))
+    for offset in offsets:
+        qtbot.mouseMove(slider, QPoint(round(centre + offset * (x1 - x0) / 2), y))
+    if release:
+        end = round(centre + offsets[-1] * (x1 - x0) / 2) if offsets else centre
+        qtbot.mouseRelease(slider, Qt.MouseButton.LeftButton, pos=QPoint(end, y))
+
+
+def test_nudge_slider_range_mode_maps_its_range(qtbot, nudge):
+    assert nudge.mode() == "range" and nudge.handle_x() == pytest.approx(nudge.x_for(20.0))
+    moves, finished = nudge_record(nudge)
+    y = nudge.height() // 2
+    qtbot.mousePress(nudge, Qt.MouseButton.LeftButton, pos=QPoint(round(nudge.x_for(60)), y))
+    assert nudge.value() == pytest.approx(60.0, abs=0.5)  # the groove: the handle jumps
+    qtbot.mouseMove(nudge, QPoint(round(nudge.x_for(80)), y))
+    assert nudge.value() == pytest.approx(80.0, abs=0.5) and len(moves) == 2 and not finished
+    qtbot.mouseRelease(nudge, Qt.MouseButton.LeftButton, pos=QPoint(round(nudge.x_for(80)), y))
+    assert finished == [True]
+    with qtbot.assertNotEmitted(nudge.valueChanged):
+        nudge.set_value(150.0)  # kept, drawn at the end
+    assert nudge.value() == 150.0 and nudge.handle_x() == nudge.track()[1]
+
+
+def test_nudge_slider_relative_drag_springs_back(qtbot, nudge):
+    nudge.set_mode("relative", 10.0)
+    assert nudge.handle_x() == nudge.centre_x()  # at rest in the centre
+    moves, finished = nudge_record(nudge)
+    jog(qtbot, nudge, 0.25, 0.5, release=False)
+    assert nudge.is_dragging() and nudge.handle_offset() == pytest.approx(0.5)
+    expected = 20.0 * (1 + 0.10 * jog_fraction(0.5))  # +3.125 % on the gentle curve
+    assert nudge.value() == pytest.approx(expected, abs=1e-3) and len(moves) == 2
+    assert nudge.change_text() == "+3.1 %"
+    assert not finished
+    y = nudge.height() // 2
+    qtbot.mouseRelease(nudge, Qt.MouseButton.LeftButton, pos=QPoint(160, y))
+    assert finished == [True] and nudge.value() == moves[-1]  # the release changes nothing
+    assert nudge.handle_offset() == 0.0 and not nudge.is_dragging()
+
+    jog(qtbot, nudge, 1.0)  # the next drag works around the new value, the end gives the span
+    assert nudge.value() == pytest.approx(expected * 1.1, abs=1e-3)
+    jog(qtbot, nudge, -1.0, -2.0)  # beyond the end: still the whole span
+    assert nudge.value() == pytest.approx(expected * 1.1 * 0.9, abs=1e-3)
+    count = len(moves)
+    jog(qtbot, nudge)  # a click alone changes nothing
+    assert len(moves) == count and len(finished) == 3
+
+
+def test_nudge_slider_springs_back_with_an_animation(qtbot, nudge):
+    nudge.set_mode("relative", 50.0)
+    nudge.duration_ms = 60
+    nudge.show()
+    qtbot.waitExposed(nudge)
+    jog(qtbot, nudge, 0.8)
+    value = nudge.value()
+    assert value > 20.0 and nudge.is_springing() and nudge.handle_offset() > 0
+    qtbot.waitUntil(lambda: not nudge.is_springing(), timeout=2000)
+    assert nudge.handle_offset() == 0.0 and nudge.value() == value
+
+
+def test_nudge_slider_relative_zero_floor_and_bounds(qtbot, nudge):
+    nudge.set_mode("relative", 10.0)
+    nudge.set_value(0.0)
+    jog(qtbot, nudge, 1.0)
+    assert nudge.value() == pytest.approx(0.1)  # 10 % of 1 for a zero value without a floor
+    nudge.set_value(0.0)
+    nudge.set_floor(5.0)  # a typical scale
+    jog(qtbot, nudge, 1.0)
+    assert nudge.value() == pytest.approx(0.5)
+    jog(qtbot, nudge, 1.0)  # still small: the floor keeps the span
+    assert nudge.value() == pytest.approx(1.0)
+    nudge.set_bounds(minimum=0.0)
+    jog(qtbot, nudge, -1.0)
+    jog(qtbot, nudge, -1.0)
+    jog(qtbot, nudge, -1.0)
+    assert nudge.value() == 0.0  # held at the bound
+    nudge.set_value(2.0)
+    nudge.set_floor(0.0)
+    nudge.set_mode("relative", 1.0)
+    jog(qtbot, nudge, 1.0)
+    assert nudge.value() == pytest.approx(2.02)
+
+
+def test_nudge_slider_keyboard(qtbot, nudge):
+    focused(qtbot, nudge)
+    moves, finished = nudge_record(nudge)
+    qtbot.keyClick(nudge, Qt.Key.Key_Right)  # range: 1 % of the range
+    assert nudge.value() == pytest.approx(21.0) and finished == [True]
+    qtbot.keyClick(nudge, Qt.Key.Key_Right, Qt.KeyboardModifier.ShiftModifier)  # 10 %
+    assert nudge.value() == pytest.approx(31.0)
+    qtbot.keyClick(nudge, Qt.Key.Key_Home)
+    assert nudge.value() == 0.0
+    qtbot.keyClick(nudge, Qt.Key.Key_Left)  # nothing below the range: nothing emitted
+    assert len(moves) == 3 and len(finished) == 3
+
+    nudge.set_mode("relative", 10.0)
+    nudge.set_value(20.0)
+    qtbot.keyClick(nudge, Qt.Key.Key_Right)  # a tenth of the span: 1 %
+    assert nudge.value() == pytest.approx(20.2)
+    qtbot.keyClick(nudge, Qt.Key.Key_Left, Qt.KeyboardModifier.ShiftModifier)  # the span
+    assert nudge.value() == pytest.approx(20.2 * 0.9)
+    qtbot.keyClick(nudge, Qt.Key.Key_PageUp)
+    assert nudge.value() == pytest.approx(20.2 * 0.9 * 1.1)
+    assert len(finished) == 6 and nudge.handle_offset() == 0.0
+
+
+def test_nudge_slider_whole_numbers(qtbot, nudge):
+    nudge.set_step(1.0)
+    nudge.set_range(1.0, 40.0)
+    nudge.set_bounds(1.0, 40.0)
+    nudge.set_modes(("range",))
+    y = nudge.height() // 2
+    qtbot.mouseClick(nudge, Qt.MouseButton.LeftButton, pos=QPoint(round(nudge.x_for(7.3)), y))
+    assert nudge.value() == 7.0
+    nudge.set_mode("relative")  # not offered: ignored
+    assert nudge.mode() == "range"
+    menu = nudge.mode_menu()
+    assert [a.isEnabled() for a in menu.actions()] == [True, False, False, False]
+
+
+def test_nudge_slider_mode_menu_and_settings(qtbot, nudge):
+    menu = nudge.mode_menu()
+    texts = [a.text() for a in menu.actions()]
+    assert texts == ["Range", "Relative ±1 %", "Relative ±10 %", "Relative ±50 %"]
+    assert [a.isChecked() for a in menu.actions()] == [True, False, False, False]
+    with qtbot.waitSignal(nudge.modeChanged) as changed:
+        menu.actions()[3].trigger()
+    assert changed.args == ["relative", 50.0]
+    assert (nudge.mode(), nudge.span()) == ("relative", 50.0)
+    assert "±50 %" in nudge.accessibleDescription()
+    assert [a.isChecked() for a in nudge.mode_menu().actions()] == [False, False, False, True]
+    with qtbot.assertNotEmitted(nudge.modeChanged):
+        nudge.set_mode("range")
+        nudge.mode_menu().actions()[0].trigger()  # already the mode: nothing changes
+    assert json.loads(nudge.settings_value()) == {"mode": "range", "span": 50.0}
+    assert nudge.set_settings_value('{"mode": "relative", "span": 1}')
+    assert (nudge.mode(), nudge.span()) == ("relative", 1.0)
+    for bad in ('{"mode": "jog"}', '{"mode": "relative", "span": -5}', "nonsense", 3):
+        assert not nudge.set_settings_value(bad)
+    assert (nudge.mode(), nudge.span()) == ("relative", 1.0)
+    with pytest.raises(ValueError):
+        nudge.set_mode("relative", 0.0)
 
 
 # --- RangeControl --------------------------------------------------------------------------
@@ -1106,3 +1277,13 @@ def test_gallery_shows_every_widget(qtbot, tmp_path):
     gallery.log.set_open(False, animate=False)
     assert gallery.stage.sizes()[1] == 0
     assert gallery.grab().save(str(tmp_path / "gallery.png"))
+
+
+def test_gallery_shows_the_nudge_slider(qtbot):
+    from mag_opt_detective.gui.kit.gallery import Gallery
+    from mag_opt_detective.gui.theme import Theme
+
+    gallery = Gallery(Theme("light"))
+    qtbot.addWidget(gallery)
+    modes = sorted(slider.mode() for slider in gallery.findChildren(NudgeSlider))
+    assert modes == ["range", "relative"]
