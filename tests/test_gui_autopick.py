@@ -475,6 +475,23 @@ def test_the_round_handle_turns_the_box_as_drawn_on_screen(shown, qtbot, monkeyp
     assert math.degrees(math.atan2(-side.y(), side.x())) == pytest.approx(45.0, abs=3.0)
 
 
+def test_a_changing_region_is_searched_live_unless_that_is_slow(picked, qtbot, monkeypatch):
+    tool = picked.autopick
+    tool.bar.mode.set_value("detect")
+    tool.detect_in((1.0, 7.0), (300.0, 1100.0))
+    roi = tool.region.roi
+    calls = counting(monkeypatch)
+    roi.setPos(roi.pos() + pg.Point(10, 0), finish=False)  # a step of a drag
+    qtbot.waitUntil(lambda: len(calls) == 1, timeout=5000)
+    assert tool.target.box[0][0] > 1.0
+    tool.search_ms = 4 * autopick.LIVE_LIMIT_MS  # as if a search took long
+    roi.setPos(roi.pos() + pg.Point(10, 0), finish=False)
+    qtbot.wait(4 * autopick.LIVE_MS)
+    assert len(calls) == 1  # not while it moves...
+    roi.setPos(roi.pos())  # ... but when the drag ends
+    assert len(calls) == 2
+
+
 def test_a_loop_drawn_with_the_mouse_becomes_a_polygon(shown, qtbot):
     w, tool = shown, shown.autopick
     viewport = w.plots.map.view.viewport()
