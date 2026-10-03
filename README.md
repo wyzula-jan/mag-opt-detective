@@ -239,7 +239,7 @@ committed.
 ## Citing
 
 If you use Magneto-Optical Detective for an analysis in a publication, please cite it with
-the version you used (*Help › About* shows it, and so does its release).
+the version you used, which the About box shows (*Help › About*, on macOS in the app menu).
 [`CITATION.cff`](CITATION.cff) has the details (GitHub shows them under *Cite this
 repository*), for example:
 
