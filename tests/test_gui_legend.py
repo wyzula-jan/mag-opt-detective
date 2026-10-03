@@ -216,6 +216,22 @@ def test_the_rows_follow_the_picked_curves(processed):
     assert legend(w, "stacked").texts() == ["LL 1", "CR 2"]
 
 
+def test_the_stacked_legend_lists_only_the_curves_drawn_there(processed):
+    w, c = processed, processed.controller
+    c.record_points([0.5, 1.5], [300.0, 320.0], unit="cm-1")  # LL 1: the 1st and 3rd traces
+    c.add_curve("odd")
+    c.record_points([1.0, 2.0], [500.0, 520.0], unit="cm-1")  # the 2nd and 4th traces only
+    w.plot_area.set_current_view("stacked")
+    assert legend(w, "stacked").texts() == ["LL 1", "odd"]
+    c.set_view(stacked_every=2)  # traces 0.5 and 1.5 T: "odd" has no marker there
+    assert legend(w, "stacked").texts() == ["LL 1"]
+    assert legend(w).texts() == ["LL 1", "odd"]  # the map draws both
+    w.panels["points"].markers.set_value("current")  # only "odd", which draws nothing here
+    assert legend(w, "stacked").texts() == []
+    c.set_view(stacked_every=1)
+    assert legend(w, "stacked").texts() == ["odd"]
+
+
 def test_the_rows_follow_the_models_shown(processed):
     w, c = processed, processed.controller
     models = models_of(w)

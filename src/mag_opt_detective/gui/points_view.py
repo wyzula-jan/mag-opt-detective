@@ -62,7 +62,7 @@ def shown_curves(controller, mode: str) -> list[tuple[str, QColor, bool]]:
 
 def draw_markers(layer: OverlayLayer, sets: list[MarkerSet], size: float) -> None:
     """Open rings for the other curves, then the current curve filled (the last group); the
-    curves are the layer's legend rows (:func:`legend_entries`).
+    curves with markers drawn are the layer's legend rows (:func:`legend_entries`).
 
     Each group has one pen: with a pen per marker pyqtgraph renders every marker anew.
     """
@@ -78,7 +78,7 @@ def draw_markers(layer: OverlayLayer, sets: list[MarkerSet], size: float) -> Non
         if s.current:
             pen = pg.mkPen(OUTLINE, width=1.5)
             layer.add_points(s.x, s.y, size=size + 1, pen=pen, brush=pg.mkBrush(s.color))
-    layer.set_legend(legend_entries(sets, size))
+    layer.set_legend(legend_entries([s for s in sets if s.x.size], size))
 
 
 def legend_entries(sets: list[MarkerSet], size: float = MAP_SIZE) -> list[LegendEntry]:
