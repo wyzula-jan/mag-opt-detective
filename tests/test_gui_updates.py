@@ -386,6 +386,18 @@ def test_a_trickling_answer_ends_the_check(qtbot, stored, monkeypatch):
         gate.set()
 
 
+def test_a_real_check_in_a_test_fails_it(qtbot, window, network_guard):
+    """Help > Check for updates with the real request: refused on the worker thread, where
+    it only becomes a message on the bar, and still recorded, so the test fails."""
+    with qtbot.waitSignal(window.updates.finished, timeout=10_000):
+        window.commands["check_updates"].trigger()
+    assert infobar_text(window).startswith("Can't check for updates: Unexpected error")
+    assert network_guard.attempts == ["the update check"]
+    with pytest.raises(pytest.fail.Exception, match="tried to reach the network"):
+        network_guard.check()
+    network_guard.attempts.clear()  # tried on purpose
+
+
 def test_a_check_still_running_when_the_window_closes_is_dropped(qtbot, ini):
     w = MainWindow(settings=QSettings(ini, QSettings.Format.IniFormat))
     gate = threading.Event()

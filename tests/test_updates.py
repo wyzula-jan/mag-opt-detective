@@ -355,14 +355,19 @@ def test_the_request_goes_through_urllib_without_cookies(monkeypatch):
     assert request.full_url == updates.RELEASES_API and timeout == 5
 
 
-def test_no_test_reaches_the_network():
-    """conftest's guard: the update check, urllib and http.client all refuse."""
+def test_no_test_reaches_the_network(network_guard):
+    """conftest's guard: the update check, urllib and http.client all refuse, and a test
+    that tried fails."""
     with pytest.raises(AssertionError, match="network"):
         fetch_releases("0.2.0")
     with pytest.raises(AssertionError, match="network"):
         urllib.request.urlopen("https://api.github.com/", timeout=1)
     with pytest.raises(AssertionError, match="network"):
         http.client.HTTPSConnection("api.github.com", timeout=1).request("GET", "/")
+    assert network_guard.attempts == ["the update check", "urllib", "http.client"]
+    with pytest.raises(pytest.fail.Exception, match=r"the update check, urllib, http\.client"):
+        network_guard.check()
+    network_guard.attempts.clear()  # tried on purpose
 
 
 def test_the_module_does_not_import_qt():

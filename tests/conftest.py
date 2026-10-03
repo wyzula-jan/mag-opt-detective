@@ -18,20 +18,49 @@ def pytest_configure(config):
     config.addinivalue_line("markers", "network: the test may reach the network (none does)")
 
 
+class NetworkGuard:
+    """Refuses every request and records it, also one made on a worker thread (the update
+    check), where the refusal would only end as a message in the app."""
+
+    def __init__(self):
+        self.attempts: list[str] = []
+
+    def refuse(self, what: str):
+        def blocked(*_args, **_kwargs):
+            self.attempts.append(what)
+            raise AssertionError(f"a test tried to reach the network ({what})")
+
+        return blocked
+
+    def install(self, monkeypatch) -> None:
+        from mag_opt_detective import updates
+
+        monkeypatch.setattr(updates, "open_github", self.refuse("the update check"))
+        monkeypatch.setattr(urllib.request.OpenerDirector, "open", self.refuse("urllib"))
+        monkeypatch.setattr(http.client.HTTPConnection, "connect", self.refuse("http.client"))
+
+    def check(self) -> None:
+        """Fail the test if it tried to reach the network."""
+        if self.attempts:
+            pytest.fail(
+                f"the test tried to reach the network: {', '.join(self.attempts)} "
+                "(mark it network if it must)",
+                pytrace=False,
+            )
+
+
 @pytest.fixture(autouse=True)
-def _no_network(request, monkeypatch):
+def network_guard(request, monkeypatch):
     """No test reaches the network (the update check, any urllib or http.client request)
-    unless it is marked ``network``."""
+    unless it is marked ``network``: a test that tries fails, also when the request was made
+    on a worker thread. A test that tries on purpose clears ``attempts``."""
     if request.node.get_closest_marker("network") is not None:
+        yield None
         return
-    from mag_opt_detective import updates
-
-    def refuse(*_args, **_kwargs):
-        raise AssertionError("a test tried to reach the network")
-
-    monkeypatch.setattr(updates, "open_github", refuse)
-    monkeypatch.setattr(urllib.request.OpenerDirector, "open", refuse)
-    monkeypatch.setattr(http.client.HTTPConnection, "connect", refuse)
+    guard = NetworkGuard()
+    guard.install(monkeypatch)
+    yield guard
+    guard.check()
 
 
 @pytest.fixture(autouse=True)
