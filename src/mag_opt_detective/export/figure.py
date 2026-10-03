@@ -72,6 +72,7 @@ _DASHES = (0, (3.0, 2.0))  # in pt, not scaled with the line width
 _PAD_IN = 1.0 / 72.0  # constrained-layout padding around the axes and labels
 _COLORBAR_PAD = 0.02  # gap between the axes and the colour bar (share of the axes)
 _COLORBAR_ASPECT = 25  # length / thickness of a colour bar beside the axes
+_FIT_TOLERANCE_IN = 0.5 / 72.0  # how far a drawn figure may reach past its edges
 
 _EDITABLE_TEXT = {"pdf.fonttype": 42, "ps.fonttype": 42, "svg.fonttype": "none"}
 # rcParams each figure was made with; save and rasterize draw with the same ones
@@ -480,6 +481,32 @@ def rasterize(fig: Figure, dpi: float) -> np.ndarray:
         fig.set_size_inches(size, forward=False)
         fig.dpi = old_dpi
         fig.set_canvas(old_canvas)
+
+
+def layout_problem(fig: Figure) -> str:
+    """What does not fit into *fig* once drawn (by :func:`rasterize` or :func:`save`), as a
+    sentence for people; "" when everything fits.
+
+    In a figure too small for its text, matplotlib's layout gives up (with a warning) or
+    pushes labels past the edges: then labels or the colour bar are cut off, or the plot and
+    its colour bar overlap.
+    """
+    with mpl.rc_context(_rc(fig)):
+        box = fig.get_tightbbox(fig.canvas.get_renderer())
+    width, height = fig.get_size_inches()
+    across = max(0.0, -box.x0) + max(0.0, box.x1 - width)  # how far it reaches past the edges
+    down = max(0.0, -box.y0) + max(0.0, box.y1 - height)
+    places = [ax.get_position() for ax in fig.axes]
+    squeezed = any(p.width <= 0 or p.height <= 0 for p in places)
+    squeezed |= any(a.overlaps(b) for i, a in enumerate(places) for b in places[i + 1 :])
+    if max(across, down) <= _FIT_TOLERANCE_IN and not squeezed:
+        return ""
+    what = "the labels and the colour bar" if len(places) > 1 else "the labels"
+    if max(across, down) <= _FIT_TOLERANCE_IN:
+        bigger = "larger"
+    else:
+        bigger = "taller" if down >= across else "wider"
+    return f"Too small for {what}: make the figure {bigger}."
 
 
 def save(fig: Figure, path: str | Path, *, dpi: float) -> Path:

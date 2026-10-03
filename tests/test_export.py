@@ -37,6 +37,7 @@ from mag_opt_detective.export import (
     colormap,
     energy_label,
     get_preset,
+    layout_problem,
     presets_from_json,
     presets_to_json,
     rasterize,
@@ -879,3 +880,17 @@ def test_stored_presets_skip_the_bad_ones():
     for nonsense in ("nonsense", "[" * 100_000, b"\xff\xfe", '{"version": 9, "presets": []}'):
         presets, problems = stored_presets(nonsense)
         assert presets == [] and len(problems) == 1
+
+
+@pytest.mark.filterwarnings("ignore:constrained_layout not applied")
+def test_a_figure_too_small_for_its_labels_is_reported(map_state):
+    assert layout_problem(_drawn(nature_single(map_state))) == ""
+    top = FigureStyle("top")
+    fig = _drawn(nature_single(map_state, height_mm=12.0, style=top))
+    assert layout_problem(fig) == (
+        "Too small for the labels and the colour bar: make the figure taller."
+    )
+    plain = dataclasses.replace(map_state, colorbar=False)
+    fig = _drawn(render(plain, preset=NATURE, width_mm=10.0, height_mm=70.0))
+    assert layout_problem(fig) == "Too small for the labels: make the figure wider."
+    assert layout_problem(_drawn(nature_single(map_state, height_mm=25.0, style=top))) == ""
