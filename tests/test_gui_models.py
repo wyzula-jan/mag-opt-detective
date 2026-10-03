@@ -645,6 +645,12 @@ def test_models_are_remembered(qtbot, tmp_path):
     assert card_of(w2, x).body.isHidden()
 
 
+def test_stored_transitions_stay_within_the_limit():
+    data = ms.entry_to_dict(ms.new_entry("dirac", []))
+    for stored, expected in ((100000, 40), (0, 1), (-3, 1), (12, 12)):
+        assert ms.entry_from_dict(data | {"n_lines": stored}).model.n_lines == expected
+
+
 def test_invalid_stored_models_keep_the_defaults(qtbot, tmp_path):
     ini = str(tmp_path / "settings.ini")
     s = QSettings(ini, QSettings.Format.IniFormat)

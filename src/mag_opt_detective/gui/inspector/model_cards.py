@@ -106,7 +106,11 @@ class DiracEditor(QWidget):
         self.entry, self.owner = entry, owner
         self.velocity = SliderField("Fermi velocity v", 0.1, 30.0, "×10⁵ m/s", minimum=0.0)
         self.delta = SliderField("Half-gap Δ", 0.0, DELTA_SPAN, "meV", minimum=0.0)
-        self.n_lines = SliderField("Transitions shown", 1, 40, integer=True, minimum=1)
+        most = ms.DIRAC_MAX_LINES
+        self.n_lines = SliderField(
+            "Transitions shown", 1, most, integer=True, minimum=1, maximum=most
+        )
+        self.n_lines.field.edit.setToolTip(f"Transitions shown (1 to {most})")
         formula = QLabel(DIRAC_FORMULA)
         formula.setProperty("kit", "muted")
         formula.setWordWrap(True)
@@ -139,7 +143,7 @@ class DiracEditor(QWidget):
         self.owner.edited(self.entry)
 
     def _on_n_lines(self, value: float) -> None:
-        self.entry.model.n_lines = max(1, round(value))
+        self.entry.model.n_lines = ms.dirac_lines(value)
         self.owner.edited(self.entry, structure=True)
 
 

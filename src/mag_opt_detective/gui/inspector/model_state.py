@@ -29,6 +29,7 @@ MODEL_COLORS = ("#ffffff", "#8be9fd", "#ffb86c", "#9cf27a", "#ff8fd8", "#f4f78a"
 COLOR_NAMES = ("White", "Cyan", "Orange", "Green", "Pink", "Yellow")
 COUPLING_START = 1.0  # meV: a new coupling (a zero coupling has no gradient)
 DIRAC_DEFAULTS = {"velocity": 5.0, "delta": 0.0, "n_lines": 5}
+DIRAC_MAX_LINES = 40  # transitions drawn at most (each is a curve and its shadow)
 ZEEMAN_E0 = 10.0  # meV, first branch of a new model when no map is shown
 FIELD_SAMPLES = 300
 EXAMPLE = "E0 + g*muB*B"
@@ -140,6 +141,11 @@ def new_entry(
     if kind == CUSTOM:
         return ModelEntry(CUSTOM, key, name, color, None)
     raise ValueError(f"unknown model kind {kind!r}")
+
+
+def dirac_lines(n: float) -> int:
+    """*n* transitions as drawn: an integer in 1 .. :data:`DIRAC_MAX_LINES`."""
+    return min(max(round(n), 1), DIRAC_MAX_LINES)
 
 
 def round_nice(value: float) -> float:
@@ -537,9 +543,8 @@ def entry_from_dict(data: Mapping) -> ModelEntry:
             },
         )
         if kind == DIRAC:
-            entry.model = DiracModel(
-                _number(data["velocity"]), _number(data["delta_meV"]), _int(data["n_lines"])
-            )
+            n_lines = dirac_lines(_int(data["n_lines"]))  # a bad value must not hang the app
+            entry.model = DiracModel(_number(data["velocity"]), _number(data["delta_meV"]), n_lines)
         elif kind == ZEEMAN:
             branches = [
                 Branch(

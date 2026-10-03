@@ -75,7 +75,8 @@ class NumberField(UnitField):
     """A number (C locale, scientific notation allowed) in a rounded box with its unit.
 
     ``valueEdited`` fires while the user types a valid number (None for an empty *optional*
-    field); invalid text marks the box. :meth:`set_value` never emits.
+    field); invalid text (or a number outside *minimum* .. *maximum*) marks the box.
+    :meth:`set_value` never emits.
     """
 
     valueEdited = Signal(object)
@@ -87,6 +88,7 @@ class NumberField(UnitField):
         name: str = "",
         optional: bool = False,
         minimum: float | None = None,
+        maximum: float | None = None,
         integer: bool = False,
         digits: int = 6,
         placeholder: str = "",
@@ -96,6 +98,7 @@ class NumberField(UnitField):
         compact(self)
         self._optional = optional
         self._minimum = minimum
+        self._maximum = maximum
         self._integer = integer
         self._digits = digits
         self._value: float | None = None
@@ -132,6 +135,8 @@ class NumberField(UnitField):
             return False, None
         if self._minimum is not None and value < self._minimum:
             return False, None
+        if self._maximum is not None and value > self._maximum:
+            return False, None
         return True, value
 
     def _on_text(self, text: str) -> None:
@@ -161,7 +166,7 @@ class SliderField(QWidget):
     """A caption, then a slider for quick live changes and a number field (as in the mockup).
 
     The slider spans ``[lo, hi]``; the field also takes values beyond it (the slider then sits
-    at its end). ``valueChanged`` fires on user edits only.
+    at its end) within *minimum* .. *maximum*. ``valueChanged`` fires on user edits only.
     """
 
     valueChanged = Signal(float)
@@ -176,6 +181,7 @@ class SliderField(QWidget):
         *,
         integer: bool = False,
         minimum: float | None = None,
+        maximum: float | None = None,
         digits: int = 6,
     ):
         super().__init__()
@@ -187,7 +193,12 @@ class SliderField(QWidget):
         self.slider.setAccessibleName(caption)
         self.slider.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.field = NumberField(
-            unit, name=f"{caption} value", minimum=minimum, integer=integer, digits=digits
+            unit,
+            name=f"{caption} value",
+            minimum=minimum,
+            maximum=maximum,
+            integer=integer,
+            digits=digits,
         )
         self.field.setFixedWidth(92)
         self.slider.setMinimumWidth(40)

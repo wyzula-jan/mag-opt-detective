@@ -36,6 +36,9 @@ def test_dirac_overlay(window, sweep, errors):
     np.testing.assert_allclose(energy, expected)
     editor.n_lines.field.edit.setText("2")
     assert len(plot.model_curve_data()) == 2
+    editor.n_lines.field.edit.setText("400")  # beyond the 40 of the former overlay
+    assert editor.n_lines.field.is_invalid() and len(plot.model_curve_data()) == 2
+    assert dirac_card(window).entry.model.n_lines == 2
     dirac_card(window).visible_switch.setChecked(False)
     assert plot.model_curve_data() == []
     assert not errors

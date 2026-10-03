@@ -552,7 +552,7 @@ class ModelsSetting:
                 params["velocity"].value = velocity
             if delta is not None and delta >= 0:
                 params["delta"].value = delta  # the old field was in meV
-            if n_lines is not None and n_lines.is_integer() and 1 <= n_lines <= 40:
+            if n_lines is not None and n_lines.is_integer() and 1 <= n_lines <= ms.DIRAC_MAX_LINES:
                 dirac.model.n_lines = int(n_lines)
             self.models.rebuild()
             logger.info("Took over the Dirac overlay settings of the previous version.")
