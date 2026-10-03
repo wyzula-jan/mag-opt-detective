@@ -1064,3 +1064,18 @@ def test_reset_settings_with_live_on_applies_nothing(qtbot, tmp_path, lines, err
     assert c.changed_since_process()  # ... and its baseline is now a change to process
     assert not errors
     w.close()
+
+
+def test_baseline_is_live(processed):
+    w, c = processed, processed.controller
+    panel = w.panels["processing"]
+    assert not c.baseline_is_live()  # Live off
+    panel.baseline_live.setChecked(True)
+    assert c.baseline_is_live()
+    c.set_processing(baseline=(1300.0, 1400.0))  # no data there: not applied
+    assert not c.baseline_is_live() and c.result.baseline_region == (450.0, 550.0)
+    c.set_processing(baseline=None)
+    assert c.baseline_is_live() and c.result.baseline_region is None
+    library.save_current(w)
+    library.plot_entry(w, c.library[0].key)
+    assert not c.baseline_is_live()  # a library map keeps its baseline

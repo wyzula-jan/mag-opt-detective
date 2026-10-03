@@ -909,6 +909,12 @@ class AppController(QObject):
         """A map made by Process is shown (a library map keeps its baseline)."""
         return self.result is not None and self.result_source == "process"
 
+    def baseline_is_live(self) -> bool:
+        """The baseline region of the processing options counts as applied to the map shown
+        (Live applies it at once): Live is on, the map is processed and the region is off or
+        can be applied to it."""
+        return self._baseline_is_live()
+
     def _baseline_is_live(self) -> bool:
         """Live is on and the region can be applied to the map shown."""
         if not (self._live_baseline and self.can_apply_baseline()):
