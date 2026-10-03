@@ -96,8 +96,8 @@ def test_crop_and_merge_energy():
     low = make_map(energy=np.linspace(0, 10, 11))
     high = make_map(energy=np.linspace(8, 20, 7))
     merged = proc.merge_energy([(low, 0, 10), (high, 10, 20)])
-    assert merged.energy[0] == 0 and merged.energy[-1] == 20
-    np.testing.assert_allclose(np.diff(merged.energy), np.diff(merged.energy)[0])
+    # every measured energy is kept (nothing re-gridded): steps of 1, then of 2
+    np.testing.assert_allclose(merged.energy, [*range(11), 12, 14, 16, 18, 20])
     np.testing.assert_allclose(merged.values, np.add.outer(merged.energy, low.field))
     other_field = make_map(field=np.array([5.0, 6.0, 7.0]))
     with pytest.raises(ValueError, match="same field"):
@@ -381,3 +381,140 @@ def test_common_energy_keeps_samples_of_rounded_tables():
     assert proc.average_maps([a, b]).energy.size == 11
     shifted = b.replace(field=b.field + 3)
     assert proc.merge_field([(a, None, None), (shifted, None, None)]).energy.size == 11
+
+
+def test_merge_energy_takes_each_energy_from_one_map():
+    """An overlap is split at its middle: no samples of the two maps interleaved."""
+    low = make_map(energy=np.arange(0.0, 10.01, 0.5), values=np.ones((21, 3)))
+    high = make_map(energy=np.arange(6.0, 20.01, 2.0), values=np.full((8, 3), 2.0))
+    merged = proc.merge_energy([(high, None, None), (low, None, None)])
+    # the measured energies of each side of the middle of the overlap 6 - 10
+    np.testing.assert_allclose(merged.energy, [*np.arange(0.0, 8.01, 0.5), 10, 12, 14, 16, 18, 20])
+    below = merged.energy <= 8.0
+    np.testing.assert_allclose(merged.values[below], 1.0)
+    above = merged.energy >= 10.0
+    np.testing.assert_allclose(merged.values[above], 2.0)
+    (seam,) = proc.energy_seams([(high, None, None), (low, None, None)])
+    assert (seam.lower, seam.upper, seam.kind, seam.middle) == (1, 0, "overlap", 8.0)
+
+
+def test_merge_energy_leaves_a_gap_empty():
+    low = make_map(energy=np.linspace(0, 10, 11))
+    high = make_map(energy=np.linspace(20, 30, 11))
+    merged = proc.merge_energy([(low, None, None), (high, None, None)])
+    gap = (merged.energy > 10) & (merged.energy < 20)
+    # one empty sample a step beyond each side marks the gap
+    np.testing.assert_allclose(merged.energy[gap], [11, 19])
+    assert np.isnan(merged.values[gap]).all()
+    np.testing.assert_allclose(merged.values[~gap], np.add.outer(merged.energy[~gap], low.field))
+    coarse = make_map(energy=np.linspace(20, 30, 3))  # steps of 5: the gap is two steps
+    merged = proc.merge_energy(
+        [(make_map(energy=np.linspace(0, 10, 3)), None, None), (coarse, None, None)]
+    )
+    np.testing.assert_allclose(merged.energy[(merged.energy > 10) & (merged.energy < 20)], [15])
+    seams = proc.energy_seams([(low, None, None), (high, None, None)])
+    assert [(s.kind, s.lo, s.hi) for s in seams] == [("gap", 10.0, 20.0)]
+    touching = make_map(energy=np.linspace(11, 21, 11))
+    assert proc.energy_seams([(low, None, None), (touching, None, None)])[0].kind == "touch"
+
+
+def test_merge_energy_refuses_a_map_inside_another():
+    whole = make_map(energy=np.linspace(0, 10, 11))
+    part = make_map(energy=np.linspace(2, 8, 7))
+    for parts in ([(whole, None, None), (part, None, None)], [(whole, None, None)] * 2):
+        assert proc.energy_seams(parts)[0].kind == "inside"
+        with pytest.raises(ValueError, match="inside"):
+            proc.merge_energy(parts)
+    # cut to its limits, it is a neighbour
+    merged = proc.merge_energy([(whole, None, 5), (part, 5, None)])
+    assert merged.energy[-1] == 8
+
+
+def test_baseline_normalize_skips_missing_values():
+    values = np.add.outer(np.linspace(0, 10, 11), [1.0, 2.0, 3.0])
+    values[3] = np.nan  # e.g. the gap of a map merged by energy
+    out = proc.baseline_normalize(make_map(values=values), (2, 4))
+    np.testing.assert_allclose(np.nanmean(out.values[2:5], axis=0), 1.0)
+    assert np.isnan(out.values[3]).all() and np.isfinite(out.values[[2, 4]]).all()
+
+
+def test_baseline_region_without_values_contains_no_data():
+    values = np.add.outer(np.linspace(0, 10, 11), [1.0, 2.0, 3.0])
+    values[2:5] = np.nan  # the region lies in a gap
+    with pytest.raises(ValueError, match="contains no data"):
+        proc.baseline_normalize(make_map(values=values), (2, 4))
+
+
+def test_interpolation_keeps_missing_values_local():
+    values = np.add.outer(np.linspace(0, 10, 11), [1.0, 2.0])
+    values[4] = np.nan
+    out = proc.interp_linear(
+        np.array([1.5, 3.5, 4.5, 6.5, 12.0]), np.linspace(0, 10, 11), values, 0
+    )
+    assert np.isnan(out[1:3]).all()
+    np.testing.assert_allclose(out[[0, 3, 4]], np.add.outer([1.5, 6.5, 12.0], [1.0, 2.0]))
+
+
+def test_maps_with_a_gap_merge_and_average_again():
+    """A merged map with an empty gap (or a table with empty cells) can be combined again; its
+    missing values stay missing, and only those."""
+    low = make_map(energy=np.linspace(0, 10, 11))
+    high = make_map(energy=np.linspace(20, 30, 11))
+    gapped = proc.merge_energy([(low, None, None), (high, None, None)])
+    gap = np.isnan(gapped.values[:, 0])
+    np.testing.assert_allclose(gapped.energy[gap], [11, 19])
+    other = make_map(energy=np.linspace(0, 30, 61), field=np.array([4.0, 5.0, 6.0]))
+    # on the gapped map's energies: the empty samples stay empty, the other map is whole
+    merged = proc.merge_field([(gapped, None, None), (other, None, None)])
+    empty = np.isnan(merged.values)
+    np.testing.assert_allclose(merged.energy[empty.any(axis=1)], [11, 19])
+    assert empty[:, :3].sum() == 6 and not empty[:, 3:].any()
+    # the gapped map put on another map's energies: missing only inside the gap
+    merged = proc.merge_field([(other, None, None), (gapped, None, None)])
+    missing = merged.energy[np.isnan(merged.values[:, 0])]
+    assert missing.min() > 10 and missing.max() < 20 and missing.size == 19  # 10.5 ... 19.5
+    kept = (merged.energy <= 10) | (merged.energy >= 20)
+    np.testing.assert_allclose(
+        merged.values[kept, :3], np.add.outer(merged.energy[kept], [1.0, 2.0, 3.0])
+    )
+    averaged = proc.average_maps([gapped, make_map(energy=np.linspace(0, 30, 31))])
+    np.testing.assert_allclose(averaged.energy[np.isnan(averaged.values[:, 0])], [11, 19])
+    assert np.isfinite(averaged.values[~np.isin(averaged.energy, [11, 19])]).all()
+
+
+def test_per_point_derivative_on_an_even_axis_counts_samples():
+    """Unchanged on an even axis, also one that is even only within rounding."""
+    for energy in (np.linspace(0, 10, 11), np.linspace(0, 10, 11) + 1e-9 * np.arange(11) ** 2):
+        fmap = make_map(energy=energy, values=np.sin(np.add.outer(energy, [1.0, 2.0, 3.0])))
+        out = proc.derivative(fmap, Axis.ENERGY).values
+        assert np.array_equal(out, np.gradient(fmap.values, axis=0))
+    assert proc.typical_step(np.linspace(0, 10, 11)) is None
+    assert proc.typical_step(np.array([0.0, 1.0, 2.0, 2.5, 3.0, 3.5])) == 0.5
+    assert proc.typical_step(np.array([3.0, 2.0, 1.0, 0.0, -2.0])) == -1.0  # as it runs
+    assert proc.typical_step(np.array([0.0, 1.0, 1.0, 2.0])) is None  # repeated
+
+
+def test_per_point_derivative_keeps_merged_parts_comparable():
+    """A line sampled finely in one part and coarsely in another has (about) the same per-point
+    derivatives in both, of first and second order."""
+    field = np.array([1.0, 2.0])
+
+    def line(energy, centre):
+        dip = 0.05 * np.exp(-0.5 * ((energy - centre) / 4.0) ** 2)
+        return make_map(energy=energy, field=field, values=np.ones((energy.size, 2)) - dip[:, None])
+
+    fine, coarse = np.arange(30.0, 500.001, 0.25), np.arange(400.0, 3000.001, 1.0)
+    merged = proc.merge_energy(
+        [(line(fine, 200.0), None, None), (line(coarse, 1000.0), None, None)]
+    )
+    result = ProcessResult.from_map(merged)
+    near = (
+        (merged.energy > 150) & (merged.energy < 250),
+        (merged.energy > 950) & (merged.energy < 1050),
+    )
+    for order in (1, 2):
+        d = result.get(PlotKind.RATIO, order).values[:, 0]
+        ratio = np.abs(d[near[0]]).max() / np.abs(d[near[1]]).max()
+        assert ratio == pytest.approx(1.0, rel=0.1), order  # (was 0.25 and 0.07)
+        per_unit = result.get(PlotKind.RATIO, order, physical=True).values[:, 0]
+        np.testing.assert_allclose(d, per_unit * 1.0**order)  # the typical step: 1 cm^-1
