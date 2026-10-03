@@ -13,6 +13,7 @@ import numpy as np
 import pytest
 from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.collections import QuadMesh
+from matplotlib.colors import to_rgb
 from matplotlib.image import AxesImage
 from matplotlib.text import Text
 from matplotlib.ticker import AutoMinorLocator, NullLocator
@@ -774,6 +775,25 @@ def _dashes(line) -> tuple:
     return line._unscaled_dash_pattern  # matplotlib has no public getter
 
 
+def _assert_drawn_as(ax, rows) -> None:
+    """Each legend sample looks as the first line drawn with its label."""
+    for text, sample in rows:
+        line = next(line for line in ax.lines if line.get_label() == text)
+        for get in (
+            "get_marker",
+            "get_markersize",
+            "get_markerfacecolor",
+            "get_markeredgecolor",
+            "get_markeredgewidth",
+            "get_color",
+            "get_linewidth",
+            "get_linestyle",
+            "get_path_effects",
+        ):
+            assert getattr(sample, get)() == getattr(line, get)(), (text, get)
+        assert _dashes(sample) == _dashes(line), text
+
+
 def test_the_legend_lists_the_curves_and_the_models_once(map_state):
     b = np.linspace(0.0, 16.0, 50)
     zeeman = [Curve(b, 40.0 + k * b, "model", "Zeeman / magnon") for k in (1, -1)]
@@ -783,9 +803,11 @@ def test_the_legend_lists_the_curves_and_the_models_once(map_state):
     ax = fig.axes[0]
     rows = _legend_rows(ax)
     assert [text for text, _sample in rows] == ["L0", "L1", "n=0", "Zeeman / magnon"]
+    _assert_drawn_as(ax, rows)  # markers, fill, edges, dashes and outlines as on the map
     (_, current), (_, other), (_, dirac), (_, model) = rows
-    assert current.get_marker() == "o" and other.get_marker() == "s"  # as drawn on the map
-    assert current.get_markerfacecolor() == "black" and other.get_markerfacecolor() == "white"
+    assert current.get_marker() == "o" and other.get_marker() == "s"
+    assert current.get_markerfacecolor() == "white" and other.get_markerfacecolor() == "none"
+    assert other.get_path_effects() and dirac.get_path_effects()  # the dark outline
     assert dirac.get_linestyle() == "--" and model.get_linestyle() == "--"
     assert _dashes(dirac) != _dashes(model)  # the models drawn apart
     n0, plain, z1, z2, *_markers = ax.lines
@@ -793,7 +815,9 @@ def test_the_legend_lists_the_curves_and_the_models_once(map_state):
     assert plain.get_linestyle() == "-"  # an unlabelled curve: drawn, not listed
     legend = ax.get_legend()
     frame = legend.get_frame()
-    assert frame.get_linewidth() == 0.5 and frame.get_edgecolor()[:3] == (0.0, 0.0, 0.0)
+    assert frame.get_linewidth() == 0.5  # a dark ground: the white samples read as drawn
+    assert frame.get_facecolor() == pytest.approx((*to_rgb("#1a1a1a"), 0.85))
+    assert all(text.get_color() == "white" for text in legend.get_texts())
     assert legend.get_texts()[0].get_fontsize() == 7.0  # the figure's text size
     box = legend.get_window_extent()
     assert ax.get_window_extent().contains(box.x0, box.y0)  # inside the plot
@@ -807,8 +831,28 @@ def test_the_legend_of_stacked_spectra_lists_the_points(map_state):
     ax = render(state, preset=APS, width_mm=86, height_mm=60, style=style).axes[0]
     rows = _legend_rows(ax)
     assert [text for text, _sample in rows] == ["L0", "L1"]  # curves are not drawn here
+    _assert_drawn_as(ax, rows)
+    assert rows[0][1].get_markerfacecolor() == "black"  # the current curve, as drawn
     assert ax.get_legend().get_frame().get_edgecolor()[3] == 0.0  # no frame on spectra
+    assert ax.get_legend().get_frame().get_facecolor()[:3] == (1.0, 1.0, 1.0)
+    assert ax.get_legend().get_texts()[0].get_color() == "black"
     assert ax.get_legend().get_texts()[0].get_fontsize() == 8.0
+
+
+def test_the_legend_of_spectra_leaves_out_curves_not_on_the_traces_shown(map_state):
+    odd = PointSet([3.0, 5.0], [40.0, 50.0], "odd")  # on fields 3 T and 5 T only
+    state = dataclasses.replace(
+        map_state, kind="stacked", stacked=StackedOptions(0.05, 2), points=[*map_state.points, odd]
+    )
+    ax = render(state, preset=APS, width_mm=86, height_mm=60, style=FigureStyle(legend=True)).axes[
+        0
+    ]
+    assert [text for text, _sample in _legend_rows(ax)] == ["L0", "L1"]  # every 2nd: 0, 2, 4 T
+    every = dataclasses.replace(state, stacked=StackedOptions(0.05, 1))
+    ax = render(every, preset=APS, width_mm=86, height_mm=60, style=FigureStyle(legend=True)).axes[
+        0
+    ]
+    assert [text for text, _sample in _legend_rows(ax)] == ["L0", "L1", "odd"]
 
 
 def test_a_legend_needs_labels(map_state):

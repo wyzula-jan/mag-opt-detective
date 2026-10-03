@@ -35,7 +35,7 @@ from mag_opt_detective import __version__
 from mag_opt_detective.core import colormaps
 from mag_opt_detective.core.units import Unit
 from mag_opt_detective.export.presets import JournalPreset, get_preset
-from mag_opt_detective.export.state import Curve, FigureState, PointSet, Range
+from mag_opt_detective.export.state import Curve, FigureState, Range
 from mag_opt_detective.export.style import MINOR_WIDTH, FigureStyle, TickStyle
 
 logger = logging.getLogger(__name__)
@@ -72,8 +72,7 @@ _OUTLINE = "#1a1a1a"  # dark edge around light overlays on a map
 _DASHES = (0, (3.0, 2.0))  # in pt, not scaled with the line width
 # dashes of the models drawn, in turn (the first as before), so a legend can tell them apart
 _MODEL_DASHES = (_DASHES, (0, (7.0, 2.0)), (0, (5.0, 1.5, 1.5, 1.5)), (0, (1.5, 1.5)))
-_INK = "black"  # legend samples on a white ground; points on stacked spectra
-_LEGEND_ALPHA = 0.85  # of the legend's white ground
+_LEGEND_ALPHA = 0.85  # of the legend's ground: dark over a map, white over spectra
 _PAD_IN = 1.0 / 72.0  # constrained-layout padding around the axes and labels
 _COLORBAR_PAD = 0.02  # gap between the axes and the colour bar (share of the axes)
 _COLORBAR_ASPECT = 25  # length / thickness of a colour bar beside the axes
@@ -352,8 +351,9 @@ def _draw_map(
     _apply_range(ax, "y", state.y_range, _extent(energy))
 
     stroke = [patheffects.withStroke(linewidth=lw + 1.0, foreground=_OUTLINE)]
+    models: dict[str, Line2D] = {}  # the first curve of each model: its legend row
     for curve in state.curves:
-        ax.plot(
+        (line,) = ax.plot(
             curve.x,
             curve.y,
             color="white",
@@ -365,9 +365,12 @@ def _draw_map(
             scalex=False,
             scaley=False,
         )
+        if curve.label:
+            models.setdefault(curve.label, line)
     size = 0.55 * fs
+    rows = []
     for k, points in enumerate(state.points):
-        ax.plot(
+        (line,) = ax.plot(
             points.x,
             points.y,
             linestyle="none",
@@ -381,10 +384,13 @@ def _draw_map(
             scalex=False,
             scaley=False,
         )
+        if points.label:
+            rows.append((line, points.label))
     if state.colorbar:
         _colorbar(fig, ax, image, state.colorbar_label, lw, style)
     if style.legend:
-        _legend(ax, state.points, state.curves, fs, lw, framed=True)
+        rows += [(line, label) for label, line in models.items()]
+        _legend(ax, rows, fs, lw, dark=True)
 
 
 def _line_style(curve: Curve, curves: list[Curve]):
@@ -395,32 +401,25 @@ def _line_style(curve: Curve, curves: list[Curve]):
     return _MODEL_DASHES[models.index(curve.label) % len(_MODEL_DASHES)]
 
 
-def _legend(
-    ax: Axes, points: list[PointSet], curves: list[Curve], fs: float, lw: float, framed: bool
-) -> None:
-    """A legend of the labelled point sets (their markers, the current one filled) and curves
-    (one row per label: the curves of a model share it), where it covers the fewest of them.
+def _legend(ax: Axes, rows: list[tuple[Line2D, str]], fs: float, lw: float, dark: bool) -> None:
+    """A legend of *rows* (a drawn line and its label), where it covers the fewest of them.
 
-    Its ground is translucent white, with a thin frame over a map (none on spectra).
+    Each sample is drawn as its line: marker, fill, edges, dashes and outline. Over a map the
+    ground is dark and translucent with white text and a thin frame, so the white overlays read
+    as on the map; over spectra it is white, without a frame.
     """
-    rows = [(_marker_sample(p, k, fs, lw), p.label) for k, p in enumerate(points) if p.label]
-    for label in dict.fromkeys(c.label for c in curves if c.label):
-        curve = next(c for c in curves if c.label == label)
-        sample = Line2D([], [], color=_INK, linewidth=lw, dash_capstyle="butt")
-        sample.set_linestyle(_line_style(curve, curves))
-        rows.append((sample, label))
     if not rows:
         return
-    samples, labels = zip(*rows, strict=True)
+    lines, labels = zip(*rows, strict=True)
     legend = ax.legend(
-        samples,
+        lines,
         ["-"] * len(rows),  # the labels follow: matplotlib leaves out one starting with "_"
         loc="best",
         fontsize=fs,
         frameon=True,
         fancybox=False,
-        facecolor="white",
-        edgecolor=_INK if framed else "none",
+        facecolor=_OUTLINE if dark else "white",
+        edgecolor=_OUTLINE if dark else "none",
         framealpha=_LEGEND_ALPHA,
         borderpad=0.4,
         labelspacing=0.3,
@@ -431,21 +430,8 @@ def _legend(
     )
     for text, label in zip(legend.get_texts(), labels, strict=True):
         text.set_text(label)
+        text.set_color("white" if dark else "black")
     legend.get_frame().set_linewidth(lw)
-
-
-def _marker_sample(points: PointSet, k: int, fs: float, lw: float) -> Line2D:
-    """The marker of the *k*-th point set: filled for the current curve, open otherwise."""
-    return Line2D(
-        [],
-        [],
-        linestyle="none",
-        marker=_MARKERS[k % len(_MARKERS)],
-        markersize=0.55 * fs,
-        markeredgewidth=lw,
-        markerfacecolor=_INK if points.current else "white",
-        markeredgecolor=_INK,
-    )
 
 
 def _field_norm(field: np.ndarray) -> Normalize:
@@ -486,6 +472,7 @@ def _draw_stacked(
 
     tolerance = _field_tolerance(fmap.field)
     size = 0.55 * fs
+    rows = []
     for n, points in enumerate(state.points):
         xs, ys = [], []
         for b, e in zip(points.x, points.y, strict=True):
@@ -499,7 +486,7 @@ def _draw_stacked(
             if np.isfinite(y):
                 xs.append(e)
                 ys.append(y + k * options.offset)
-        ax.plot(
+        (line,) = ax.plot(
             xs,
             ys,
             linestyle="none",
@@ -512,6 +499,8 @@ def _draw_stacked(
             scalex=False,
             scaley=False,
         )
+        if points.label and xs:  # only the curves drawn on the traces shown
+            rows.append((line, points.label))
     ax.set_xlabel(energy_label(fmap.unit) if state.x_label is None else state.x_label)
     ax.set_ylabel(INTENSITY_LABEL if state.y_label is None else state.y_label)
     ax.margins(x=0.0, y=0.03)
@@ -522,7 +511,7 @@ def _draw_stacked(
         mappable = ScalarMappable(_field_norm(fmap.field), _field_cmap(state.cmap))
         _colorbar(fig, ax, mappable, state.colorbar_label or FIELD_LABEL, lw, style)
     if style.legend:
-        _legend(ax, state.points, [], fs, lw, framed=False)  # curves are not drawn here
+        _legend(ax, rows, fs, lw, dark=False)
 
 
 # ---------------------------------------------------------------------- output

@@ -3,9 +3,10 @@ the legend.
 
 :class:`FigureStyle` collects these choices, so a new one is one more field (with a default
 that keeps today's look) and one more key in :meth:`FigureStyle.to_dict`. The defaults draw
-exactly what the presets drew before they existed: outward ticks on the bottom and left axes,
-sized from the text size and line width, no minor ticks, the colour bar on the right and no
-legend.
+what the presets drew before they existed: outward ticks on the bottom and left axes, sized
+from the text size and line width, no minor ticks, the colour bar on the right and no legend.
+One thing differs, whatever the style: in a figure with two or more models each model's curves
+now have their own dashes (the first model keeps the old ones), so they can be told apart.
 """
 
 from __future__ import annotations
