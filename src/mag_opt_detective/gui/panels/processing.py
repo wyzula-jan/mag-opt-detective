@@ -13,8 +13,10 @@ there.
 
 from __future__ import annotations
 
+import collections
 import logging
 import math
+import statistics
 import time
 from collections.abc import Callable
 
@@ -321,12 +323,13 @@ class LiveApply(QObject):
     stacked plot that takes longer than the run). So its cost is counted until the window is
     idle again, found with zero timers: the first that comes back within IDLE seconds (at most
     SETTLE_MAX seconds after the start). A run started meanwhile (:meth:`flush`) takes over the
-    measurement. The first change runs at once. Later ones wait, from
-    that point, INTERVAL ms or twice the cost if that is longer, so the window keeps at least
-    two thirds of the time to follow the mouse. A cost above SLOW seconds makes it slow:
-    changes made while the region is dragged then wait until the drag ends (:meth:`flush`),
-    and typed ones until the typing pauses (SETTLE ms). It is fast again only after a cost
-    below FAST seconds, so a map that takes about SLOW to update behaves the same in every drag.
+    measurement. The first change runs at once. Later ones wait, from that point, INTERVAL ms or
+    twice the typical cost (:meth:`cost`) if that is longer, so the window keeps at least two
+    thirds of the time to follow the mouse. When two of the last three costs are above SLOW
+    seconds it is slow: changes made while the region is dragged then wait until the drag ends
+    (:meth:`flush`), and typed ones until the typing pauses (SETTLE ms). It is fast again when
+    two of the last three are below FAST seconds. So a single stall (another program, garbage
+    collection) changes nothing, and a map that takes about SLOW behaves the same in every drag.
 
     *apply* returns False when it had nothing to do; such a run does not count. *clock* gives
     the time in seconds (tests may pass their own).
@@ -338,6 +341,7 @@ class LiveApply(QObject):
     FAST = 0.15  # s
     IDLE = 0.02  # s: a zero timer back this soon finds the window idle
     SETTLE_MAX = 1.0  # s: the longest a run's cost is measured
+    HISTORY = 3  # costs the slow and fast decisions (and the typical cost) look at
 
     def __init__(
         self,
@@ -359,9 +363,10 @@ class LiveApply(QObject):
         self._start = 0.0  # clock() at the start of the last run
         self._probe_at = 0.0  # clock() when its last zero timer was started
         self._done = -math.inf  # clock() when the window was idle after the last run
+        self._costs: collections.deque[float] = collections.deque(maxlen=self.HISTORY)
         self.slow = False  # see the class docstring
         self.runs = 0  # how many times *apply* did something
-        self.last_duration = 0.0  # s, the cost of the last run
+        self.last_duration = 0.0  # s, the cost of the last run measured
 
     def is_pending(self) -> bool:
         return self._pending
@@ -370,9 +375,17 @@ class LiveApply(QObject):
         """The last run's cost is still being measured (what it changed is being drawn)."""
         return self._busy
 
+    def costs(self) -> tuple[float, ...]:
+        """The last measured costs (s), oldest first."""
+        return tuple(self._costs)
+
+    def cost(self) -> float:
+        """The typical cost (s): the lower median of the last ones (0 before any)."""
+        return statistics.median_low(self._costs) if self._costs else 0.0
+
     def gap(self) -> float:
         """How long (ms) a change waits after the last run's cost while not slow."""
-        return max(self.INTERVAL, 2000 * self.last_duration)
+        return max(self.INTERVAL, 2000 * self.cost())
 
     def request(self, dragging: bool = False) -> None:
         """A change: run now, or as soon as the rules above allow."""
@@ -425,7 +438,12 @@ class LiveApply(QObject):
         self._busy = False
         self._done = now
         self.last_duration = now - self._start
-        self.slow = self.last_duration > (self.FAST if self.slow else self.SLOW)
+        self._costs.append(self.last_duration)
+        most = self.HISTORY // 2 + 1  # two of three
+        if self.slow:
+            self.slow = sum(c < self.FAST for c in self._costs) < most
+        else:
+            self.slow = sum(c > self.SLOW for c in self._costs) >= most
         if self._pending:
             self._schedule()
 

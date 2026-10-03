@@ -412,57 +412,60 @@ def test_live_apply_coalesces_a_burst(qtbot):
     assert clock.calls == 2 and not live.is_pending()
 
 
+def run_costing(qtbot, live, clock, cost: float, dragging: bool = False) -> None:
+    """One change, long after the last run, that runs now and costs *cost* (s), measured."""
+    clock.cost = cost
+    clock.now += 10.0
+    live.request(dragging)
+    live.flush()
+    settled(qtbot, live)
+
+
 def test_live_apply_is_slow_with_hysteresis(qtbot):
+    slow, fast = LiveApply.SLOW, LiveApply.FAST
+    between = (slow + fast) / 2
+    clock = FakeClock()
+    live = LiveApply(clock.run, clock=clock)
+    for _ in range(2):  # runs longer than SLOW ...
+        run_costing(qtbot, live, clock, 1.2 * slow)
+    assert live.slow and live.gap() == pytest.approx(2400 * slow)
+    live.request(dragging=True)  # ... make a drag wait for its end
+    qtbot.wait(2 * LiveApply.INTERVAL)
+    assert clock.calls == 2 and live.is_pending()
+    clock.cost = between
+    live.flush()
+    settled(qtbot, live)
+    assert clock.calls == 3 and live.slow
+    live.request()  # typed: once the typing pauses
+    live.request()
+    assert clock.calls == 3
+    qtbot.waitUntil(lambda: clock.calls == 4, timeout=3000)
+    settled(qtbot, live)
+    assert live.slow and live.costs() == pytest.approx((1.2 * slow, between, between))
+    for _ in range(2):  # runs shorter than FAST: fast again
+        run_costing(qtbot, live, clock, fast / 2, dragging=True)
+    assert not live.slow
+    run_costing(qtbot, live, clock, between)
+    run_costing(qtbot, live, clock, between)
+    assert not live.slow  # between FAST and SLOW: still fast
+    assert live.costs() == pytest.approx((fast / 2, between, between))
+
+
+def test_live_apply_ignores_a_single_stall(qtbot):
     slow, fast = LiveApply.SLOW, LiveApply.FAST
     clock = FakeClock()
     live = LiveApply(clock.run, clock=clock)
-    clock.cost = 1.2 * slow  # a run longer than SLOW ...
-    live.request()
-    settled(qtbot, live)
-    assert live.slow and live.gap() == pytest.approx(2400 * slow)
-    live.request(dragging=True)  # ... makes a drag wait for its end
-    qtbot.wait(2 * LiveApply.INTERVAL)
-    assert clock.calls == 1 and live.is_pending()
-    clock.cost = (slow + fast) / 2  # between FAST and SLOW: still slow
-    live.flush()
-    settled(qtbot, live)
-    assert clock.calls == 2 and live.slow
-    live.request()  # typed: once the typing pauses
-    live.request()
-    assert clock.calls == 2
-    qtbot.waitUntil(lambda: clock.calls == 3, timeout=3000)
-    settled(qtbot, live)
-    clock.cost = fast / 2  # below FAST: fast again
-    live.request(dragging=True)
-    live.flush()
-    settled(qtbot, live)
-    assert not live.slow and clock.calls == 4
-    clock.cost = (slow + fast) / 2  # between FAST and SLOW: still fast
-    clock.now += 1.0
-    live.request(dragging=True)
-    settled(qtbot, live)
-    assert clock.calls == 5 and not live.slow
-
-
-def test_live_apply_counts_the_drawing_a_run_leaves(qtbot):
-    """What a run changed is drawn after it returns: that time counts as its cost."""
-    clock = FakeClock()
-
-    def run():
-        clock.run()
-        QTimer.singleShot(0, draw)  # (posted by the run, as a redraw is)
-
-    def draw():
-        clock.now += 2 * LiveApply.IDLE
-
-    live = LiveApply(run, clock=clock)
-    clock.cost = LiveApply.IDLE / 2
-    live.request()
-    assert live.is_busy()
-    settled(qtbot, live)
-    assert live.last_duration == pytest.approx(2.5 * LiveApply.IDLE)
-    live.request()  # waits twice the cost after the drawing, not after the run
-    assert clock.calls == 1 and live.is_pending()
+    for _ in range(3):
+        run_costing(qtbot, live, clock, fast / 2)
+    run_costing(qtbot, live, clock, 3 * slow)  # one stall (another program, a collection)
+    assert not live.slow and live.cost() == pytest.approx(fast / 2)
+    assert live.gap() == pytest.approx(max(LiveApply.INTERVAL, 1000 * fast))
+    run_costing(qtbot, live, clock, 3 * slow)  # two in a row: slow
+    assert live.slow
+    run_costing(qtbot, live, clock, fast / 2, dragging=True)  # one quick run ...
+    assert live.slow
+    run_costing(qtbot, live, clock, fast / 2, dragging=True)  # ... and a second: fast again
+    assert not live.slow
 
 
 def test_a_run_during_a_measurement_takes_it_over(qtbot):
@@ -490,7 +493,28 @@ def test_a_run_during_a_measurement_takes_it_over(qtbot):
     settled(qtbot, live)
     qtbot.wait(50)  # every zero timer has come back
     assert measuring == [True]  # still measured while the second run is drawn
+    assert live.costs() == pytest.approx((2.5 * LiveApply.IDLE,))  # measured once
+
+
+def test_live_apply_counts_the_drawing_a_run_leaves(qtbot):
+    """What a run changed is drawn after it returns: that time counts as its cost."""
+    clock = FakeClock()
+
+    def run():
+        clock.run()
+        QTimer.singleShot(0, draw)  # (posted by the run, as a redraw is)
+
+    def draw():
+        clock.now += 2 * LiveApply.IDLE
+
+    live = LiveApply(run, clock=clock)
+    clock.cost = LiveApply.IDLE / 2
+    live.request()
+    assert live.is_busy()
+    settled(qtbot, live)
     assert live.last_duration == pytest.approx(2.5 * LiveApply.IDLE)
+    live.request()  # waits twice the cost after the drawing, not after the run
+    assert clock.calls == 1 and live.is_pending()
 
 
 def test_live_apply_counts_only_runs_that_did_something(qtbot):
