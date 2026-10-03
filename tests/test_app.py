@@ -17,9 +17,13 @@ from mag_opt_detective.gui.main_window import MainWindow
 
 @pytest.fixture
 def restore_look(qapp):
-    """The smoke test applies the theme to the shared application; undo it afterwards."""
+    """The smoke test applies the theme to the shared application; undo it afterwards, and
+    delete the smoke test's (closed) window, which later theme changes would restyle."""
     palette, sheet, style = QPalette(qapp.palette()), qapp.styleSheet(), qapp.style().name()
     yield qapp
+    for widget in QApplication.topLevelWidgets():
+        if isinstance(widget, MainWindow):
+            widget.deleteLater()
     qapp.setStyleSheet(sheet)
     qapp.setPalette(palette)
     if qapp.style().name() != style:
