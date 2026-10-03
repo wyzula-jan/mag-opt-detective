@@ -69,7 +69,9 @@ stays). Energies are stored in cm⁻¹ whatever unit is shown.
 (24 × 24, stroke 2, `stroke="currentColor"`). Copy the SVG unchanged into `gui/icons/`
 under its Lucide name, use it with `icons.set_icon(widget, "name")`, and keep
 `LICENSE-lucide.txt` (ISC, with the MIT notice for icons derived from Feather) next to
-them.
+them. Lucide has outlines only: for a filled icon pass `fill=`, which draws the glyph on a
+rounded tile (`icons.set_icon(button, "layers", "accent-fg", fill="accent")`, as the rail's
+data states do); never edit the SVGs.
 
 ## GUI tests
 

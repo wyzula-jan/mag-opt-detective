@@ -34,7 +34,7 @@ description: What Process does with a sweep: zero-field drift correction, the fo
   <dt>None</dt>
   <dd>The sample ratio is used as measured.</dd>
   <dt>Separate sweep</dt>
-  <dd>Divides by a second sweep measured the same way, for example of the bare substrate. Load it like the sample: <b>Open reference sweep…</b> (<kbd>Ctrl</kbd>+<kbd>R</kbd>), zero field with <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>R</kbd>, or a drop on the panel. Its fields come from its file names, or from its own custom range when the sample uses one. The reference is interpolated onto the sample's fields (and onto its energies, if they differ) before dividing: the sample's data by the reference's data, and the sample's R(B)/R(0) by the reference's R(B)/R(0).</dd>
+  <dd>Divides by a second sweep measured the same way, for example of the bare substrate. Load it like the sample: <b>Open reference sweep…</b> (<kbd>Ctrl</kbd>+<kbd>R</kbd>), zero field with <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>R</kbd>, or a drop on the panel. Its fields come from its file names, or from its own custom range when the sample uses one. The reference is interpolated onto the sample's fields (and onto its energies, if they differ) before dividing: the sample's data by the reference's data, and the sample's R(B)/R(0) by the reference's R(B)/R(0). Without reference files, Process shows the sample as with None and says so in a note above the plot; reference files that cannot be read stop Process with an error.</dd>
   <dt>The sample</dt>
   <dd>Divides the sweep by itself, smoothed, to remove slow spectral features while keeping the narrow lines. Use it with smoothing on.</dd>
 </dl>
