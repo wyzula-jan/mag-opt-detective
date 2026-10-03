@@ -922,7 +922,10 @@ class AppController(QObject):
     def settle_baseline(self) -> bool:
         """Apply a live region that counts as applied but is still waiting (the panel applies
         changes at most about ten times a second), before the map shown is kept or replaced or
-        Live is turned off. Returns whether the map changed."""
+        Live is turned off. Returns whether the map changed. Nothing is applied while settings
+        are restored (:meth:`restoring`): restored values are applied after it, if at all."""
+        if self._restoring:
+            return False
         if self._baseline_is_live() and self._baseline() != self.result.baseline_region:
             return self.apply_baseline()
         return False

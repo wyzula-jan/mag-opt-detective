@@ -904,3 +904,22 @@ def test_turning_live_off_applies_a_waiting_change(processed, qtbot, caplog):
         lambda: any("900 – 1100 cm-1 (Live)" in r.getMessage() for r in caplog.records),
         timeout=3000,
     )
+
+
+def test_reset_settings_with_live_on_applies_nothing(qtbot, tmp_path, lines, errors):
+    w = MainWindow(settings=QSettings(str(tmp_path / "settings.ini"), QSettings.Format.IniFormat))
+    qtbot.addWidget(w)
+    c, panel = w.controller, w.panels["processing"]
+    c.set_processing(sample_files=lines, baseline=(700.0, 900.0))
+    process(w)
+    panel.baseline_live.setChecked(True)
+    assert c.result.baseline_region == (700.0, 900.0) and not c.changed_since_process()
+    during = []
+    c.resultChanged.connect(lambda: during.append(c.is_restoring()))
+    w.reset_settings()  # the baseline goes off before Live does
+    assert not panel.baseline_live.isChecked() and not panel.baseline_on.isChecked()
+    assert True not in during  # nothing applied while restoring
+    assert c.result.baseline_region == (700.0, 900.0)  # the processed map stays ...
+    assert c.changed_since_process()  # ... and its baseline is now a change to process
+    assert not errors
+    w.close()

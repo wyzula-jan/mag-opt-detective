@@ -422,6 +422,13 @@ def show_view_energy(window) -> None:
         scroll.ensureWidgetVisible(target if isinstance(target, QWidget) else section)
 
 
+@user_action("Live baseline")
+def settle_live(window) -> bool:
+    """Apply what was changed with Live on before Live is turned off (see
+    :meth:`AppController.settle_baseline`); errors go to the error bar."""
+    return window.controller.settle_baseline()
+
+
 def readable(text: str) -> str:
     """A controller message with the energy unit written as in the window (cm⁻¹)."""
     return text.replace(str(Unit.CM1), unit_text(Unit.CM1))
@@ -640,7 +647,7 @@ def install(window) -> None:
         else:  # what was changed with Live on is applied (Live is still on in the controller)
             applying = True
             try:
-                changed = c.settle_baseline()
+                changed = settle_live(window)
             finally:
                 applying = False
             live.cancel()
