@@ -48,18 +48,20 @@ body:
     id: log
     attributes:
       label: Log
-      description: The lines of the log around the problem (the Log button in the status bar).
+      description: >-
+        The lines of the log around the problem (the Log button in the status bar). The log
+        shows full file paths: remove any paths or names you don't want public.
       render: text
   - type: markdown
     attributes:
       value: |
         ### Environment
-        Filled in by **Help › Report a bug…**; otherwise **Help › About** shows the versions.
+        Filled in by **Help › Report a bug…**; otherwise the About box (**Help › About**, on macOS in the app menu) shows the versions.
   - type: input
     id: version
     attributes:
       label: App version
-      description: Help › About shows it.
+      description: The About box shows it (Help › About, on macOS in the app menu).
       placeholder: x.y.z
     validations:
       required: true
