@@ -64,9 +64,12 @@ def test_the_help_menu(window):
         "",
         "&Shortcuts",
         "",
+        "Check for &updates…",  # gui/updates.py
+        "Check for updates at s&tartup",
         "&About",
     ]
-    names = [window.commands[n] for n in (*LINKS, "shortcuts", "about")]
+    updates = ("check_updates", "check_updates_at_startup")
+    names = [window.commands[n] for n in (*LINKS, "shortcuts", *updates, "about")]
     assert [a for a in menu.actions() if not a.isSeparator()] == names
     assert all(a.statusTip() for a in names)
     assert all(not window.commands[n].icon().isNull() for n in LINKS)
@@ -84,6 +87,8 @@ def test_the_help_menu(window):
         "Request a feature…",
         "Report a bug…",
         "Shortcuts",
+        "Check for updates…",
+        "Check for updates at startup",
         "About",
     ]
 
