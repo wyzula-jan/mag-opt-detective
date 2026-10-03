@@ -12,7 +12,7 @@ authors:
   - family-names: Wyzula
     given-names: Jan
     email: wyzula.jan@gmail.com
-version: 0.5.0
+version: 0.6.0
 date-released: "2026-10-04"
 license: GPL-3.0-only
 repository-code: "https://github.com/wyzula-jan/mag-opt-detective"

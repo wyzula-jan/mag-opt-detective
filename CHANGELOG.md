@@ -4,6 +4,16 @@ All notable changes to Magneto-Optical Detective, newest first. The format is ba
 Changelog, and the versions follow Semantic Versioning. `tools/release.py` writes each section
 from the commit messages when a version is released (see Releases in CONTRIBUTING.md).
 
+## 0.6.0 - 2026-10-04
+
+### Added
+
+- **gui:** the status bar shows the baseline correction of the map on screen: "Baseline 500 – 880 cm⁻¹" in the display unit, with a Live tag while it is applied live, a dot when the Processing panel holds another region than the one applied, and "No baseline" when a region waits for the next Process. Its tooltip explains the state (or why a region cannot be applied); a click opens the baseline settings.
+
+### Changed
+
+- **gui:** the status bar's summary is shortened with an ellipsis when it does not fit.
+
 ## 0.5.0 - 2026-10-04
 
 ### Added
