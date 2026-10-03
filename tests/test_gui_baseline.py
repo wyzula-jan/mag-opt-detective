@@ -664,7 +664,7 @@ def test_live_explains_a_region_without_data(processed):
 def test_library_maps_are_not_baselined_live(processed, errors):
     w, c = processed, processed.controller
     panel = w.panels["processing"]
-    library.save_current(w)
+    library.add_processed(w)
     library.plot_entry(w, c.library[0].key)
     assert c.result_source == "library"
     shown = shown_image(w).copy()
@@ -863,7 +863,7 @@ def test_the_subtitle_says_when_the_baseline_applies(processed):
     assert subtitle.text() == CHANGED
     panel.cut_on.setChecked(False)
     assert subtitle.text() == LIVE_APPLIED
-    library.save_current(w)
+    library.add_processed(w)
     library.plot_entry(w, c.library[0].key)  # Live waits for a processed map
     assert subtitle.text() == APPLIED
     process(w)
@@ -882,7 +882,7 @@ def test_a_library_save_or_plot_applies_a_waiting_region(processed, qtbot, error
     panel.baseline_hi.setText("1000")
     assert panel.live.is_pending() and c.result.baseline_region == (600, 700)
     assert not c.changed_since_process()  # it counts as applied ...
-    library.save_current(w)  # ... so the map saved has it
+    library.add_processed(w)  # ... so the map saved has it
     np.testing.assert_allclose(c.library[-1].fmap.values, fresh_result(w).ratio.values)
     assert c.result.baseline_region == (600, 1000)
 
@@ -1085,7 +1085,7 @@ def test_baseline_is_live(processed):
     assert not c.baseline_is_live() and c.result.baseline_region == (450.0, 550.0)
     c.set_processing(baseline=None)
     assert c.baseline_is_live() and c.result.baseline_region is None
-    library.save_current(w)
+    library.add_processed(w)
     library.plot_entry(w, c.library[0].key)
     assert not c.baseline_is_live()  # a library map keeps its baseline
 

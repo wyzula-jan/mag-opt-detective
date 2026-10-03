@@ -165,15 +165,19 @@ def stacked_scene(window: MainWindow) -> QWidget:
 
 
 def library_scene(window: MainWindow) -> QWidget:
-    """Two library maps ready to merge by field, the limits of the first one open."""
+    """Two library maps ticked and plotted cut to their limits, ready to merge by field, the
+    limits of the first one open."""
     c = window.controller
 
     def two_halves() -> None:
-        low = c.save_current_map("Demo_Sam1_0-8T")
-        c.update_entry(low, field_cut=(None, 8.0))
-        high = c.save_current_map("Demo_Sam1_8-16T")
-        c.update_entry(high, field_cut=(8.25, None))
-        window.panels["library"].rows[low.key].expand_button.click()
+        panel = window.panels["library"]
+        panel.full_energy.setChecked(False)  # plotted cut to their limits
+        low = c.add_processed("Demo_Sam1_0-8T")
+        c.update_entry(low, field_cut=(None, 8.0), used=True)
+        high = c.add_processed("Demo_Sam1_8-16T")
+        c.update_entry(high, field_cut=(8.25, None), used=True)
+        panel.method.set_value("field")
+        panel.rows[low.key].expand_button.click()
 
     window.show_panel("library")
     step("library maps", two_halves)

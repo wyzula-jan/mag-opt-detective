@@ -377,7 +377,7 @@ def test_a_library_map_shown_holds_the_processing(window, clock, tmp_path):
     spectrum(tmp_path, 0.5, old=True)
     window.folder_watch.start(tmp_path)
     c = window.controller
-    c.plot_entry(c.save_current_map())
+    c.plot_entry(c.add_processed())
     spectrum(tmp_path, 1.0)
     arrive(window, clock)
     assert c.result_source == "library" and len(c.processing.sample_files.field) == 2

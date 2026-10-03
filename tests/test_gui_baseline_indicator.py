@@ -113,7 +113,7 @@ def test_no_baseline_never_shows_with_live_or_a_library_map(window, lines):
     panel = w.panels["processing"]
     c.set_processing(sample_files=lines)
     process(w)
-    library.save_current(w)
+    library.add_processed(w)
     panel.baseline_live.setChecked(True)
     type_region(w, 600, 700)
     panel.baseline_on.setChecked(True)  # applied at once
@@ -290,7 +290,7 @@ def test_live_applies_at_once_and_is_never_pending(processed):
 def test_library_maps_show_the_region_they_were_plotted_with(processed, errors):
     w, c = processed, processed.controller
     panel = w.panels["processing"]
-    library.save_current(w)
+    library.add_processed(w)
     type_region(w, 600, 700)
     library.plot_entry(w, c.library[0].key)  # plotted with the panel's region
     assert c.result_source == "library" and not errors

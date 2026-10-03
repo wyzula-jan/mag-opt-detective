@@ -391,19 +391,17 @@ def test_library_list(window, sweep, tmp_path, monkeypatch, errors):
     panel = window.panels["library"]
     c = window.controller
     assert not panel.empty.isHidden() and panel.list_card.isHidden()
-    assert panel.count_label.text() == "No maps in the library."
-    assert not any(b.isEnabled() for b in panel.batch_buttons())
+    assert panel.sweep.isHidden() and not panel.create_button.isEnabled()
 
     load_sweep(window, sweep)
     process(window)
+    assert not panel.sweep.isHidden() and panel.save_button.isEnabled()
     panel.save_button.click()
     (entry,) = c.library
     row = panel.rows[entry.key]
     assert row.name_label.text() == "Sample_4p2K_Sam1"
     assert row.meta_label.text() == "R(B)/R(0) · 4 fields · 100 – 1000 cm⁻¹"
-    assert panel.count_label.text() == "1 of 1 ticked. Tick at least two to merge or average."
-    assert not panel.average_button.isEnabled()
-    assert panel.average_button.toolTip().startswith("Tick at least two maps")
+    assert not entry.used and not row.use.isChecked()  # in the library, not on the plot
     set_unit(window, "meV")
     assert row.meta_label.text() == "R(B)/R(0) · 4 fields · 12.4 – 124 meV"
 
@@ -412,22 +410,25 @@ def test_library_list(window, sweep, tmp_path, monkeypatch, errors):
     open_many(monkeypatch, [tmp_path / "S1_Ratio.csv"])
     panel.load_button.click()
     assert [e.name for e in c.library] == ["Sample_4p2K_Sam1", "S1_Ratio.csv"]
-    assert panel.count_label.text() == "2 of 2 ticked"
-    assert all(b.isEnabled() for b in panel.batch_buttons())
-    panel.rows[c.library[1].key].use.setChecked(False)
-    assert not c.library[1].used and not panel.merge_energy_button.isEnabled()
+    row.use.setChecked(True)
+    assert entry.used and c.result_source == "library"
+    assert "Showing a library map" in window.state_text()
     c.update_entry(c.library[1], used=True)  # set elsewhere: the row follows
-    assert panel.rows[c.library[1].key].use.isChecked() and panel.average_button.isEnabled()
+    assert panel.rows[c.library[1].key].use.isChecked()
+    library.refresh_preview(window)
+    assert panel.create_button.isEnabled()
+    panel.rows[c.library[1].key].use.setChecked(False)
+    assert not c.library[1].used
+    library.refresh_preview(window)
+    assert not panel.create_button.isEnabled()
 
-    row.plot_button.click()
-    assert c.result_source == "library" and "Showing a library map" in window.state_text()
     other = panel.rows[c.library[1].key]
     assert not other.remove_button.isVisibleTo(other)  # in the opened row, with the limits
     other.expand_button.click()
     other.remove_button.click()
     assert [e.name for e in c.library] == ["Sample_4p2K_Sam1"] and len(panel.rows) == 1
-    c.remove_entry(entry)
-    assert not panel.empty.isHidden()
+    c.remove_entry(entry)  # on the plot: the processed sweep comes back
+    assert not panel.empty.isHidden() and c.result_source == "process"
     drop(panel.empty, [tmp_path / "S1_Ratio.csv"])  # tables dropped on the empty list
     assert [e.name for e in c.library] == ["S1_Ratio.csv"]
     assert not errors
@@ -436,7 +437,7 @@ def test_library_list(window, sweep, tmp_path, monkeypatch, errors):
 def test_library_cut_limits_are_in_the_display_unit(window, sweep):
     load_sweep(window, sweep)
     process(window)
-    library.save_current(window)
+    library.add_processed(window)
     c = window.controller
     entry = c.library[0]
     row = window.panels["library"].rows[entry.key]
@@ -458,7 +459,7 @@ def test_library_cut_limits_are_in_the_display_unit(window, sweep):
     assert row.fields[row.b_min].is_invalid() and row.fields[row.b_max].is_invalid()
     row.b_max.setText("x")
     assert entry.field_cut == (1.0, None) and row.fields[row.b_max].is_invalid()
-    library.save_current(window)  # a new row: the open one stays open
+    library.add_processed(window)  # a new row: the open one stays open
     assert not window.panels["library"].rows[entry.key].cut_box.isHidden()
 
 
@@ -510,14 +511,14 @@ def test_a_failed_library_plot_keeps_the_name_of_the_map_shown(window, sweep, er
     load_sweep(window, sweep)
     process(window)
     c = window.controller
-    library.save_current(window)
+    library.add_processed(window)
     low = c.add_map(c.result.ratio.replace(energy=c.result.ratio.energy * 0.05), "Low")
     library.plot_entry(window, c.library[0].key)
     c.set_processing(baseline=(500.0, 600.0))
     library.plot_entry(window, low.key)  # the baseline region misses this map
     assert errors and "baseline region" in errors[-1]
     assert c.result_name() == "Sample_4p2K_Sam1"
-    assert c.save_current_map().name == "Sample_4p2K_Sam1 (2)"
+    assert c.add_processed().name == "Sample_4p2K_Sam1 (2)"
 
 
 def test_library_tables_can_take_the_custom_field_range(window, sweep, tmp_path, monkeypatch):

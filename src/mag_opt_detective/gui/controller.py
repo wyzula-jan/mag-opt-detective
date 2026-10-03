@@ -14,6 +14,7 @@ from __future__ import annotations
 import contextlib
 import dataclasses
 import functools
+import itertools
 import logging
 import math
 import re
@@ -40,6 +41,7 @@ from mag_opt_detective.core.processing import (
     average_maps,
     crop_energy,
     crop_field,
+    energy_seams,
     merge_energy,
     merge_field,
 )
@@ -60,7 +62,7 @@ from mag_opt_detective.core.units import (
     from_cm1,
     to_cm1,
 )
-from mag_opt_detective.gui.display import unit_text
+from mag_opt_detective.gui.display import format_number, format_range, unit_text
 from mag_opt_detective.gui.plots.base import robust_levels
 from mag_opt_detective.gui.points_undo import PointsState, PointsUndoStack
 
@@ -111,6 +113,13 @@ DATA_EMPTY, DATA_CHANGED, DATA_CURRENT = "empty", "changed", "current"
 DATA_PARTS = ("sample", "reference")
 NO_REFERENCE_FILES = "Reference sweep has no files – shown without reference."
 LIBRARY_KEEPS_BASELINE = "the library map shown keeps the baseline it was plotted with"
+
+# what the plot shows (AppController.showing) and how ticked library maps are combined
+SHOWS_PROCESS, SHOWS_MAPS, SHOWS_PRODUCT = "process", "maps", "product"
+COMBINE_METHODS = {"energy": "Merge by energy", "field": "Merge by field", "average": "Average"}
+PRODUCT_PREFIX = {"energy": "Merged by energy", "field": "Merged by field", "average": "Average"}
+DEFAULT_OPACITY = 0.5  # of the library maps drawn above the bottom one
+FIELD_TOL = 1e-6  # T: fields closer than this are the same field
 
 Curve = tuple[np.ndarray, np.ndarray]
 
@@ -467,22 +476,111 @@ class FigureState:
     overlays: dict[str, list[Curve]]
 
 
+@dataclass(frozen=True)
+class PartRecord:
+    """A map that went into a combined one: its name, kind and cut limits (cm^-1 and T)."""
+
+    name: str
+    kind: str
+    energy_cut: Range = (None, None)
+    field_cut: Range = (None, None)
+    provenance: Provenance | None = None
+
+
+@dataclass(frozen=True)
+class Provenance:
+    """How a library map was made: by Process, loaded from a table or combined from maps.
+
+    *method* is ``"process"``, ``"table"`` or a :data:`COMBINE_METHODS` key. Energies are in
+    cm^-1; :meth:`lines` describes it in a unit. *facts* are what combining did, as
+    ``(what, lo, hi)`` (see :func:`fact_text`).
+    """
+
+    method: str
+    made: datetime
+    source: str = ""  # table: its path; process: the name of the sweep
+    parts: tuple[PartRecord, ...] = ()
+    facts: tuple[tuple[str, float, float], ...] = ()
+    files: tuple[int, int] = (0, 0)  # process: in-field and zero-field files
+    reference: str = ""  # process: the reference used
+    window: Range | None = None  # process: the energy window
+    baseline: Range | None = None  # process: the baseline region
+
+    def lines(self, unit: Unit, indent: str = "") -> list[str]:
+        """The provenance as lines of text, energies in *unit* (nested parts indented)."""
+        stamp = self.made.strftime("%Y-%m-%d %H:%M")
+        if self.method == "process":
+            n_field, n_zero = self.files
+            lines = [f"Processed sweep {self.source}, {stamp}"]
+            lines.append(f"{n_field} in-field and {n_zero} zero-field files")
+            lines.append(f"Reference: {self.reference or 'none'}")
+            if self.window is not None:
+                lines.append(f"Energy window {energy_range_text(self.window, unit)}")
+            if self.baseline is not None:
+                lines.append(f"Baseline region {energy_range_text(self.baseline, unit)}")
+        elif self.method == "table":
+            lines = [f"Loaded from {self.source}, {stamp}"]
+        else:
+            lines = [f"{COMBINE_METHODS[self.method]} of {len(self.parts)} maps, {stamp}"]
+            for part in self.parts:
+                cuts = cut_text(part.energy_cut, part.field_cut, unit)
+                lines.append(f"- {part.name} ({part.kind}{', ' + cuts if cuts else ''})")
+                if part.provenance is not None:
+                    lines += part.provenance.lines(unit, "  ")
+            lines += [fact_text(fact, unit)[0] for fact in self.facts]
+        return [indent + line for line in lines]
+
+
 @dataclass(eq=False)
 class LibraryEntry:
     """A processed map in the library (cm^-1) with its tick and cut limits.
 
     *energy_cut* is in cm^-1 and *field_cut* in T; a None end keeps everything on that side.
-    *key* identifies the entry while it is in the library.
+    A ticked entry (*used*) is on the plot and in the maps combined. *key* identifies the
+    entry while it is in the library.
     """
 
     name: str
     fmap: FieldMap
     kind: str = KIND_LABELS[PlotKind.RATIO]
-    used: bool = True
+    used: bool = False
     energy_cut: Range = (None, None)
     field_cut: Range = (None, None)
     source: str = ""  # the file it was loaded from ("" for a saved map)
     key: int = 0
+    provenance: Provenance | None = None
+
+
+@dataclass(eq=False)
+class Product:
+    """A map combined from library maps (cm^-1), until it is saved into the library."""
+
+    name: str
+    fmap: FieldMap
+    kind: str
+    provenance: Provenance
+    saved: int | None = None  # key of the library entry it was saved as
+
+
+@dataclass(frozen=True)
+class OverlayLayer:
+    """A ticked library map below the top one: as drawn (display unit), or why it is not."""
+
+    entry: LibraryEntry
+    fmap: FieldMap | None
+    problem: str = ""
+
+
+@dataclass(frozen=True)
+class CombinePreview:
+    """What combining *entries* with *method* gives: the map (cm^-1) and what was done to
+    make it (*facts*, see :func:`fact_text`), or why it cannot be made (*problem*)."""
+
+    method: str
+    entries: tuple[LibraryEntry, ...]
+    fmap: FieldMap | None = None
+    facts: tuple[tuple[str, float, float], ...] = ()
+    problem: str = ""
 
 
 # ---------------------------------------------------------------------- controller
@@ -529,6 +627,15 @@ class AppController(QObject):
         self.points_undo = PointsUndoStack(self._restore_points, self)
         self._point_edits = 0  # depth of nested point_edit blocks
         self._overlays: dict[str, Callable[[Unit], list[Curve]]] = {}
+        # what the library shows (see the library section)
+        self._plotted: list[int] = []  # keys of the ticked library maps, bottom to top
+        self._library_shows = SHOWS_MAPS  # what a library result is: the ticked maps or product
+        self._shown_top: tuple | None = None  # the ticked map shown on top, with its cut
+        self._kept_result: ProcessResult | None = None  # the processed sweep, while hidden
+        self.product: Product | None = None
+        self._full_range = True  # library maps are plotted without their cut limits
+        self._opacity = DEFAULT_OPACITY  # of the library maps drawn above the bottom one
+        self._layers: tuple[tuple, list[OverlayLayer]] | None = None  # overlay_layers() cache
 
     # --- unit --------------------------------------------------------------------------
     @property
@@ -893,6 +1000,7 @@ class AppController(QObject):
         if processed:
             self.processed_at = datetime.now()
             self._processed_with = self._processing
+            self._kept_result = None  # the sweep a library map hid is out of date
         self._init_points_if_requested(result.ratio.field)
         self.resultChanged.emit()
         self._update_changed()
@@ -903,6 +1011,13 @@ class AppController(QObject):
         baseline = self._baseline(panel="processing")
         if baseline is not None:
             self.check_energy_range("baseline region", baseline, fmap.energy, "processing")
+            if not _has_values(fmap, baseline):
+                lo, hi = convert_range(baseline, Unit.CM1, self._unit)
+                raise panel_error(
+                    f"baseline region {fmt(lo)} – {fmt(hi)} {self._unit} contains no data "
+                    "(it lies in a gap of the map)",
+                    "processing",
+                )
         result = ProcessResult.from_map(fmap, baseline)
         self.set_result(result, processed=False)
         return result
@@ -1368,6 +1483,17 @@ class AppController(QObject):
         logger.info("Exported points to %s", path)
 
     # --- library -----------------------------------------------------------------------
+    # Library maps are kept in cm^-1. A ticked map is on the plot: the ticked maps are drawn
+    # together, the one ticked or brought up last on top (:meth:`plotted_entries`). The top
+    # map is the result shown (picking, the stacked plot, exports); the others are drawn below
+    # it (:meth:`overlay_maps`). Combining ticked maps makes a product, shown until it is saved
+    # into the library or discarded. Process shows the processed sweep again and keeps the
+    # ticks (:meth:`showing`); the sweep a library map hides is kept (:meth:`show_processed`).
+    plottedChanged = Signal()  # what the library puts on the plot changed (ticks, order, source)
+    overlayMapsChanged = Signal()  # the maps below the top one changed, the result did not
+    opacityChanged = Signal(float)
+    productChanged = Signal()  # a product was made, renamed, saved or discarded
+
     def entry(self, key: int) -> LibraryEntry:
         for entry in self.library:
             if entry.key == key:
@@ -1384,9 +1510,14 @@ class AppController(QObject):
         return f"{name} ({n})"
 
     def add_map(
-        self, fmap: FieldMap, name: str, kind: str = KIND_LABELS[PlotKind.RATIO], source: str = ""
+        self,
+        fmap: FieldMap,
+        name: str,
+        kind: str = KIND_LABELS[PlotKind.RATIO],
+        source: str = "",
+        provenance: Provenance | None = None,
     ) -> LibraryEntry:
-        """Add a processed map (kept in cm^-1) to the library, ticked."""
+        """Add a processed map (kept in cm^-1) to the library, not ticked."""
         self._next_key += 1
         entry = LibraryEntry(
             name=self._unique_name(name.strip() or "Map"),
@@ -1394,6 +1525,7 @@ class AppController(QObject):
             kind=kind,
             source=source,
             key=self._next_key,
+            provenance=provenance,
         )
         self.library.append(entry)
         self.libraryChanged.emit()
@@ -1403,7 +1535,8 @@ class AppController(QObject):
         """Add an exported table to the library (kept in cm^-1).
 
         A table without a unit in its header is in the display unit. *field_values* replace
-        the field read from the header.
+        the field read from the header. The kind comes from the name an export gives
+        (``…_Data.csv``; R(B)/R(0) without one).
         """
         with in_panel("library"):
             fmap = load_tsv(path, default_unit=self._unit)
@@ -1415,137 +1548,527 @@ class AppController(QObject):
                         f"the table has {fmap.field.size}"
                     )
                 fmap = fmap.replace(field=field_values)
-        entry = self.add_map(fmap, Path(path).name, source=str(path))
+        provenance = Provenance("table", datetime.now(), source=str(path))
+        name = Path(path).name
+        entry = self.add_map(fmap, name, kind_from_name(name), str(path), provenance)
         logger.info("Library: loaded %s (energy in %s)", Path(path).name, file_unit)
         return entry
+
+    def sweep_name(self) -> str:
+        """The name of the processed sweep: its files' common prefix."""
+        used = self._processed_with
+        files = used.sample_files.field if used is not None else ()
+        return common_prefix([Path(f).name for f in files]).strip(SEPARATORS) or "Processed map"
 
     def result_name(self) -> str:
         """A name for the map shown: the sweep's common file prefix, or the library map's."""
         if self.result_source == "library":
             return self._library_name or "Library map"
-        used = self._processed_with
-        files = used.sample_files.field if used is not None else ()
-        return common_prefix([Path(f).name for f in files]).strip(SEPARATORS) or "Processed map"
+        return self.sweep_name()
 
-    def save_current_map(self, name: str | None = None) -> LibraryEntry:
-        """Add the R(B)/R(0) map shown to the library."""
-        if self.result is None:
-            raise panel_error("nothing to save - process data first", "library")
-        self.settle_baseline()
-        entry = self.add_map(self.result.ratio, name or self.result_name())
-        logger.info("Library: saved the current R(B)/R(0) as %r", entry.name)
+    def processed_result(self) -> ProcessResult | None:
+        """The result of the last Process, shown or hidden by a library map (None before)."""
+        return self.result if self.result_source == "process" else self._kept_result
+
+    def processed_in_library(self) -> bool:
+        """The processed sweep's R(B)/R(0) map, as it is, is in the library already."""
+        result = self.processed_result()
+        return result is not None and any(e.fmap is result.ratio for e in self.library)
+
+    def add_processed(self, name: str | None = None) -> LibraryEntry:
+        """Add the processed sweep's R(B)/R(0) map to the library, with how it was made."""
+        if self.result_source == "process":
+            self.settle_baseline()  # with the region it counts as having
+        result = self.processed_result()
+        if result is None:
+            raise panel_error("process a sweep first: there is no processed map to add", "library")
+        p = self._processed_with or self._processing
+        mode = p.reference_used()
+        reference = {ReferenceMode.NONE: "none", ReferenceMode.SELF: "the sample itself"}.get(
+            mode, f"a separate sweep of {len(p.reference_files.field)} files"
+        )
+        if mode is not ReferenceMode.NONE and p.smooth:
+            reference += f", smoothed (window {p.sg_window}, order {p.sg_poly})"
+        provenance = Provenance(
+            "process",
+            datetime.now(),
+            source=self.sweep_name(),
+            files=(len(p.sample_files.field), len(p.sample_files.zero)),
+            reference=reference,
+            window=p.energy_cut,
+            baseline=result.baseline_region,
+        )
+        entry = self.add_map(result.ratio, name or self.sweep_name(), provenance=provenance)
+        logger.info("Library: added the processed R(B)/R(0) as %r", entry.name)
         return entry
 
     def remove_entry(self, entry: LibraryEntry) -> None:
-        if entry in self.library:
-            self.library.remove(entry)
-            logger.info("Library: removed %r", entry.name)
-            self.libraryChanged.emit()
+        if entry not in self.library:
+            return
+        plotted = entry.key in self._plotted
+        self.library.remove(entry)
+        logger.info("Library: removed %r", entry.name)
+        if plotted:
+            self._plotted.remove(entry.key)
+        self.libraryChanged.emit()
+        if plotted and self._showing_maps():
+            self._show_next()  # the next map comes on top
 
     def update_entry(self, entry: LibraryEntry, **changes) -> None:
-        """Change an entry's ``used`` tick, ``energy_cut`` (cm^-1) or ``field_cut`` (T)."""
+        """Change an entry's ``used`` tick, ``energy_cut`` (cm^-1) or ``field_cut`` (T).
+
+        Ticking shows the map on top of the ticked ones, unticking takes it off the plot; a
+        map that cannot be shown or left (e.g. the baseline region misses the next one) keeps
+        its tick and the error is raised. Limits are kept as given: maps plotted cut to their
+        limits are drawn with new ones by :meth:`redraw_ticked` (the panel calls it once typing
+        pauses), so a limit typed half-way never fails.
+        """
         unknown = set(changes) - {"used", "energy_cut", "field_cut"}
         if unknown:
             raise TypeError(f"cannot change {sorted(unknown)} of a library entry")
-        changed = False
+        old_used, before = entry.used, list(self._plotted)
+        changed = set()
         for name, value in changes.items():
             if name != "used":
                 value = tuple(None if v is None else float(v) for v in value)
+            else:
+                value = bool(value)
             if getattr(entry, name) != value:
                 setattr(entry, name, value)
-                changed = True
-        if changed:
-            self.entryChanged.emit(entry.key)
+                changed.add(name)
+        if not changed:
+            return
+        if "used" in changed:
+            if entry.key in self._plotted:
+                self._plotted.remove(entry.key)
+            if entry.used:
+                self._plotted.append(entry.key)
+        self.entryChanged.emit(entry.key)
+        if "used" in changed:
+            try:
+                self._show_ticked()
+            except Exception:
+                entry.used, self._plotted = old_used, before  # the limits stay
+                self.entryChanged.emit(entry.key)
+                raise
+
+    def redraw_ticked(self) -> None:
+        """Draw the ticked maps on the plot again with their limits, when they are plotted
+        cut to them (after limits changed)."""
+        if self._showing_maps() and not self._full_range:
+            self._show_ticked()
 
     def ticked(self) -> list[LibraryEntry]:
         return [entry for entry in self.library if entry.used]
 
-    def _energy_cut(self, entry: LibraryEntry) -> FieldMap:
-        rng = entry.energy_cut
-        if rng == (None, None):
-            return entry.fmap
-        self.check_energy_range(f"{entry.name}: E range", rng, entry.fmap.energy, "library")
-        return crop_energy(entry.fmap, *rng)
+    def plotted_entries(self) -> list[LibraryEntry]:
+        """The ticked maps in the order they are drawn: bottom first, the top one last."""
+        by_key = {entry.key: entry for entry in self.library}
+        return [by_key[key] for key in self._plotted if key in by_key]
 
-    def _field_cut(self, entry: LibraryEntry) -> Range:
+    def showing(self) -> str:
+        """What the plot shows: the processed sweep (:data:`SHOWS_PROCESS`), the ticked library
+        maps (:data:`SHOWS_MAPS`), the product (:data:`SHOWS_PRODUCT`), or nothing ("")."""
+        if self.result is None:
+            return ""
+        if self.result_source != "library":
+            return SHOWS_PROCESS
+        return self._library_shows
+
+    def _showing_maps(self) -> bool:
+        return self.showing() == SHOWS_MAPS
+
+    def plot_title(self, overlays: bool = True) -> str:
+        """The name of the map shown; with *overlays*, also the maps drawn below it."""
+        shows = self.showing()
+        if shows != SHOWS_MAPS:
+            return self.result_name() if shows else ""
+        entries = self.plotted_entries()
+        title = self.result_name()
+        if overlays and len(entries) == 2:
+            title += f" over {entries[0].name}"
+        elif overlays and len(entries) > 2:
+            title += f" over {len(entries) - 1} maps"
+        return title
+
+    def plot_entry(self, entry: LibraryEntry) -> ProcessResult:
+        """Show *entry* on top of the ticked maps (ticking it); the map on top is plotted
+        again (with the baseline region of the processing options)."""
+        if entry.used and self._plotted and self._plotted[-1] == entry.key:
+            self._shown_top = None
+            self._show_ticked()
+            return self.result
+        logger.info("-" * 40)
+        logger.info("Plotting library map %r", entry.name)
+        before = list(self._plotted)
+        if entry.used:
+            self._plotted.remove(entry.key)
+            self._plotted.append(entry.key)
+            try:
+                self._show_ticked()
+            except Exception:
+                self._plotted = before
+                raise
+        else:
+            self.update_entry(entry, used=True)
+        return self.result
+
+    def show_ticked(self) -> None:
+        """Show the ticked maps again (after Process or a product hid them)."""
+        if not self._plotted:
+            raise panel_error("tick the maps to show first", "library")
+        self._show_ticked()
+
+    def _show_ticked(self) -> None:
+        """Show the ticked maps; without any, the processed sweep (or nothing)."""
+        entries = self.plotted_entries()
+        if not entries:
+            if self._showing_maps():
+                self._shown_top = None
+                if self._kept_result is not None:
+                    self.show_processed()
+                else:
+                    self._clear_result()
+            self.plottedChanged.emit()
+            return
+        top = entries[-1]
+        shown = (top.key, None if self._full_range else (top.energy_cut, top.field_cut))
+        if self._showing_maps() and shown == self._shown_top:
+            self.overlayMapsChanged.emit()
+        else:
+            self._show_library(self.entry_map(top), top.name, SHOWS_MAPS)
+            self._shown_top = shown
+        self.plottedChanged.emit()
+
+    def _show_next(self) -> None:
+        """Show the ticked maps after the top one left; when the next one cannot be shown, the
+        processed sweep (or nothing) instead, and raise why."""
+        try:
+            self._show_ticked()
+        except Exception:
+            self._leave_library()
+            raise
+
+    def _leave_library(self) -> None:
+        """Show the processed sweep, or nothing, instead of library maps (the ticks stay)."""
+        self._library_shows, self._shown_top = SHOWS_MAPS, None
+        if self._kept_result is not None:
+            self.show_processed()
+        else:
+            self._clear_result()
+        self.plottedChanged.emit()
+
+    def show_processed(self) -> None:
+        """Show the processed sweep a library map hid (Process is not run again)."""
+        result = self._kept_result
+        if self.result_source == "process":
+            return
+        if result is None:
+            raise panel_error("process a sweep first: there is no processed map", "library")
+        self._kept_result = None
+        self._library_name = ""
+        self.result, self.result_source = result, "process"
+        self._init_points_if_requested(result.ratio.field)
+        self.resultChanged.emit()
+        self._update_changed()
+        self.settle_baseline()  # a live region changed while the sweep was hidden
+        self.plottedChanged.emit()
+
+    def _clear_result(self) -> None:
+        """Show nothing (no map ticked and no processed sweep to go back to)."""
+        self.result, self.result_source, self._library_name = None, "", ""
+        self._shown_top = None
+        self.resultChanged.emit()
+        self._update_changed()
+
+    @property
+    def full_range(self) -> bool:
+        """Library maps are plotted whole (else cut to their E and B limits)."""
+        return self._full_range
+
+    def set_full_range(self, full: bool) -> None:
+        if bool(full) != self._full_range:
+            self._full_range = bool(full)
+            if self._showing_maps():
+                self._show_ticked()
+
+    @property
+    def overlay_opacity(self) -> float:
+        """Opacity of the ticked maps drawn above the bottom one (0 - 1)."""
+        return self._opacity
+
+    def set_overlay_opacity(self, opacity: float) -> None:
+        opacity = min(max(float(opacity), 0.0), 1.0)
+        if opacity != self._opacity:
+            self._opacity = opacity
+            self.opacityChanged.emit(opacity)
+
+    def entry_map(self, entry: LibraryEntry) -> FieldMap:
+        """*entry*'s map as plotted (cm^-1): whole, or cut to its limits."""
+        return entry.fmap if self._full_range else self.cut_map(entry)
+
+    def cut_map(self, entry: LibraryEntry) -> FieldMap:
+        """*entry*'s map cut to its E and B limits (errors name it, in the display unit)."""
+        fmap = entry.fmap
+        if entry.energy_cut != (None, None):
+            rng = entry.energy_cut
+            self.check_energy_range(f"{entry.name}: E range", rng, fmap.energy, "library")
+            fmap = crop_energy(fmap, *rng)
         lo, hi = entry.field_cut
+        if (lo, hi) == (None, None):
+            return fmap
         if lo is not None and hi is not None and lo >= hi:
             raise panel_error(
                 f"{entry.name}: B range: the first value must be below the second; it is "
                 f"{fmt(lo)} – {fmt(hi)} T",
                 "library",
             )
-        return lo, hi
+        b = fmap.field
+        if not ((lo is None or b >= lo - FIELD_TOL) & (hi is None or b <= hi + FIELD_TOL)).any():
+            raise panel_error(
+                f"{entry.name}: B range {fmt(lo)} – {fmt(hi)} T contains no data "
+                f"(the map spans {b.min():g} – {b.max():g} T)",
+                "library",
+            )
+        with in_panel("library"):
+            return crop_field(fmap, lo, hi)
 
-    def _show_library(self, fmap: FieldMap, name: str) -> ProcessResult:
-        old, self._library_name = self._library_name, name  # read when the result is shown
+    def overlay_layers(self) -> list[OverlayLayer]:
+        """The ticked maps below the top one, bottom first, each as drawn (as the top one is
+        shown: plot kind, derivative, baseline region, display unit) or why it is not: a map
+        of another kind than the top one, or one that cannot be shown so (e.g. its limits or
+        the baseline region hold no data)."""
+        entries = self.plotted_entries()
+        if not (self._showing_maps() and entries):  # (none while the top one is replaced)
+            return []
+        s = self._selection
+        parts = tuple((e.key, e.kind, e.energy_cut, e.field_cut, e.fmap) for e in entries)
+        key = (self.result, s, self._unit, self._full_range, parts)
+        if self._layers is not None and self._layers[0] == key:
+            return self._layers[1]
+        top = entries[-1]
+        region = self.result.baseline_region  # the top map's: library maps keep theirs
+        layers = []
+        for entry in entries[:-1]:
+            if entry.kind != top.kind:
+                problem = f"it is {entry.kind} and the top map {top.kind}"
+                layers.append(OverlayLayer(entry, None, problem))
+                continue
+            try:
+                fmap = self.entry_map(entry)
+                if region is not None and not _has_values(fmap, region):
+                    raise ValueError("the baseline region holds none of its data")
+                result = ProcessResult.from_map(fmap, region)
+                shown = result.get(s.kind, s.order, s.axis, s.physical, self._unit)
+                layers.append(OverlayLayer(entry, shown))
+            except ValueError as exc:
+                problem = str(exc).removeprefix(f"{entry.name}: ")
+                layers.append(OverlayLayer(entry, None, problem))
+                logger.debug("Library: %s is not drawn: %s", entry.name, problem)
+        self._layers = (key, layers)
+        return layers
+
+    def overlay_maps(self) -> list[FieldMap]:
+        """The ticked maps drawn below the top one, bottom first (see :meth:`overlay_layers`)."""
+        return [layer.fmap for layer in self.overlay_layers() if layer.fmap is not None]
+
+    def _show_library(self, fmap: FieldMap, name: str, shows: str) -> ProcessResult:
+        """Show a library map or the product (*shows*), keeping the processed sweep."""
+        if self.result_source == "process":
+            self.settle_baseline()  # the processed map leaves with the region it counts as having
+        kept = self.result if self.result_source == "process" else self._kept_result
+        old = self._library_name, self._library_shows, self._kept_result
+        self._library_name, self._library_shows = name, shows  # read when the result is shown
+        self._kept_result = kept
         try:
             return self.from_map(fmap)
         except Exception:
-            self._library_name = old  # the map shown keeps its name
+            self._library_name, self._library_shows, self._kept_result = old  # nothing changed
             raise
 
-    def plot_entry(self, entry: LibraryEntry, cut_energy: bool = False) -> ProcessResult:
-        """Show *entry*, cut to its E limits if *cut_energy*."""
-        fmap = self._energy_cut(entry) if cut_energy else entry.fmap
-        logger.info("-" * 40)
-        logger.info("Plotting library map %r", entry.name)
-        return self._show_library(fmap, entry.name)
+    # --- combining ticked maps (the product) --------------------------------------------
+    def combine_preview(self, method: str, entries: list[LibraryEntry] | None = None):
+        """What :meth:`make_product` would give for *entries* (default: the ticked maps)."""
+        parts = tuple(self.ticked() if entries is None else entries)
+        try:
+            fmap, facts = self._combine(method, parts)
+        except EXPECTED_ERRORS as exc:
+            return CombinePreview(method, parts, problem=str(exc))
+        return CombinePreview(method, parts, fmap, facts)
 
-    def _parts(self, entries: list[LibraryEntry] | None) -> list[LibraryEntry]:
-        parts = self.ticked() if entries is None else list(entries)
+    def _combine(
+        self, method: str, parts: tuple[LibraryEntry, ...]
+    ) -> tuple[FieldMap, tuple[tuple[str, float, float], ...]]:
+        """Combine *parts*, each cut to its limits; errors say why not, naming the maps."""
+        if method not in COMBINE_METHODS:
+            raise ValueError(f"unknown way to combine maps: {method!r}")
         if len(parts) < 2:
             raise panel_error("tick at least two maps to merge or average them", "library")
-        return parts
+        kinds = list(dict.fromkeys(p.kind for p in parts))
+        if len(kinds) > 1:
+            what = ", ".join(f"{p.name} is {p.kind}" for p in parts)
+            raise panel_error(f"combine maps of one kind: {what}", "library")
+        maps = [self.cut_map(p) for p in parts]
+        if method in ("energy", "average"):
+            first = maps[0].field
+            if any(m.field.shape != first.shape or not np.allclose(m.field, first) for m in maps):
+                fields = "; ".join(
+                    _fields_text(p.name, m) for p, m in zip(parts, maps, strict=True)
+                )
+                how = "merging by energy" if method == "energy" else "averaging"
+                raise panel_error(
+                    f"{how} needs the same fields in every map ({fields}): cut them to the "
+                    "same fields with B limits, or merge by field",
+                    "library",
+                )
+        if method == "energy":
+            return self._merge_energy(parts, maps)
+        lo = max(m.energy.min() for m in maps)
+        hi = min(m.energy.max() for m in maps)
+        common = energy_mask(maps[0].energy, lo, hi).sum() >= 2
+        if not common:
+            spans = "; ".join(
+                f"{p.name} {energy_range_text((m.energy.min(), m.energy.max()), self._unit)}"
+                for p, m in zip(parts, maps, strict=True)
+            )
+            raise panel_error(f"the maps share no energy range ({spans})", "library")
+        facts: list[tuple[str, float, float]] = []
+        if any(m.energy.min() < lo or m.energy.max() > hi for m in maps):
+            facts.append(("common", float(lo), float(hi)))
+        with in_panel("library"):
+            if method == "field":
+                fmap = merge_field([(m, None, None) for m in maps])
+                facts += _field_facts(maps)
+            else:
+                fmap = average_maps(maps)
+        return fmap, tuple(facts)
 
-    def merge_by_energy(self, entries: list[LibraryEntry] | None = None) -> ProcessResult:
-        """Join maps measured in different spectral ranges, each cut to its E limits.
-
-        *entries* default to the ticked ones.
-        """
-        parts = self._parts(entries)
-        for entry in parts:
-            if entry.energy_cut != (None, None):
-                self.check_energy_range(
-                    f"{entry.name}: E range", entry.energy_cut, entry.fmap.energy, "library"
+    def _merge_energy(self, parts, maps):
+        seams = energy_seams([(m, None, None) for m in maps])
+        for seam in seams:
+            if seam.kind == "inside":
+                inner, outer = parts[seam.upper], parts[seam.lower]
+                span = energy_range_text((seam.lo, seam.hi), self._unit)
+                raise panel_error(
+                    f"{inner.name} ({span}) lies inside the energy range of {outer.name}: "
+                    "give them E limits that meet, or average repeated measurements",
+                    "library",
                 )
         with in_panel("library"):
-            merged = merge_energy([(e.fmap, *e.energy_cut) for e in parts])
-        names = [e.name for e in parts]
-        logger.info("-" * 40)
-        logger.info("Merged %s by energy; energy re-gridded to a uniform step.", names)
-        return self._show_library(merged, "Merged by energy: " + " + ".join(names))
+            fmap = merge_energy([(m, None, None) for m in maps])
+        facts = tuple((s.kind, s.lo, s.hi) for s in seams if s.kind in ("overlap", "gap"))
+        return fmap, facts
 
-    def merge_by_field(self, entries: list[LibraryEntry] | None = None) -> ProcessResult:
-        """Join maps measured over different field ranges, each cut to its B limits (T)."""
-        parts = self._parts(entries)
-        with in_panel("library"):
-            merged = merge_field([(e.fmap, *self._field_cut(e)) for e in parts])
-        names = [e.name for e in parts]
-        logger.info("-" * 40)
-        logger.info(
-            "Merged %s by field: %d fields, B = %g … %g T.",
-            names,
-            merged.field.size,
-            merged.field[0],
-            merged.field[-1],
+    def make_product(self, method: str, entries: list[LibraryEntry] | None = None) -> Product:
+        """Combine *entries* (default: the ticked maps) by *method* (:data:`COMBINE_METHODS`)
+        into the product, which replaces the one before and is shown."""
+        parts = tuple(self.ticked() if entries is None else entries)
+        fmap, facts = self._combine(method, parts)
+        records = tuple(
+            PartRecord(p.name, p.kind, p.energy_cut, p.field_cut, p.provenance) for p in parts
         )
-        return self._show_library(merged, "Merged by field: " + " + ".join(names))
-
-    def average(self, entries: list[LibraryEntry] | None = None) -> ProcessResult:
-        """Average maps, each cut to its E limits (cm^-1) and B limits (T)."""
-        parts = self._parts(entries)
-        maps = []
-        for entry in parts:
-            fmap = self._energy_cut(entry)
-            with in_panel("library"):
-                maps.append(crop_field(fmap, *self._field_cut(entry)))
-        with in_panel("library"):
-            averaged = average_maps(maps)
-        names = [e.name for e in parts]
+        provenance = Provenance(method, datetime.now(), parts=records, facts=facts)
+        name = f"{PRODUCT_PREFIX[method]}: " + " + ".join(p.name for p in parts)
+        product = Product(name, fmap, parts[0].kind, provenance)
+        old, self.product = self.product, product
+        try:
+            self._show_library(fmap, name, SHOWS_PRODUCT)
+        except Exception:
+            self.product = old
+            raise
         logger.info("-" * 40)
-        logger.info("Averaged %s (%d datasets).", names, len(parts))
-        return self._show_library(averaged, "Average: " + " + ".join(names))
+        names = [p.name for p in parts]
+        b, e = fmap.field, from_cm1(fmap.energy[[0, -1]], self._unit)
+        logger.info(
+            "%s %s: %d fields, B = %g … %g T, E = %.6g … %.6g %s, %d energies.",
+            PRODUCT_PREFIX[method],
+            names,
+            b.size,
+            b.min(),
+            b.max(),
+            e[0],
+            e[1],
+            self._unit,
+            fmap.energy.size,
+        )
+        self.productChanged.emit()
+        self.plottedChanged.emit()
+        return product
+
+    def _product(self) -> Product:
+        if self.product is None:
+            raise panel_error("there is no product: combine ticked maps first", "library")
+        return self.product
+
+    def rename_product(self, name: str) -> None:
+        product = self._product()
+        name = name.strip()
+        if name and name != product.name:
+            product.name = name
+            if self.showing() == SHOWS_PRODUCT:
+                self._library_name = name
+            self.productChanged.emit()
+
+    def plot_product(self) -> ProcessResult:
+        """Show the product (in place of the ticked maps)."""
+        product = self._product()
+        if self.showing() != SHOWS_PRODUCT:
+            self._show_library(product.fmap, product.name, SHOWS_PRODUCT)
+            self.plottedChanged.emit()
+        return self.result
+
+    def save_product(self) -> LibraryEntry:
+        """Add the product to the library, with how it was made (once)."""
+        product = self._product()
+        if product.saved is not None:
+            with contextlib.suppress(ValueError):
+                return self.entry(product.saved)
+        entry = self.add_map(
+            product.fmap, product.name, kind=product.kind, provenance=product.provenance
+        )
+        product.saved = entry.key
+        logger.info("Library: saved the product as %r", entry.name)
+        self.productChanged.emit()
+        return entry
+
+    def product_table(self) -> tuple[FieldMap, Range | None]:
+        """The product as its table is exported: as plotted, with the baseline region of the
+        processing options (the one it is shown with), in the display unit; and that region
+        (cm^-1, None without one)."""
+        product = self._product()
+        if self.showing() == SHOWS_PRODUCT:
+            result = self.result
+        else:
+            region = self._baseline()
+            if region is not None:
+                self.check_energy_range(
+                    "baseline region", region, product.fmap.energy, "processing"
+                )
+            with in_panel("processing"):
+                result = ProcessResult.from_map(product.fmap, region)
+        return result.ratio.to_unit(self._unit), result.baseline_region
+
+    def discard_product(self) -> None:
+        """Drop the product; the ticked maps (or the processed sweep) come back on the plot.
+        When the ticked maps cannot be shown, the processed sweep (or nothing) comes instead
+        and the error is raised."""
+        if self.product is None:
+            return
+        shown = self.showing() == SHOWS_PRODUCT
+        self.product = None
+        self.productChanged.emit()
+        if not shown:
+            return
+        self._library_shows, self._shown_top = SHOWS_MAPS, None
+        if self._plotted:
+            self._show_next()
+        else:
+            self._leave_library()
+
+
+def _has_values(fmap: FieldMap, region: Range) -> bool:
+    """*fmap* (cm^-1) has a value (not NaN) in the energy *region* (cm^-1)."""
+    return bool(np.isfinite(fmap.values[energy_mask(fmap.energy, *region)]).any())
 
 
 def _curve_name_rule(name: str) -> str | None:
@@ -1595,3 +2118,90 @@ def common_prefix(names: list[str]) -> str:
 
 def _sorted_files(files: SweepFiles) -> SweepFiles:
     return SweepFiles(zero=tuple(sort_paths(files.zero)), field=tuple(sort_paths(files.field)))
+
+
+# ---------------------------------------------------------------------- library text
+_EXPORT_KIND = re.compile(
+    r"_(?P<kind>Ratio_AVR|Ratio_Step|Ratio|Data)(?P<order>_1stDer|_2ndDer)?(?:_perUnit)?$"
+)
+
+
+def kind_from_name(name: str) -> str:
+    """The kind of a map from the name an export gives it (``S1_Data.csv`` -> ``"Data"``,
+    ``S1_Ratio_1stDer.csv`` -> ``"R(B)/R(0) · 1st derivative"``); R(B)/R(0) for other names."""
+    match = _EXPORT_KIND.search(Path(name).stem)
+    if match is None:
+        return KIND_LABELS[PlotKind.RATIO]
+    kind = next(k for k, export in EXPORT_NAMES.items() if export == match["kind"])
+    order = {"_1stDer": 1, "_2ndDer": 2}.get(match["order"] or "", 0)
+    return KIND_LABELS[kind] + (f" · {ORDINALS[order]} derivative" if order else "")
+
+
+def energy_range_text(rng: Range, unit: Unit) -> str:
+    """An energy range (cm^-1) in *unit*, e.g. ``350 – 3200 cm⁻¹``."""
+    lo, hi = convert_range(rng, Unit.CM1, unit)
+    return format_range(lo, hi, unit_text(unit))
+
+
+def cut_text(energy_cut: Range, field_cut: Range, unit: Unit) -> str:
+    """Cut limits in words (``E ≤ 450 cm⁻¹, B 0 – 8 T``); "" without any."""
+    parts = []
+    for name, (lo, hi), shown, u in (
+        ("E", energy_cut, convert_range(energy_cut, Unit.CM1, unit), unit_text(unit)),
+        ("B", field_cut, field_cut, "T"),
+    ):
+        if lo is not None and hi is not None:
+            parts.append(f"{name} {format_range(shown[0], shown[1], u)}")
+        elif lo is not None:
+            parts.append(f"{name} ≥ {format_number(shown[0])} {u}")
+        elif hi is not None:
+            parts.append(f"{name} ≤ {format_number(shown[1])} {u}")
+    return ", ".join(parts)
+
+
+def fact_text(fact: tuple[str, float, float], unit: Unit) -> tuple[str, str]:
+    """(text, level) of something combining did (see :meth:`AppController.combine_preview`);
+    the level is ``"info"``, or ``"warn"`` for what may need other limits."""
+    what, lo, hi = fact
+    if what == "overlap":
+        middle = f"{format_number(float(from_cm1((lo + hi) / 2, unit)))} {unit_text(unit)}"
+        if hi - lo <= 1e-9 * max(abs(hi), 1.0):  # the limits meet in one sample
+            return f"Joined at {middle}", "info"
+        return f"Overlap {energy_range_text((lo, hi), unit)} joined at {middle}", "info"
+    if what == "gap":
+        return f"No data in {energy_range_text((lo, hi), unit)}: left empty", "warn"
+    if what == "common":
+        return f"Cut to the energies all maps share, {energy_range_text((lo, hi), unit)}", "info"
+    if what == "averaged":
+        n = int(lo)
+        return f"{n} field{'s' if n != 1 else ''} in more than one map averaged", "info"
+    if what == "interleaved":
+        span = format_range(lo, hi, "T")
+        return f"Fields of two maps alternate in {span}: set B limits to join them", "warn"
+    raise ValueError(f"unknown fact {what!r}")
+
+
+def _fields_text(name: str, fmap: FieldMap) -> str:
+    b = fmap.field
+    fields = f"{b.size} field{'s' if b.size != 1 else ''}"
+    return f"{name} {fields}, {format_range(b.min(), b.max(), 'T')}"
+
+
+def _field_facts(maps: list[FieldMap]) -> list[tuple[str, float, float]]:
+    """What merging *maps* by field does: fields measured more than once are averaged, and
+    the fields of overlapping maps may alternate."""
+    facts: list[tuple[str, float, float]] = []
+    fields = np.sort(np.concatenate([m.field for m in maps]))
+    repeated = np.diff(fields) <= FIELD_TOL
+    if repeated.any():
+        facts.append(("averaged", float(np.count_nonzero(repeated)), 0.0))
+    ordered = sorted((m.field for m in maps), key=lambda b: (b.min(), b.max()))
+    for a, b in itertools.pairwise(ordered):
+        b_lo, a_hi = float(b.min()), float(a.max())
+        a_in, b_in = a[(a >= b_lo) & (a <= a_hi)], b[(b >= b_lo) & (b <= a_hi)]
+        if a_in.size + b_in.size < 3:
+            continue
+        same = a_in.size == b_in.size and np.allclose(np.sort(a_in), np.sort(b_in), atol=FIELD_TOL)
+        if not same:
+            facts.append(("interleaved", b_lo, a_hi))
+    return facts

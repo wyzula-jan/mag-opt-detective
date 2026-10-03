@@ -18,8 +18,6 @@ from PySide6.QtCore import QEvent, QObject, QPointF, QRect, QRectF, QSize, Qt, S
 from PySide6.QtGui import QKeySequence, QPainter, QShortcut
 from PySide6.QtWidgets import (
     QHBoxLayout,
-    QLabel,
-    QSizePolicy,
     QSplitter,
     QSplitterHandle,
     QStackedWidget,
@@ -45,6 +43,7 @@ from mag_opt_detective.gui.controller import (
 from mag_opt_detective.gui.display import format_number, process_key, unit_text
 from mag_opt_detective.gui.kit import EmptyState, SegmentedControl, SlidePanel
 from mag_opt_detective.gui.kit._common import to_bool
+from mag_opt_detective.gui.panels.common import ElidedLabel
 from mag_opt_detective.gui.plots import ColorMapPlot, PlotColors, StackedPlot, robust_levels
 from mag_opt_detective.gui.settings import PREFIX
 from mag_opt_detective.gui.theme import current_tokens
@@ -384,9 +383,8 @@ class PlotArea(QWidget):
         self.tabs = _Tabs()
         for title in TAB_TITLES:
             self.tabs.addTab(title)
-        self.description = QLabel()
+        self.description = ElidedLabel()  # the kind of map and its name
         self.description.setProperty("kit", "muted")
-        self.description.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         self.tool_bar = QHBoxLayout()
         self.tool_bar.setSpacing(2)
         self.tools_row = QHBoxLayout()
@@ -529,10 +527,23 @@ def render(window) -> None:
         x_range=view.field_range,
         y_range=view.energy_range,
     )
+    plots.map.set_overlays(c.overlay_maps(), c.overlay_opacity)  # ticked library maps below
     plots.stacked.set_map(
         fmap, view.stacked_offset, y_range=view.stacked_range, x_range=view.energy_range
     )
     plots.stacked.plot.setLabel("left", f"{kind_label(c.selection)} + offset")
+
+
+@user_action("Plot")
+def render_overlays(window) -> None:
+    """Draw the ticked library maps below the top one again (the top one is unchanged)."""
+    c = window.controller
+    if c.result is not None:
+        window.plots.map.set_overlays(c.overlay_maps(), c.overlay_opacity)
+    ranges = getattr(window, "view_ranges", None)  # the View section fits the maps below too
+    if ranges is not None:
+        ranges.refresh()
+    update_description(window)
 
 
 def render_reference(window) -> None:
@@ -562,10 +573,13 @@ def redraw(window) -> None:
 def update_description(window) -> None:
     area: PlotArea = window.plot_area
     c = window.controller
-    if area.current_view() == "reference":
+    view = area.current_view()
+    if view == "reference" or c.result is None:
         area.description.setText("")
+    elif c.result_source == "library":  # which library map, and on the map those below it
+        area.description.setText(f"{c.description()} · {c.plot_title(overlays=view == 'map')}")
     else:
-        area.description.setText(c.description() if c.result is not None else "")
+        area.description.setText(c.description())
     area.description.setToolTip(area.description.text())
     update_empty_state(window)
 
@@ -593,6 +607,18 @@ def empty_message(window, view: str) -> tuple[str, str, str, str | None, Callabl
     if view == "reference":
         if c.reference_map() is not None:
             return None
+        if c.result_source == "library":  # a library map keeps no reference
+            text = (
+                "A library map keeps only its processed map. Show the processed sweep in the "
+                "Library panel to compare its reference."
+            )
+            return (
+                "layers",
+                "No reference for library maps",
+                text,
+                "Open Library",
+                lambda: window.show_panel("library"),
+            )
         mode = c.processing.reference_mode
         open_reference = ("Open Reference", lambda: window.show_panel("reference"))
         files = c.processing.reference_files.field
@@ -892,6 +918,10 @@ def install(window) -> None:
     c.selectionChanged.connect(lambda: redraw(window))
     c.viewChanged.connect(lambda: redraw(window))
     c.unitChanged.connect(lambda _old, _new: redraw(window))
+    c.overlayMapsChanged.connect(lambda: render_overlays(window))
+    c.opacityChanged.connect(window.plots.map.set_overlay_opacity)
+    c.plottedChanged.connect(lambda: update_description(window))
+    c.productChanged.connect(lambda: update_description(window))
     window.plots.map.levelsEdited.connect(
         lambda lo, hi: _store_levels(window, "map", c.selection.level_key, lo, hi)
     )

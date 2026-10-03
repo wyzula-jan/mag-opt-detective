@@ -369,7 +369,7 @@ def test_library_maps_leave_the_process_state(window, sweep, errors):
     load_sweep(window, sweep)
     process(window)
     c, tb = window.controller, window.toolbar
-    library.save_current(window)
+    library.add_processed(window)
     key = c.library[0].key
     library.plot_entry(window, key)
     assert "Showing a library map" in window.state_text() and not tb.process_button.dot
