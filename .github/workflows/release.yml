@@ -1,0 +1,108 @@
+name: Release
+
+# Publishes the version in pyproject.toml as a GitHub release, once. tools/release.py makes the
+# release commit "chore(release): vX.Y.Z" and the annotated tag locally; this workflow runs on
+# every push to main (pushed tags start nothing) and publishes when that version has a section
+# in CHANGELOG.md and no GitHub release yet. It builds the app bundles with the App bundles
+# workflow, then creates the release on the release commit, from the pushed tag or with a new
+# tag when the tag was not pushed, with the CHANGELOG.md section as its notes and the bundles
+# attached. Versions before 1.0.0 are marked as pre-releases. Any other push publishes nothing.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# one run at a time, never cancelled: a waiting run sees the release the one before created
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Check version
+    runs-on: ubuntu-latest
+    outputs:
+      publish: ${{ steps.check.outputs.publish }}
+      version: ${{ steps.check.outputs.version }}
+      sha: ${{ steps.check.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # the history and the tags: find the release commit
+      - id: check
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        # tools/release.py needs the standard library only: the runner's Python is enough
+        run: |
+          version=$(python3 tools/release.py --print-version)
+          tag="v$version"
+          publish=true
+          if [ "$GITHUB_REF" != refs/heads/main ]; then
+            echo "Releases are published from main only."
+            publish=false
+          elif ! python3 tools/release.py --print-notes "$version" > /dev/null; then
+            echo "$version has no section in CHANGELOG.md: nothing to publish."
+            publish=false
+          elif gh release view "$tag" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            echo "The release $tag exists already."
+            publish=false
+          fi
+          # the commit to release: the pushed tag's, else the release commit, else the pushed one
+          sha=$(git rev-parse -q --verify "refs/tags/$tag^{commit}" || true)
+          if [ -z "$sha" ]; then
+            sha=$(git log --format='%H%x09%s' HEAD |
+              awk -F '\t' -v s="chore(release): $tag" '$2 == s && !n { print $1; n = 1 }')
+          fi
+          sha=${sha:-$GITHUB_SHA}
+          echo "$tag at $sha, publish: $publish"
+          {
+            echo "publish=$publish"
+            echo "version=$version"
+            echo "sha=$sha"
+          } >> "$GITHUB_OUTPUT"
+
+  bundles:
+    name: Bundles
+    needs: check
+    if: needs.check.outputs.publish == 'true'
+    uses: ./.github/workflows/bundles.yml
+    with:
+      ref: ${{ needs.check.outputs.sha }}
+
+  publish:
+    name: Publish release
+    needs: [check, bundles]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.check.outputs.sha }}
+      - uses: actions/download-artifact@v8
+        with:
+          path: bundles
+          merge-multiple: true
+      - name: Create release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.check.outputs.version }}
+          SHA: ${{ needs.check.outputs.sha }}
+        run: |
+          tag="v$VERSION"
+          python3 tools/release.py --print-notes "$VERSION" > notes.md
+          flags=()
+          case "$VERSION" in 0.*) flags+=(--prerelease) ;; esac
+          if git ls-remote --exit-code --tags origin "refs/tags/$tag" > /dev/null; then
+            flags+=(--verify-tag) # the pushed tag
+          else
+            flags+=(--target "$SHA") # GitHub creates the tag on the release commit
+          fi
+          # GitHub allows one release per tag: a second create fails instead of duplicating
+          gh release create "$tag" bundles/* --repo "$GITHUB_REPOSITORY" \
+            --title "$tag" --notes-file notes.md "${flags[@]}"

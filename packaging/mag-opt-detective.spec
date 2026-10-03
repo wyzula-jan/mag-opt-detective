@@ -17,7 +17,7 @@ sys.path.insert(0, SPECPATH)
 from third_party_notices import write_notices  # noqa: E402
 
 NAME = "mag-opt-detective"
-# macOS wants one to three integers as the version (5.0.0.dev0 -> 5.0.0)
+# macOS wants one to three integers as the version (1.2.0.dev0 -> 1.2.0)
 BUNDLE_VERSION = re.match(r"\d+(\.\d+){0,2}", __version__).group()
 NOTICES = write_notices(Path(workpath) / "THIRD_PARTY_NOTICES.txt")
 LICENSE = Path(SPECPATH).parent / "LICENSE"  # the app's own licence (GNU GPL v3)

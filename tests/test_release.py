@@ -452,3 +452,34 @@ def test_the_repository_version_files_agree():
         release.parse_version(version)
     else:
         assert release.citation_date(ROOT) is None
+
+
+def test_only_the_release_workflow_publishes_releases():
+    yaml = pytest.importorskip("yaml")
+    workflows = ROOT / ".github" / "workflows"
+    publishing = sorted(
+        path.name
+        for path in workflows.glob("*.yml")
+        if "gh release create" in path.read_text(encoding="utf-8")
+    )
+    assert publishing == ["release.yml"]
+
+    def load(name):
+        workflow = yaml.safe_load((workflows / name).read_text(encoding="utf-8"))
+        return workflow, workflow.get("on", workflow.get(True))  # YAML 1.1 reads "on" as True
+
+    workflow, triggers = load("release.yml")
+    assert triggers == {"push": {"branches": ["main"]}, "workflow_dispatch": None}
+    assert workflow["permissions"] == {"contents": "read"}
+    jobs = workflow["jobs"]
+    assert jobs["bundles"]["uses"] == "./.github/workflows/bundles.yml"
+    assert jobs["publish"]["permissions"] == {"contents": "write"}
+    assert set(jobs["publish"]["needs"]) == {"check", "bundles"}
+    steps = "\n".join(step.get("run", "") for step in jobs["check"]["steps"])
+    assert "tools/release.py --print-version" in steps
+    assert "tools/release.py --print-notes" in steps
+
+    bundles, triggers = load("bundles.yml")
+    assert "ref" in triggers["workflow_call"]["inputs"]
+    assert "tags" not in triggers["push"]  # a pushed tag builds nothing on its own
+    assert list(bundles["jobs"]) == ["bundle"]
