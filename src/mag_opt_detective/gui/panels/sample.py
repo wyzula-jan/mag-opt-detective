@@ -143,23 +143,29 @@ class WatchBox(QWidget):
 
 
 class _TokenLabel(QLabel):
-    """A one-line label painted in the theme token *token* (read at paint time)."""
+    """A one-line label painted in the theme token *token* (read at paint time); given less
+    width than its text, it elides it at the right."""
 
     token = "muted"
+
+    def minimumSizeHint(self) -> QSize:
+        return QSize(0, super().minimumSizeHint().height())
 
     def paintEvent(self, event) -> None:
         painter = QPainter(self)
         painter.setPen(current_tokens()[self.token])
         painter.setFont(self.font())
+        rect = self.contentsRect()
+        text = self.fontMetrics().elidedText(self.text(), Qt.TextElideMode.ElideRight, rect.width())
         flags = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
-        painter.drawText(self.contentsRect(), int(flags), self.text())
+        painter.drawText(rect, int(flags), text)
         painter.end()
 
 
 class WatchChip(QWidget):
     """The watching state in the status bar (hidden while not watching), with a button that
     stops it: ``Watching Demo_sweep · 23 files · 12:03:10``; a problem shows in the warning
-    colour."""
+    colour. Its width may be anything down to zero: the text is elided first."""
 
     MAX_NAME = 28  # characters of the folder name shown
 
@@ -180,11 +186,15 @@ class WatchChip(QWidget):
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 6, 0)
         layout.setSpacing(5)
+        layout.setSizeConstraint(QHBoxLayout.SizeConstraint.SetNoConstraint)  # (it shrinks)
         layout.addWidget(self.icon_label)
-        layout.addWidget(self.text_label)
+        layout.addWidget(self.text_label, 1)
         layout.addWidget(self.stop_button)
         self._level = OK
         self.setVisible(False)
+
+    def minimumSizeHint(self) -> QSize:
+        return QSize(0, super().minimumSizeHint().height())
 
     def text(self) -> str:
         return self.text_label.text()
@@ -459,7 +469,7 @@ def install_watch(window, panel: SamplePanel) -> FolderWatcher:
     _StopOnClose(window, watcher)
     box = panel.watch
     chip = WatchChip()
-    window.statusBar().addWidget(chip)  # right of the summary, left of the read-out
+    window.add_status_chip(chip)  # beside the state and the baseline chip
     syncing = False
 
     def show() -> None:

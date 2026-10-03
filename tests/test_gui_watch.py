@@ -9,7 +9,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 from PySide6.QtCore import QSettings
-from PySide6.QtWidgets import QFileDialog
+from PySide6.QtWidgets import QFileDialog, QLabel
 
 import gui_helpers
 from helpers import sweep_name, write_opus, write_text
@@ -723,6 +723,30 @@ def test_the_file_menu_follows_a_failed_start(window, tmp_path, errors):
     assert not window.folder_watch.watching() and errors
     assert not action.isChecked()
     assert not window.panels["sample"].watch.switch.isChecked()
+
+
+def test_the_chip_sits_beside_the_baseline_chip_and_shrinks(window, qtbot, tmp_path):
+    zero(tmp_path, old=True)
+    for b in (0.5, 1.0):
+        spectrum(tmp_path, b, old=True)
+    window.controller.set_processing(baseline=(300.0, 400.0))
+    window.resize(1100, 800)
+    window.show()
+    qtbot.waitExposed(window)
+    narrowest = window.minimumSizeHint().width()
+    window.folder_watch.start(tmp_path)
+    watching, baseline = chip(window), window.baseline_chip
+    qtbot.waitUntil(lambda: watching.width() >= watching.sizeHint().width())  # all fits
+    assert watching.isVisible() and baseline.isVisible()
+    labels = window.statusBar().findChildren(QLabel)
+    state = next(label for label in labels if label.text() == window.state_text())
+    summary = next(label for label in labels if label.text() == window.summary_text())
+    # between the state and the summary, beside the baseline chip
+    assert state.geometry().right() < watching.geometry().left()
+    assert watching.geometry().right() < baseline.geometry().left()
+    assert baseline.geometry().right() < summary.geometry().left()
+    assert watching.minimumSizeHint().width() == 0
+    assert window.minimumSizeHint().width() == narrowest <= 1100  # it adds nothing
 
 
 # ---------------------------------------------------------------------- stopping
