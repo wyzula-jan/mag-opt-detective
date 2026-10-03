@@ -2,15 +2,23 @@
 #   uv sync --group bundle
 #   uv run pyinstaller packaging/mag-opt-detective.spec --noconfirm
 # Result: dist/mag-opt-detective/ (and dist/Magneto-Optical Detective.app on macOS).
+import os
 import sys
+
+from PyInstaller.utils.hooks import collect_data_files
 
 from mag_opt_detective import __version__
 
 NAME = "mag-opt-detective"
+ICONS = os.path.join(SPECPATH, "icons")
+# Windows embeds the .ico in the .exe; macOS needs .icns (Linux has no file icon)
+ICON = os.path.join(ICONS, NAME + (".icns" if sys.platform == "darwin" else ".ico"))
 
 a = Analysis(
     ["launcher.py"],
     hiddenimports=["mag_opt_detective.smoke"],
+    # package data such as the window icon in mag_opt_detective/resources
+    datas=collect_data_files("mag_opt_detective"),
     excludes=[
         "pyqtgraph.opengl",
         "tkinter",
@@ -34,6 +42,7 @@ exe = EXE(
     console=False,
     # macOS: keep argv so "--smoke-test" reaches the app
     argv_emulation=False,
+    icon=ICON,
 )
 coll = COLLECT(exe, a.binaries, a.datas, name=NAME)
 
@@ -41,6 +50,7 @@ if sys.platform == "darwin":
     app = BUNDLE(
         coll,
         name="Magneto-Optical Detective.app",
+        icon=ICON,
         bundle_identifier="io.github.wyzula-jan.mag-opt-detective",
         version=__version__,
         info_plist={"NSHighResolutionCapable": True},
