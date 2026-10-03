@@ -40,6 +40,7 @@ from mag_opt_detective.core.units import CM1_PER_UNIT, Unit, derivative_scale, f
 from mag_opt_detective.gui.controller import PlotSelection
 from mag_opt_detective.gui.display import UNIT_TEXT
 from mag_opt_detective.gui.plot_panel import PlotClick
+from mag_opt_detective.gui.plots.legend import PlotLegend
 from mag_opt_detective.gui.points_view import OUTLINE
 from mag_opt_detective.gui.tools.autopick_bar import DETECT, TRACK, AutoPickBar
 from mag_opt_detective.gui.tools.autopick_roi import (
@@ -747,7 +748,8 @@ def _busy(size: int) -> Iterator[None]:
 class RegionDrag(QObject):
     """Left-drags on the map draw the Detect region (instead of panning); a click there chooses
     one of the lines found. Presses on the region (its inside, edges or handles) go to it, to
-    move or reshape it. Other buttons, the wheel and the moves (crosshair) pass through."""
+    move or reshape it, and presses on the legend move the legend. Other buttons, the wheel and
+    the moves (crosshair) pass through."""
 
     def __init__(self, tool: AutoPick):
         super().__init__(tool)
@@ -764,9 +766,9 @@ class RegionDrag(QObject):
         self.points, self.moved = [], False
 
     def on_region(self, event) -> bool:
-        """The press is on the region (which then takes it)."""
+        """The press is on the region (which then takes it) or on the legend (which moves)."""
         items = self.plot.view.items(event.position().toPoint())
-        return any(self.tool.region.owns(item) for item in items)
+        return any(self.tool.region.owns(item) or isinstance(item, PlotLegend) for item in items)
 
     def _point(self, event, inside: bool) -> QPointF | None:
         vb = self.plot.plot.vb

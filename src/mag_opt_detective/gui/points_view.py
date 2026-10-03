@@ -1,9 +1,9 @@
 """Picked points on the plots: the curve colours, the markers and the hint shown while picking.
 
 Curve *i* of ``controller.curve_names()`` gets ``CURVE_COLORS[i % 6]`` everywhere: on the map,
-on the stacked plot and in the chips of the Points panel. The current curve is drawn filled
-and the others as open rings; a dark outline keeps every colour readable on all colour maps
-and on the light and dark plot backgrounds.
+on the stacked plot, in the chips of the Points panel and in the plot legend. The current curve
+is drawn filled and the others as open rings; a dark outline keeps every colour readable on all
+colour maps and on the light and dark plot backgrounds.
 """
 
 from __future__ import annotations
@@ -18,6 +18,7 @@ from PySide6.QtWidgets import QWidget
 
 from mag_opt_detective.core.units import from_cm1
 from mag_opt_detective.gui.plots import OverlayLayer, StackedPlot
+from mag_opt_detective.gui.plots.legend import LegendEntry
 from mag_opt_detective.gui.theme import current_tokens
 
 CURVE_COLORS = ("#ffffff", "#5ad1ff", "#a6e35f", "#ffd166", "#ff86d9", "#ff9b6b")
@@ -38,29 +39,30 @@ def curve_color(index: int) -> QColor:
 
 @dataclass(frozen=True, eq=False)
 class MarkerSet:
-    """Markers of one curve in plot coordinates."""
+    """Markers of curve *name* in plot coordinates."""
 
     x: np.ndarray
     y: np.ndarray
     color: QColor
     current: bool
+    name: str = ""
 
 
 def shown_curves(controller, mode: str) -> list[tuple[str, QColor, bool]]:
-    """``(name, colour, current)`` of the curves with points that *mode* shows, current last."""
-    table = controller.points
-    if mode == SHOW_NONE or table is None:
+    """``(name, colour, current)`` of the curves with points that *mode* shows, in table order."""
+    if mode == SHOW_NONE or controller.points is None:
         return []
-    shown = [
+    picked = controller.picked_curves()
+    return [
         (name, curve_color(i), name == controller.curve)
         for i, name in enumerate(controller.curve_names())
-        if name in table.names and (mode == SHOW_ALL or name == controller.curve)
+        if name in picked and (mode == SHOW_ALL or name == controller.curve)
     ]
-    return sorted(shown, key=lambda item: item[2])
 
 
 def draw_markers(layer: OverlayLayer, sets: list[MarkerSet], size: float) -> None:
-    """Open rings for the other curves, then the current curve filled (the last group).
+    """Open rings for the other curves, then the current curve filled (the last group); the
+    curves are the layer's legend rows (:func:`legend_entries`).
 
     Each group has one pen: with a pen per marker pyqtgraph renders every marker anew.
     """
@@ -76,6 +78,30 @@ def draw_markers(layer: OverlayLayer, sets: list[MarkerSet], size: float) -> Non
         if s.current:
             pen = pg.mkPen(OUTLINE, width=1.5)
             layer.add_points(s.x, s.y, size=size + 1, pen=pen, brush=pg.mkBrush(s.color))
+    layer.set_legend(legend_entries(sets, size))
+
+
+def legend_entries(sets: list[MarkerSet], size: float = MAP_SIZE) -> list[LegendEntry]:
+    """Legend rows of the curves of *sets*, with their markers as drawn: the current curve
+    filled and in bold, the others as open rings."""
+    entries = []
+    for s in sets:
+        if s.current:
+            pens, brush = (pg.mkPen(OUTLINE, width=1.5),), pg.mkBrush(s.color)
+        else:
+            pens, brush = (pg.mkPen(OUTLINE, width=4), pg.mkPen(s.color, width=2)), None
+        entries.append(
+            LegendEntry(
+                s.name,
+                pens,
+                brush,
+                marker=True,
+                size=size + 1 if s.current else size,
+                emphasis=s.current,
+                group="points",
+            )
+        )
+    return entries
 
 
 def map_markers(controller, mode: str) -> list[MarkerSet]:
@@ -83,7 +109,7 @@ def map_markers(controller, mode: str) -> list[MarkerSet]:
     sets = []
     for name, color, current in shown_curves(controller, mode):
         b, e = controller.points.points(name)
-        sets.append(MarkerSet(b, from_cm1(e, controller.unit), color, current))
+        sets.append(MarkerSet(b, from_cm1(e, controller.unit), color, current, name))
     return sets
 
 
@@ -174,7 +200,7 @@ def stacked_markers(
     if positions is None:
         positions = StackedPositions()
     sets = [
-        MarkerSet(*positions.get(controller, stacked, field, name), color, current)
+        MarkerSet(*positions.get(controller, stacked, field, name), color, current, name)
         for name, color, current in shown_curves(controller, mode)
     ]
     positions.forget_others(controller.points.names)

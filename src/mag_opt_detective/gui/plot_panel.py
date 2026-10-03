@@ -33,7 +33,7 @@ from mag_opt_detective.core.pipeline import PlotKind, ReferenceMode
 from mag_opt_detective.core.processing import Axis
 from mag_opt_detective.core.spectra import save_tsv
 from mag_opt_detective.core.units import Unit
-from mag_opt_detective.gui import icons
+from mag_opt_detective.gui import icons, plot_legend
 from mag_opt_detective.gui.controller import (
     KIND_LABELS,
     ORDINALS,
@@ -813,6 +813,9 @@ def install(window) -> None:
         "eye", "Show or hide all colour scales", checkable=True
     )
     area.scales_button.setChecked(True)
+    area.legend_button = area.add_tool_button(
+        "chart-scatter", "Show or hide the legend of the plot", checkable=True
+    )
     area.inspector_button = area.add_tool_button(
         "panel-right", "Show or hide the inspector", checkable=True
     )
@@ -897,3 +900,4 @@ def install(window) -> None:
         p.bind("export/type_suffix", CheckableSetting(window.commands["export_suffix"]))
     window.add_splitter("map_scale", area.map_splitter)
     window.add_splitter("reference_scale", area.reference_splitter)
+    plot_legend.install(window)
