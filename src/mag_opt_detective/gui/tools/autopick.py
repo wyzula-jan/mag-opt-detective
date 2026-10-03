@@ -125,7 +125,7 @@ def search(fmap: FieldMap, target: Target, options: Options) -> tuple[list[Track
         e = float(from_cm1(e_cm1, unit))
         prominence = options.prominence
         if prominence is None:
-            prominence = picking.auto_prominence(fmap, feature)
+            prominence = picking.auto_prominence(fmap, feature, smooth=smooth)
         seed = (_clip(b, fmap.field), _clip(e, fmap.energy))  # a click on an edge pixel
         found = picking.track(
             fmap,
@@ -143,7 +143,9 @@ def search(fmap: FieldMap, target: Target, options: Options) -> tuple[list[Track
     e_range = tuple(float(v) for v in from_cm1(np.array(target.box[1]), unit))
     prominence = options.prominence
     if prominence is None:
-        prominence = picking.auto_prominence(fmap, feature, b_range=b_range, e_range=e_range)
+        prominence = picking.auto_prominence(
+            fmap, feature, smooth=smooth, b_range=b_range, e_range=e_range
+        )
     found = picking.detect(
         fmap,
         feature=feature,

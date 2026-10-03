@@ -187,6 +187,18 @@ def test_track_says_why_a_click_finds_nothing(picked):
     assert len(preview(w)) == 2  # the click stays marked
 
 
+def test_track_rising_inflections_of_smoothed_spectra(picked):
+    w, tool, bar = picked, picked.autopick, picked.autopick.bar
+    bar.feature.set_value("rising")
+    bar.smooth.set_value("9")
+    flank = 9.0 / np.sqrt(2)  # the rising inflection of a dip exp(-(x/9)^2), above its centre
+    click_map(w, 4.0, line1(4.0) + flank)
+    assert len(tool.candidates) == 1
+    np.testing.assert_allclose(tool.candidates[0].field, FIELDS)
+    np.testing.assert_allclose(tool.candidates[0].energy, line1(FIELDS) + flank, atol=STEP)
+    assert bar.prominence_field.unit_label.text() == "/cm⁻¹"
+
+
 # ---------------------------------------------------------------------- detect
 def test_detect_finds_the_lines_in_a_box_and_a_click_chooses_one(picked):
     w, c, tool = picked, picked.controller, picked.autopick
