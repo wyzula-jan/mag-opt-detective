@@ -136,6 +136,33 @@ def test_the_window_notes_a_process_without_reference_files(window, sweep, error
     assert bar.isHidden() and c.reference_map() is not None and not errors
 
 
+def test_the_note_closes_once_the_reference_changes(window, sweep, errors):
+    c, bar = window.controller, window.infobar
+    reference = window.rail_button("reference")
+    load_sweep(window, sweep)
+    c.set_processing(reference_mode=ReferenceMode.SEPARATE)  # empty in None and Separate
+    assert reference.toolTip() == "Reference measurement – no files"  # worded for the mode
+    process(window)
+    assert bar.title_label.text() == NO_REFERENCE_FILES and not bar.isHidden()
+    c.set_processing(smooth=True, energy_cut=(200.0, 800.0))  # not about the reference files
+    assert not bar.isHidden()
+    c.set_processing(reference_files=files(sweep))  # the note is out of date
+    assert bar.isHidden()
+
+    c.set_processing(reference_files=SweepFiles())
+    process(window)
+    assert not bar.isHidden()
+    c.set_processing(reference_mode=ReferenceMode.NONE)
+    assert bar.isHidden() and reference.toolTip() == "Reference measurement – none in use"
+
+    c.set_processing(reference_mode=ReferenceMode.SEPARATE)
+    process(window)
+    window.report_error("Process", "something else")  # another message on the bar stays
+    c.set_processing(reference_mode=ReferenceMode.SELF)
+    assert not bar.isHidden() and bar.level() == "error"
+    assert errors == ["something else"]
+
+
 # ---------------------------------------------------------------------- data states
 def test_sample_state_follows_load_process_change_and_clear(controller, sweep):
     c = controller

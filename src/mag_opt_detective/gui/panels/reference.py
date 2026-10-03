@@ -196,15 +196,37 @@ def install(window) -> None:
             return f"the sample itself, {'no files yet' if state == DATA_EMPTY else text}"
         return text
 
-    c.processingChanged.connect(show_data_state(window, "reference", describe))  # the mode
+    show_state = show_data_state(window, "reference", describe)
+    shown = (c.processing.reference_mode, c.processing.reference_files)
+    note_shown = ""  # the note about missing files, while it may be on the bar
 
     def note_missing(note: str) -> None:
         """Process went on without the reference sweep: say so (not an error)."""
+        nonlocal note_shown
+        note_shown = note
         window.infobar.show_message(
             "warning", note, MISSING_HINT, "Open Reference", lambda: window.show_panel("reference")
         )
 
+    def follow_reference() -> None:
+        """A new reference mode or new reference files: word the rail button for the mode
+        (state changes show by themselves) and close the note about missing files, which is
+        out of date (other messages on the bar stay)."""
+        nonlocal shown, note_shown
+        p = c.processing
+        if (p.reference_mode, p.reference_files) == shown:
+            return
+        mode_changed = p.reference_mode is not shown[0]
+        shown = (p.reference_mode, p.reference_files)
+        if mode_changed:
+            show_state()
+        bar = window.infobar
+        if note_shown and not bar.isHidden() and bar.title_label.text() == note_shown:
+            bar.dismiss()
+        note_shown = ""
+
     c.referenceMissing.connect(note_missing)
+    c.processingChanged.connect(follow_reference)
 
     box = panel.measurement
     for text, slot, shortcut in (
