@@ -331,8 +331,8 @@ class LiveApply(QObject):
     again when two of the last three are below FAST seconds. So a single stall (another program,
     garbage collection) changes nothing, and the vote keeps a map from flipping between drags.
 
-    *apply* returns False when it had nothing to do; such a run does not count. *clock* gives
-    the time in seconds (tests may pass their own).
+    *apply* returns False when it had nothing to do; such a run does not count. *clock*
+    (:attr:`clock`) gives the time in seconds; tests may pass or set their own.
     """
 
     INTERVAL = 100  # ms
@@ -351,7 +351,7 @@ class LiveApply(QObject):
     ):
         super().__init__(parent)
         self._apply = apply
-        self._clock = clock
+        self.clock = clock
         self._timer = QTimer(self)
         self._timer.setSingleShot(True)
         self._timer.setTimerType(Qt.TimerType.PreciseTimer)  # (a coarse one may fire 5 % early)
@@ -404,7 +404,7 @@ class LiveApply(QObject):
             return
         if self._timer.isActive():
             return
-        wait = self.gap() - (self._clock() - self._done) * 1000
+        wait = self.gap() - (self.clock() - self._done) * 1000
         if wait <= 0:
             self.flush()
         else:
@@ -416,7 +416,7 @@ class LiveApply(QObject):
         if not self._pending:
             return
         self._pending = False
-        start = self._clock()
+        start = self.clock()
         if self._apply() is False:
             return
         self.runs += 1
@@ -426,13 +426,13 @@ class LiveApply(QObject):
         self._probe(self._run)
 
     def _probe(self, run: int) -> None:
-        self._probe_at = self._clock()
+        self._probe_at = self.clock()
         QTimer.singleShot(0, self, lambda: self._probed(run))
 
     def _probed(self, run: int) -> None:
         if run != self._run:  # a later run took over the measurement
             return
-        now = self._clock()
+        now = self.clock()
         if now - self._probe_at > self.IDLE and now - self._start < self.SETTLE_MAX:
             self._probe(run)  # the window was busy (drawing what the run changed): look again
             return

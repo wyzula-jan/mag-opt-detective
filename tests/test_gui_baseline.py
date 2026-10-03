@@ -539,20 +539,32 @@ def test_live_apply_counts_only_runs_that_did_something(qtbot):
 def test_live_paces_a_drag_whatever_a_run_costs(processed, qtbot, monkeypatch, share):
     """While the band is dragged, apply_baseline runs at most once per INTERVAL or per its
     cost plus twice that cost (at most twice SLOW) of idle time, the drawing it leaves for later
-    included (that drawing takes twice as long as the run, as on the stacked plot)."""
+    included (that drawing takes twice as long as the run, as on the stacked plot).
+
+    The drag, the runs and the waits between them take real time, but LiveApply's clock moves
+    only with the simulated work: the real re-apply and painting, and other programs on a
+    loaded machine, cost nothing there, so they cannot make it slow."""
     w, c = processed, processed.controller
     panel = w.panels["processing"]
+    live = panel.live
     w.resize(1400, 900)
     w.show()
     qtbot.waitExposed(w)
     cost = share * LiveApply.SLOW
+    clock = FakeClock()
+    live.clock = clock  # (the panel goes with the window)
     starts = []
     original = c.apply_baseline
 
+    def work(seconds: float) -> None:
+        """Keep the window busy for *seconds*, on the wall and on LiveApply's clock."""
+        time.sleep(seconds)
+        clock.now += seconds
+
     def costly():
         starts.append(time.perf_counter())
-        time.sleep(cost / 3)
-        QTimer.singleShot(0, lambda: time.sleep(2 * cost / 3))  # what the run leaves to draw
+        work(cost / 3)
+        QTimer.singleShot(0, lambda: work(2 * cost / 3))  # what the run leaves to draw
         return original()
 
     monkeypatch.setattr(c, "apply_baseline", costly)
@@ -562,6 +574,8 @@ def test_live_paces_a_drag_whatever_a_run_costs(processed, qtbot, monkeypatch, s
     start = time.perf_counter()
     mouse_drag(qtbot, plot, steps, release=False)
     elapsed = time.perf_counter() - start
+    costs = live.costs()  # (those measured so far: each a run and all of its drawing)
+    assert costs and costs == pytest.approx((cost,) * len(costs))
     idle = max(LiveApply.INTERVAL / 1000, 2 * min(cost, LiveApply.SLOW))
     spacing = 0.98 * (cost + idle)  # (timer precision)
     assert 1 <= len(starts) <= 1 + elapsed / spacing
@@ -569,9 +583,8 @@ def test_live_paces_a_drag_whatever_a_run_costs(processed, qtbot, monkeypatch, s
     QTest.mouseRelease(plot.view.viewport(), LEFT, PLAIN, viewport_pos(plot, *steps[-1]))
     assert c.result.baseline_region == c.processing.baseline  # applied when let go
     assert c.processing.baseline[1] == pytest.approx(850, abs=5)
-    settled(qtbot, panel.live)
-    if cost < LiveApply.FAST / 2 or cost > LiveApply.SLOW:  # (the drawing adds a little)
-        assert panel.live.slow == (cost > LiveApply.SLOW)
+    settled(qtbot, live)
+    assert live.slow == (cost > LiveApply.SLOW)
 
 
 def test_live_logs_the_region_once_it_rests(processed, qtbot, caplog):
