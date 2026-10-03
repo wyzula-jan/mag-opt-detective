@@ -4,6 +4,12 @@ All notable changes to Magneto-Optical Detective, newest first. The format is ba
 Changelog, and the versions follow Semantic Versioning. `tools/release.py` writes each section
 from the commit messages when a version is released (see Releases in CONTRIBUTING.md).
 
+## 0.7.0 - 2026-10-04
+
+### Added
+
+- **gui:** watch a measurement folder. Switch on "Watch for new files" for the loaded sweep's folder, or choose File › Watch a folder… for one that may still be empty: every new spectrum is read once it is complete, and the sweep is processed and plotted again with the current settings, keeping the picked points, view ranges and models. Only new files are read. A spectrum written again is read again; files that are not spectra, are still being written or have another energy axis are held back and reported once; a folder that is out of reach is looked at until it is back. The status bar shows what is watched, with a button to stop.
+
 ## 0.6.0 - 2026-10-04
 
 ### Added
