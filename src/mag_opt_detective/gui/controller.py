@@ -85,6 +85,13 @@ DEFAULT_LEVELS = {
     str(PlotKind.STEP): (0.98, 1.02),
 }
 
+# the ViewState ranges shown on the x and y axes of each plot view
+VIEW_RANGES = {
+    "map": ("field_range", "energy_range"),
+    "stacked": ("energy_range", "stacked_range"),
+    "reference": ("field_range", "energy_range"),
+}
+
 Curve = tuple[np.ndarray, np.ndarray]
 
 
@@ -410,6 +417,7 @@ class AppController(QObject):
     resultChanged = Signal()
     unitChanged = Signal(object, object)  # old Unit, new Unit
     viewChanged = Signal()
+    rangesChanged = Signal()  # only plot ranges changed (set_ranges): no redraw needed
     selectionChanged = Signal()
     processingChanged = Signal()
     changedSinceProcess = Signal(bool)
@@ -480,6 +488,23 @@ class AppController(QObject):
         if new != self._view:
             self._view = new
             self.viewChanged.emit()
+
+    def set_ranges(self, **ranges: Range | None) -> None:
+        """Change plot ranges (``field_range``, ``energy_range``, ``stacked_range``; None fits
+        the data) without a redraw: :attr:`rangesChanged` fires instead of viewChanged."""
+        unknown = set(ranges) - {"field_range", "energy_range", "stacked_range"}
+        if unknown:
+            raise TypeError(f"not a plot range: {', '.join(sorted(unknown))}")
+        ranges = {k: None if v is None else (float(v[0]), float(v[1])) for k, v in ranges.items()}
+        new = dataclasses.replace(self._view, **ranges)
+        if new != self._view:
+            self._view = new
+            self.rangesChanged.emit()
+
+    def fit_ranges(self, view: str) -> None:
+        """Fit the axes of plot *view* ("map", "stacked", "reference") to the data again."""
+        self._view = dataclasses.replace(self._view, **dict.fromkeys(VIEW_RANGES[view]))
+        self.rangesChanged.emit()  # also when already fitted: the plot may have moved
 
     def derivative_scale(self) -> float:
         """Factor of the shown map's intensities over the same map per cm^-1 (a per-unit energy

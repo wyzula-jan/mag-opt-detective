@@ -41,10 +41,8 @@ def test_live_unit_switch(window, sweep, errors):
     c = window.controller
     result = c.result
     page = view_page(window)
-    page.energy_custom.setChecked(True)
-    page.energy_min.setText("200")
-    page.energy_max.setText("800")
-    page.energy_max.editingFinished.emit()
+    page.energy.lo_spin.setValue(200.0)
+    page.energy.hi_spin.setValue(800.0)
     assert c.view.energy_range == (200.0, 800.0)
     window.tools.set_active("pick")
     click_map(window, 1.0, 300.0)
@@ -67,7 +65,8 @@ def test_live_unit_switch(window, sweep, errors):
     assert window.plots.reference.plot.getAxis("left").labelText == "Energy (meV)"
     assert c.view.energy_range == pytest.approx((200 / MEV, 800 / MEV))
     assert window.plots.map.plot.vb.viewRange()[1] == pytest.approx([200 / MEV, 800 / MEV])
-    assert page.energy_min.text() == "24.7967" and page.energy_label.text() == "E (meV)"
+    assert page.energy.range() == pytest.approx((200 / MEV, 800 / MEV))
+    assert page.energy.unit() == "meV" and not page.energy.is_auto()
     assert c.view.levels["Data_der1_E_unit"] == pytest.approx((-0.002 * MEV, 0.003 * MEV))
     assert window.plots.map.levels() == pytest.approx((-0.002 * MEV, 0.003 * MEV))
     assert c.view.levels["Ratio"] == ratio_levels  # other levels do not depend on the unit
@@ -88,7 +87,7 @@ def test_live_unit_switch(window, sweep, errors):
     assert c.result is result
     assert c.view.energy_range == pytest.approx((200.0, 800.0))
     assert c.view.levels["Data_der1_E_unit"] == pytest.approx((-0.002, 0.003))
-    assert page.energy_min.text() == "200"
+    assert page.energy.range() == pytest.approx((200.0, 800.0))
     np.testing.assert_allclose(c.points.points("LL 1")[1], [300.0])  # kept in cm-1
     assert not errors
 

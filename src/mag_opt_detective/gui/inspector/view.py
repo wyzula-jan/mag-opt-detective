@@ -1,39 +1,33 @@
-"""View section: field, energy and stacked ranges of the plots (temporary), and the shared
-parts of the inspector sections.
+"""View section: the field, energy and intensity ranges of the plots.
 
-The range page is the old Tools > Plot dimensions page without the energy cut, the colour
-levels (now in the Colour section) and the stacked offset (in the Traces section). It edits
-``controller.view`` (:class:`ViewState`); the energy range is typed in the display unit and
-kept in cm^-1. This module also shows the inspector sections that belong to the plot on screen
-(``window.inspector_views``) and holds the number field and map cache the sections use.
+The ranges live in ``controller.view`` (:class:`ViewState`); None fits the data (Auto), a pair
+is fixed. Editing a range control, panning or zooming a plot, double-clicking it or the Fit
+tool change them through :meth:`AppController.set_ranges` / :meth:`~AppController.fit_ranges`,
+which redraw nothing: this module puts the ranges on the plots, also after every redraw, so
+they survive level drags and unit switches. The energy range is shared by all three plots, the
+field range by the map and the reference. This module also shows the inspector sections that
+belong to the plot on screen (``window.inspector_views``) and holds the number field and map
+cache the other inspector sections use.
 """
 
 from __future__ import annotations
 
-import dataclasses
 import json
 import math
 import re
 
-from PySide6.QtCore import QLocale, Qt, Signal
-from PySide6.QtGui import QFont, QValidator, QWheelEvent
-from PySide6.QtWidgets import (
-    QAbstractSpinBox,
-    QButtonGroup,
-    QDoubleSpinBox,
-    QGridLayout,
-    QHBoxLayout,
-    QLabel,
-    QRadioButton,
-    QWidget,
-)
+import numpy as np
+from PySide6.QtCore import QLocale, Qt
+from PySide6.QtGui import QValidator, QWheelEvent
+from PySide6.QtWidgets import QAbstractSpinBox, QDoubleSpinBox, QLabel, QVBoxLayout, QWidget
 
 from mag_opt_detective.core.spectra import FieldMap
-from mag_opt_detective.core.units import Unit, from_cm1
-from mag_opt_detective.gui.controller import AppController, ViewState, user_action
-from mag_opt_detective.gui.widgets import EnergyEdit, FloatEdit, parse_float
+from mag_opt_detective.core.units import Unit, convert_range
+from mag_opt_detective.gui.controller import VIEW_RANGES, AppController, ViewState
+from mag_opt_detective.gui.kit import RangeControl
+from mag_opt_detective.gui.widgets import parse_float
 
-Range = tuple[float, float]
+Pair = tuple[float, float]
 
 # the plot views each inspector section belongs to (sections not listed show everywhere)
 SECTION_VIEWS = {
@@ -42,6 +36,12 @@ SECTION_VIEWS = {
     "traces": ("stacked",),
     "overlays": ("map",),
 }
+HINT = (
+    "Drag a plot to pan, scroll over it or an axis to zoom, double-click to fit. Any change "
+    "fixes the range; Auto fits the data again."
+)
+INTENSITY_NOTE = "Follows the offset while on Auto"
+UNIT_TEXT = {Unit.CM1: "cm⁻¹", Unit.MEV: "meV", Unit.THZ: "THz"}
 _PARTIAL_NUMBER = re.compile(r"[+-]?(\d+\.?\d*|\.\d*)?([eE][+-]?\d*)?")
 
 
@@ -118,6 +118,33 @@ class ShownMaps:
         return self._maps[name]
 
 
+def span(values: np.ndarray) -> Pair | None:
+    """(min, max) of the finite *values* (widened when they are all equal), or None."""
+    finite = values[np.isfinite(values)]
+    if finite.size == 0:
+        return None
+    lo, hi = float(finite.min()), float(finite.max())
+    if lo == hi:
+        pad = 0.5 * abs(lo) or 0.5
+        lo, hi = lo - pad, hi + pad
+    return lo, hi
+
+
+def stacked_extent(fmap: FieldMap, view: ViewState, energy: Pair | None) -> Pair:
+    """Intensity range of the stacked spectra (with their offsets) within *energy*, padded."""
+    shown = np.arange(0, fmap.field.size, max(1, view.stacked_every))
+    rows = np.ones(fmap.energy.size, dtype=bool)
+    if energy is not None:
+        inside = (fmap.energy >= energy[0]) & (fmap.energy <= energy[1])
+        rows = inside if inside.any() else rows
+    values = fmap.values[rows][:, shown] + np.arange(shown.size) * view.stacked_offset
+    extent = span(values)
+    if extent is None:
+        return 0.0, 1.0
+    pad = 0.04 * (extent[1] - extent[0])
+    return extent[0] - pad, extent[1] + pad
+
+
 def update_sections(window) -> None:
     """Show the inspector sections of the plot on screen (``window.inspector_views``)."""
     view = window.plot_area.current_view()
@@ -136,7 +163,7 @@ def load_json(value) -> dict | None:
     return value if isinstance(value, dict) else None
 
 
-def to_pair(value) -> Range | None:
+def to_pair(value) -> Pair | None:
     """A stored ``[lo, hi]`` with finite lo < hi; ValueError for anything else but null."""
     if value is None:
         return None
@@ -148,210 +175,241 @@ def to_pair(value) -> Range | None:
     return lo, hi
 
 
+def _same(a: Pair, b: Pair) -> bool:
+    tol = 1e-9 * max(abs(a[1] - a[0]), abs(b[1] - b[0]), 1e-300)
+    return abs(a[0] - b[0]) <= tol and abs(a[1] - b[1]) <= tol
+
+
 # ---------------------------------------------------------------------- page
-def _title(text: str) -> QLabel:
-    label = QLabel(text)
-    font = QFont(label.font())
-    font.setBold(True)
-    label.setFont(font)
-    return label
+class ViewPage(QWidget):
+    """Range controls for the field B, the energy E (shared) and the stacked intensity."""
 
-
-def _radio_group(parent, *labels: str, checked: int = 0) -> tuple[QButtonGroup, list[QRadioButton]]:
-    group = QButtonGroup(parent)
-    buttons = [QRadioButton(text) for text in labels]
-    for i, button in enumerate(buttons):
-        group.addButton(button, i)
-    buttons[checked].setChecked(True)
-    return group, buttons
-
-
-class PlotDimensionsPage(QWidget):
-    """Field, energy and intensity ranges of the plots."""
-
-    changed = Signal()
-
-    def __init__(self, parent=None):
+    def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
-        grid = QGridLayout(self)
-        grid.setContentsMargins(0, 0, 0, 0)
-        grid.setHorizontalSpacing(6)
-        row = 0
+        self.field = RangeControl("Field <i>B</i>", "T", name="Field")
+        self.energy = RangeControl("Energy <i>E</i>", UNIT_TEXT[Unit.CM1], name="Energy")
+        self.intensity = RangeControl("Intensity", "", name="Intensity")
+        self.hint = QLabel(HINT)
+        self.hint.setProperty("kit", "muted")
+        self.hint.setWordWrap(True)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(14)
+        for widget in (self.field, self.energy, self.intensity, self.hint):
+            layout.addWidget(widget)
 
-        self.field_group, (self.field_auto, self.field_custom) = _radio_group(
-            self, "Autoscale", "Custom"
-        )
-        row = self._section(grid, row, "Magnetic field range", self.field_auto, self.field_custom)
-        self.field_min, self.field_max = FloatEdit(0, "B min"), FloatEdit(16, "B max")
-        row = self._range_row(grid, row, "B (T)", self.field_min, self.field_max)
+    def controls(self) -> dict[str, RangeControl]:
+        """Range control by ViewState field name."""
+        return {
+            "field_range": self.field,
+            "energy_range": self.energy,
+            "stacked_range": self.intensity,
+        }
 
-        self.energy_group, (self.energy_auto, self.energy_custom) = _radio_group(
-            self, "Autoscale", "Custom"
-        )
-        row = self._section(grid, row, "Energy range", self.energy_auto, self.energy_custom)
-        self.energy_min = EnergyEdit(0.0, "E min")
-        self.energy_max = EnergyEdit(200.0, "E max")
-        self.energy_label = QLabel("E")
-        row = self._range_row(grid, row, self.energy_label, self.energy_min, self.energy_max)
-
-        self.stacked_group, (self.stacked_auto, self.stacked_custom) = _radio_group(
-            self, "Autoscale", "Custom", checked=1
-        )
-        row = self._section(grid, row, "Stacked plot", self.stacked_auto, self.stacked_custom)
-        self.stacked_min, self.stacked_max = FloatEdit(0.9, "Y min"), FloatEdit(3, "Y max")
-        row = self._range_row(grid, row, "Y", self.stacked_min, self.stacked_max)
-        grid.setColumnStretch(1, 1)
-        grid.setColumnStretch(2, 1)
-
-        for group in (self.field_group, self.energy_group, self.stacked_group):
-            group.buttonToggled.connect(lambda _b, checked: checked and self.changed.emit())
-
-    @staticmethod
-    def _section(grid: QGridLayout, row: int, title: str, *buttons: QRadioButton) -> int:
-        grid.addWidget(_title(title), row, 0, 1, 3)
-        line = QHBoxLayout()
-        for button in buttons:
-            line.addWidget(button)
-        line.addStretch(1)
-        grid.addLayout(line, row + 1, 0, 1, 3)
-        return row + 2
-
-    def _range_row(self, grid: QGridLayout, row: int, text, lo: FloatEdit, hi: FloatEdit):
-        for edit in (lo, hi):
-            edit.setMinimumWidth(40)
-        grid.addWidget(text if isinstance(text, QLabel) else QLabel(text), row, 0)
-        grid.addWidget(lo, row, 1)
-        grid.addWidget(hi, row, 2)
-        lo.editingFinished.connect(self.changed)
-        hi.editingFinished.connect(self.changed)
-        return row + 1
-
-    def set_unit(self, unit: Unit) -> None:
-        self.energy_min.set_unit(unit)
-        self.energy_max.set_unit(unit)
-        self.energy_label.setText(f"E ({unit})")
-
-    @staticmethod
-    def _range(lo: FloatEdit, hi: FloatEdit) -> Range:
-        a, b = lo.value(), hi.value()
-        if a >= b:
-            raise ValueError(f"invalid range {a:g} – {b:g}: minimum must be below maximum")
-        return a, b
-
-    def _energy_range(self) -> Range:
-        """The energy range in the display unit, read from the kept cm^-1 values."""
-        lo, hi = self.energy_min.cm1(), self.energy_max.cm1()
-        if lo is None or hi is None:
-            raise ValueError("energy range: enter both limits")
-        unit = self.energy_min.unit()
-        a, b = float(from_cm1(lo, unit)), float(from_cm1(hi, unit))
-        if a >= b:
-            raise ValueError(f"invalid range {a:.6g} – {b:.6g}: minimum must be below maximum")
-        return a, b
-
-    def view_state(self, current: ViewState) -> ViewState:
-        """The view as typed (colour levels and trace options are kept)."""
-        return dataclasses.replace(
-            current,
-            field_range=(
-                self._range(self.field_min, self.field_max)
-                if self.field_custom.isChecked()
-                else None
-            ),
-            energy_range=self._energy_range() if self.energy_custom.isChecked() else None,
-            stacked_range=(
-                self._range(self.stacked_min, self.stacked_max)
-                if self.stacked_custom.isChecked()
-                else None
-            ),
-        )
-
-    def show_view(self, view: ViewState) -> None:
-        """Show *view* in the fields (without emitting :attr:`changed`)."""
-        self.blockSignals(True)
-        try:
-            for rng, auto, custom, lo, hi in (
-                (view.field_range, self.field_auto, self.field_custom, *self._field_edits()),
-                (view.stacked_range, self.stacked_auto, self.stacked_custom, *self._y_edits()),
-            ):
-                (custom if rng is not None else auto).setChecked(True)
-                if rng is not None:
-                    _set(lo, rng[0])
-                    _set(hi, rng[1])
-            if view.energy_range is not None:
-                self.energy_custom.setChecked(True)
-                for edit, value in zip(
-                    (self.energy_min, self.energy_max), view.energy_range, strict=True
-                ):
-                    if not _shows(edit, value):
-                        edit.set_value(value)
-            else:
-                self.energy_auto.setChecked(True)
-        finally:
-            self.blockSignals(False)
-
-    def _field_edits(self) -> tuple[FloatEdit, FloatEdit]:
-        return self.field_min, self.field_max
-
-    def _y_edits(self) -> tuple[FloatEdit, FloatEdit]:
-        return self.stacked_min, self.stacked_max
+    def show_view(self, view: str) -> None:
+        """The controls of plot *view*: B and E for maps, E and intensity for stacked."""
+        self.field.setVisible(view != "stacked")
+        self.intensity.setVisible(view == "stacked")
 
 
-def _set(edit: FloatEdit, value: float) -> None:
-    """Show *value* unless the field already holds it (keeps what was typed)."""
-    try:
-        if edit.value_or_none() == value:
+# ---------------------------------------------------------------------- ranges
+class ViewRanges:
+    """Keeps the plot ranges, the controls and ``controller.view`` in step."""
+
+    def __init__(self, window, page: ViewPage):
+        self.window = window
+        self.page = page
+        self.c: AppController = window.controller
+        self.maps: ShownMaps = window.shown_maps
+        self._applied: dict[str, tuple[Pair, Pair]] = {}
+
+    # --- what is shown -----------------------------------------------------------------
+    def effective(self) -> dict[str, tuple[Pair, Pair]]:
+        """(x, y) range of each plot that shows data: the fixed ranges, else the data's."""
+        v = self.c.view
+        out: dict[str, tuple[Pair, Pair]] = {}
+        for name in ("map", "reference"):
+            fmap = self.maps.get(name)
+            if fmap is None:
+                continue
+            b = v.field_range or span(fmap.field)
+            e = v.energy_range or span(fmap.energy)
+            if b is None or e is None:
+                continue
+            out[name] = (b, e)
+            if name == "map":
+                out["stacked"] = (e, v.stacked_range or stacked_extent(fmap, v, e))
+        return out
+
+    def apply(self) -> None:
+        """Put the ranges on the plots."""
+        for name, (x, y) in self.effective().items():
+            self.window.plots[name].plot.vb.setRange(xRange=x, yRange=y, padding=0)
+            self._applied[name] = (x, y)
+
+    def sync_controls(self) -> None:
+        """Show the ranges of the plot on screen in the controls (without emitting)."""
+        c, page = self.c, self.page
+        view = self.window.plot_area.current_view()
+        v = c.view
+        unit = UNIT_TEXT[c.unit]
+        page.energy.set_unit(unit)
+        fmap = self.maps.get(view)
+        shared = "Map" if view == "stacked" else "Stacked"
+        b_data = span(fmap.field) if fmap is not None else None
+        e_data = span(fmap.energy) if fmap is not None else None
+        e_note = None
+        if e_data is not None:
+            e_note = f"Data {e_data[0]:.5g} – {e_data[1]:.5g} {unit} · shared with {shared}"
+        _show(page.field, v.field_range, b_data)
+        _show(page.energy, v.energy_range, e_data, e_note)
+        i_data = None
+        if fmap is not None and view == "stacked":
+            e = v.energy_range or e_data
+            i_data = stacked_extent(fmap, v, e)
+        _show(page.intensity, v.stacked_range, i_data, INTENSITY_NOTE)
+
+    def refresh(self) -> None:
+        if self.c.is_restoring():  # restored values are shown once settings are restored
             return
-    except ValueError:
-        pass
-    edit.set_value(value)
+        self.apply()
+        self.sync_controls()
+
+    # --- user changes on the plots -----------------------------------------------------
+    def on_manual(self, view: str) -> None:
+        """A pan or zoom on plot *view*: the axes it moved become fixed."""
+        vb = self.window.plots[view].plot.vb
+        moved = tuple((float(lo), float(hi)) for lo, hi in vb.viewRange())
+        applied = self._applied.get(view)
+        changes = {}
+        for i, name in enumerate(VIEW_RANGES[view]):
+            if applied is None or not _same(applied[i], moved[i]):
+                changes[name] = moved[i]
+        if changes:
+            self.c.set_ranges(**changes)
+
+    def on_click(self, view: str, event) -> None:
+        """A double-click in the data area of plot *view* fits it to the data."""
+        if not (event.double() and event.button() == Qt.MouseButton.LeftButton):
+            return
+        vb = self.window.plots[view].plot.vb
+        if vb.sceneBoundingRect().contains(event.scenePos()):
+            self.c.fit_ranges(view)
 
 
-def _shows(edit: EnergyEdit, value: float) -> bool:
-    """Whether *edit* keeps *value* (display unit) up to rounding."""
-    kept = edit.cm1()
-    if kept is None:
-        return False
-    return math.isclose(float(from_cm1(kept, edit.unit())), value, rel_tol=1e-9, abs_tol=1e-12)
+def _show(control: RangeControl, fixed: Pair | None, data: Pair | None, note=None) -> None:
+    """Show *fixed* (or, on Auto, the *data* range) in *control*, with *data* as its extent."""
+    shown = fixed or data
+    if data is None:
+        data = shown or control.extent()
+        note = "No data to show yet"
+    elif fixed is not None:
+        data = (min(data[0], fixed[0]), max(data[1], fixed[1]))
+    control.set_extent(*data, note=note)
+    if shown is not None:
+        control.set_range(*shown)
+    control.set_auto(fixed is None)
 
 
-@user_action("Plot dimensions")
-def apply_page(window, page: PlotDimensionsPage) -> None:
-    c = window.controller
-    c.set_view(page.view_state(c.view))
+# ---------------------------------------------------------------------- settings
+class ViewSetting:
+    """Settings protocol for the plot ranges: JSON with the field range (T), the energy range
+    in cm^-1 and the stacked intensity range (per cm^-1 for per-unit energy derivatives); null
+    fits the data. Restored ranges are applied in the unit shown once settings are restored."""
+
+    def __init__(self, controller: AppController):
+        self.controller = controller
+        self.pending: dict[str, Pair | None] | None = None
+
+    def settings_value(self) -> str:
+        c = self.controller
+        v = c.view
+        scale = c.derivative_scale()
+        intensity = None
+        if v.stacked_range is not None:
+            intensity = [v.stacked_range[0] / scale, v.stacked_range[1] / scale]
+        return json.dumps(
+            {
+                "field": _list(v.field_range),
+                "energy_cm1": _list(convert_range(v.energy_range, c.unit, Unit.CM1)),
+                "intensity": intensity,
+            }
+        )
+
+    def set_settings_value(self, value) -> bool:
+        data = load_json(value)
+        if data is None:
+            return False
+        try:
+            self.pending = {
+                "field": to_pair(data.get("field")),
+                "energy_cm1": to_pair(data.get("energy_cm1")),
+                "intensity": to_pair(data.get("intensity")),
+            }
+        except (TypeError, ValueError):
+            return False
+        return True
+
+    def apply(self) -> None:
+        """Put restored ranges into the view, in the display unit."""
+        if self.pending is None:
+            return
+        c, data = self.controller, self.pending
+        self.pending = None
+        scale = c.derivative_scale()
+        intensity = data["intensity"]
+        if intensity is not None:
+            intensity = (intensity[0] * scale, intensity[1] * scale)
+        c.set_view(
+            field_range=data["field"],
+            energy_range=convert_range(data["energy_cm1"], Unit.CM1, c.unit),
+            stacked_range=intensity,
+        )
 
 
+def _list(pair) -> list[float] | None:
+    return None if pair is None else [float(pair[0]), float(pair[1])]
+
+
+# ---------------------------------------------------------------------- install
 def install(window) -> None:
     c = window.controller
-    page = PlotDimensionsPage()
+    page = ViewPage()
     window.add_inspector_section("view", "View", page)
     window.inspector_views = dict(SECTION_VIEWS)
     window.shown_maps = ShownMaps(c)
-    page.set_unit(c.unit)
-    page.changed.connect(lambda: apply_page(window, page))
-    c.viewChanged.connect(lambda: c.is_restoring() or page.show_view(c.view))
+    ranges = ViewRanges(window, page)
 
-    def on_unit(_old, new) -> None:
-        page.set_unit(new)  # the fields keep cm^-1: this only shows them in the new unit
-        if not c.is_restoring():  # while restoring the view is not converted; see on_restored
-            page.show_view(c.view)
+    for name, control in page.controls().items():
+        control.rangeEdited.connect(lambda lo, hi, n=name: c.set_ranges(**{n: (lo, hi)}))
+        control.autoRequested.connect(lambda n=name: c.set_ranges(**{n: None}))
 
-    c.unitChanged.connect(on_unit)
+    for view, plot in window.plots.items():
+        plot.plot.vb.sigRangeChangedManually.connect(lambda _mask, v=view: ranges.on_manual(v))
+        plot.plot.scene().sigMouseClicked.connect(lambda event, v=view: ranges.on_click(v, event))
+        plot.plot.autoBtn.clicked.connect(lambda *_args, v=view: c.fit_ranges(v))
+        plot.plot.vb.menu.viewAll.triggered.connect(lambda *_args, v=view: c.fit_ranges(v))
+
+    # after the plot area's redraw (connected earlier), which draws the stored ranges
+    for signal in (c.resultChanged, c.selectionChanged, c.viewChanged, c.rangesChanged):
+        signal.connect(ranges.refresh)
+    c.unitChanged.connect(lambda _old, _new: ranges.refresh())
+
+    def on_tab(_index: int) -> None:
+        view = window.plot_area.current_view()
+        page.show_view(view)
+        update_sections(window)
+        ranges.sync_controls()
+
+    window.plot_area.tabs.currentChanged.connect(on_tab)
+    on_tab(window.plot_area.tabs.currentIndex())
+
+    setting = ViewSetting(c)
 
     def on_restored() -> None:
-        page.set_unit(c.unit)
-        apply_page(window, page)
+        setting.apply()
+        ranges.refresh()
 
     c.restored.connect(on_restored)
-    apply_page(window, page)
-    window.plot_area.tabs.currentChanged.connect(lambda _index: update_sections(window))
-    update_sections(window)
-
-    p = window.persistence
-    if p is not None:
-        for attr in (
-            "field_auto", "field_custom", "field_min", "field_max",
-            "energy_auto", "energy_custom", "energy_min", "energy_max",
-            "stacked_auto", "stacked_custom", "stacked_min", "stacked_max",
-        ):  # fmt: skip
-            p.bind(f"view/{attr}", getattr(page, attr))
+    if window.persistence is not None:
+        window.persistence.bind("view/ranges", setting)

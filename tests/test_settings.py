@@ -7,7 +7,7 @@ from PySide6.QtGui import QGuiApplication
 from mag_opt_detective.core.pipeline import PlotKind, ReferenceMode
 from mag_opt_detective.core.processing import Axis
 from mag_opt_detective.core.units import Unit
-from mag_opt_detective.gui.controller import PlotSelection
+from mag_opt_detective.gui.controller import PlotSelection, ViewState
 from mag_opt_detective.gui.main_window import MainWindow
 from mag_opt_detective.gui.plots import BarScale
 from mag_opt_detective.gui.settings import PREFIX
@@ -51,10 +51,7 @@ def test_settings_round_trip(qtbot, ini):
     reference = w.panels["reference"]
     reference.ref_separate.setChecked(True)
     reference.sg_window.setValue(15)
-    page = view_page(w)
-    page.energy_custom.setChecked(True)
-    page.energy_max.setText("120")
-    page.energy_max.editingFinished.emit()
+    w.controller.set_ranges(energy_range=(0.0, 120.0))  # as if zoomed (meV)
     colour_page(w).fields.lo.setValue(0.95)
     colour_page(w).picker.swatches["viridis"].click()
     processing = w.panels["processing"]
@@ -82,7 +79,8 @@ def test_settings_round_trip(qtbot, ini):
     assert not w2.panels["reference"].ref_none.isChecked()
     assert w2.panels["reference"].sg_window.value() == 15
     assert c.view.energy_range == pytest.approx((0.0, 120.0))  # meV
-    assert view_page(w2).energy_max.text() == "120"
+    assert view_page(w2).energy.range() == pytest.approx((0.0, 120.0))
+    assert not view_page(w2).energy.is_auto()
     assert c.view.levels["Ratio"] == (0.95, 1.1)
     assert c.view.colormap == "viridis"
     assert c.processing.energy_cut == pytest.approx((55 * MEV, 140 * MEV))
@@ -104,11 +102,7 @@ def test_settings_round_trip(qtbot, ini):
 def test_restoring_does_not_depend_on_the_order(qtbot, ini):
     w = make_window(qtbot, ini)
     w.toolbar.unit.set_value("meV")
-    page = view_page(w)
-    page.energy_custom.setChecked(True)
-    page.energy_min.setText("10")
-    page.energy_max.setText("120")
-    page.energy_max.editingFinished.emit()
+    w.controller.set_ranges(energy_range=(10.0, 120.0))
     w.controller.set_levels("Ratio_der1_E_unit", -0.5, 0.5)  # per meV
     w.panels["processing"].baseline_on.setChecked(True)
     w.panels["processing"].baseline_lo.setText("60")
@@ -132,7 +126,7 @@ def test_restoring_does_not_depend_on_the_order(qtbot, ini):
         assert c.view.levels["Ratio_der1_E_unit"] == pytest.approx((-0.5, 0.5))
         assert c.processing.baseline == pytest.approx((60 * MEV, 70 * MEV))
         assert w2.panels["processing"].baseline_lo.text() == "60"
-        assert view_page(w2).energy_min.text() == "10"
+        assert view_page(w2).energy.range() == pytest.approx((10.0, 120.0))
         w2.close()
 
 
@@ -154,9 +148,10 @@ def test_invalid_values_fall_back_to_defaults(qtbot, ini):
     raw = QSettings(ini, QSettings.Format.IniFormat)
     raw.setValue("v2/view/unit", "eV")
     raw.setValue("v2/reference/sg_window", "abc")
-    raw.setValue("v2/view/field_min", "not a number")
+    raw.setValue("v2/view/ranges", "{bad")
     raw.setValue("v2/processing/cut_lo_cm1", "x")
     raw.setValue("v2/view/levels", '{"Ratio": {"mode": "fixed", "levels": [2, 1]}}')
+    raw.setValue("v2/view/traces", '{"offset": -1, "every": 2, "by_field": false}')
     raw.setValue("v2/view/colormap", "rainbow")
     raw.setValue("v2/window/panel", "nowhere")
     raw.setValue("v2/window/appearance", "purple")
@@ -166,9 +161,7 @@ def test_invalid_values_fall_back_to_defaults(qtbot, ini):
     w = make_window(qtbot, ini)
     assert w.controller.unit is Unit.CM1
     assert w.panels["reference"].sg_window.value() == 11
-    assert view_page(w).field_min.text() == "0"
-    assert w.controller.view.levels["Ratio"] == (0.9, 1.1)
-    assert w.controller.view.colormap == "Auto"
+    assert w.controller.view == ViewState()
     assert w.panels["processing"].cut_lo.text() == ""
     assert w.current_panel() == "sample"
     assert w.theme.scheme() == "system"

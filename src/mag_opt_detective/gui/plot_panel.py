@@ -559,9 +559,7 @@ def set_scales_open(window, open_: bool) -> None:
 
 
 def fit_to_data(window) -> None:
-    view = window.plot_area.current_view()
-    plot = window.plots[view]
-    plot.plot.vb.autoRange(padding=0.0 if view != "stacked" else None)
+    window.controller.fit_ranges(window.plot_area.current_view())  # the View section draws it
 
 
 def apply_theme(window) -> None:
