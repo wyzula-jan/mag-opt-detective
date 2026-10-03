@@ -713,9 +713,17 @@ def install(window) -> None:
             draw_stacked()
         sync_tool()
 
+    def on_map_redrawn() -> None:
+        if c.result is None:  # the plots cleared the map, and its markers with it
+            draw_map()
+
     window.plot_area.tabs.currentChanged.connect(on_tab)
     window.plots.stacked.tracesChanged.connect(on_traces)
     panel.markers.valueChanged.connect(lambda _value: (draw_map(), draw_stacked()))
+    # connected after the plot panel's redraw: markers imported before Process stay shown
+    c.resultChanged.connect(draw_map)
+    c.selectionChanged.connect(on_map_redrawn)
+    c.viewChanged.connect(on_map_redrawn)
 
     # state -> widgets
     def points_of(name: str) -> tuple[np.ndarray, np.ndarray]:

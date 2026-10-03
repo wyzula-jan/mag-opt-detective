@@ -219,6 +219,25 @@ def test_import_export_round_trip_and_legacy_files(processed, tmp_path, monkeypa
     assert not errors
 
 
+def test_points_imported_before_process_stay_on_the_map(window, sweep, tmp_path, monkeypatch):
+    w, c = window, window.controller
+    path = tmp_path / "points.csv"
+    path.write_text("Energy (meV)\tLL 1\n0.5\t37.2\n1.0\t\n1.5\t38.5\n2.0\t\n")
+    open_from(monkeypatch, path)
+    w.panels["points"].import_button.click()
+    shown = from_cm1(c.points.points("LL 1")[1], c.unit)
+    assert shown.size == 2
+    np.testing.assert_allclose(current_marker_energies(w), shown)
+    select(w, kind="Data")  # redrawn without a result: the plots clear the map
+    np.testing.assert_allclose(current_marker_energies(w), shown)
+    c.set_view(stacked_offset=0.2)
+    np.testing.assert_allclose(current_marker_energies(w), shown)
+    load_sweep(w, sweep)
+    process(w)  # keeps the imported table (no new one asked for)
+    assert c.result is not None and c.points.names == ["LL 1"]
+    np.testing.assert_allclose(current_marker_energies(w), shown)
+
+
 def test_markers_and_curve_name_are_remembered(qtbot, tmp_path):
     ini = str(tmp_path / "settings.ini")
     first = MainWindow(settings=QSettings(ini, QSettings.Format.IniFormat))
