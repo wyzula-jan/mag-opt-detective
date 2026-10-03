@@ -238,6 +238,32 @@ def test_points_imported_before_process_stay_on_the_map(window, sweep, tmp_path,
     np.testing.assert_allclose(current_marker_energies(w), shown)
 
 
+def test_typed_names_of_two_curves_are_two_undo_steps(shown):
+    w = shown
+    c, panel, stack = w.controller, w.panels["points"], w.points_undo
+    panel.chips.new_chip.click()
+    panel.chips.chips()[0].click()
+    name = panel.column_name
+    name.setFocus()
+    name.end(False)
+    QTest.keyClicks(name, "x")
+    assert c.points.names == ["LL 1x", "LL 2"]
+    name.selectAll()
+    QTest.keyClick(name, Qt.Key.Key_Backspace)  # refused: no editingFinished on focus-out
+    assert name.text() == "" and not panel.name_note.isHidden()
+    chip = panel.chips.chips()[1]
+    chip.setFocus()
+    chip.click()
+    assert c.curve == "LL 2" and name.text() == "LL 2"
+    name.setFocus()
+    name.end(False)
+    QTest.keyClicks(name, "y")
+    assert c.points.names == ["LL 1x", "LL 2y"]
+    assert stack.undoText() == "Rename curve LL 2"
+    w.commands["undo"].trigger()
+    assert c.points.names == ["LL 1x", "LL 2"] and stack.undoText() == "Rename curve LL 1"
+
+
 def test_markers_and_curve_name_are_remembered(qtbot, tmp_path):
     ini = str(tmp_path / "settings.ini")
     first = MainWindow(settings=QSettings(ini, QSettings.Format.IniFormat))

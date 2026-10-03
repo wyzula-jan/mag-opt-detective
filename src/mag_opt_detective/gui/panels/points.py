@@ -733,10 +733,13 @@ def install(window) -> None:
         return table.points(name)
 
     table_curve = c.curve  # the curve in the table: its selection is kept across edits
+    session, renaming = 0, False  # typed renames of one session are one undo step
 
     def sync() -> None:
-        nonlocal table_curve
+        nonlocal table_curve, session
         table = c.points
+        if c.curve != table_curve and not renaming:
+            session += 1  # another curve: its typed name is a step of its own
         curves = [
             (name, points_of(name)[0].size, curve_color(i))
             for i, name in enumerate(c.curve_names())
@@ -764,13 +767,16 @@ def install(window) -> None:
         sync_tool()
 
     # widgets -> state
-    session = 0
-
     def on_name(text: str) -> None:
+        nonlocal renaming
         problem = c.curve_name_problem(text, c.curve)
         panel.show_name_problem(problem)
         if problem is None and text.strip() != c.curve:
-            rename_curve(window, text, session)
+            renaming = True
+            try:
+                rename_curve(window, text, session)
+            finally:
+                renaming = False
 
     def on_name_done() -> None:
         nonlocal session
