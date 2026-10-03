@@ -29,7 +29,14 @@ CM1_PER_UNIT: dict[Unit, float] = {
 Bound = float | None
 Range = tuple[Bound, Bound]
 
-_LABEL_RE = re.compile(r"^\s*Energy\s*\((?P<unit>[^)]+)\)\s*$")
+# a header cell that names a unit in parentheses, e.g. "Energy (meV)"
+_LABEL_RE = re.compile(r"^[^()]*\((?P<unit>[^()]*)\)\s*$")
+_UNIT_NAMES = {
+    **{unit.value.lower(): unit for unit in Unit},
+    "cm^-1": Unit.CM1,
+    "cm⁻¹": Unit.CM1,
+    "1/cm": Unit.CM1,
+}
 
 
 def from_cm1(x: np.ndarray, unit: Unit | str) -> np.ndarray:
@@ -102,11 +109,17 @@ def axis_label(unit: Unit | str) -> str:
 
 
 def parse_axis_label(label: str) -> Unit | None:
-    """Inverse of :func:`axis_label`; returns None for unknown labels."""
+    """Inverse of :func:`axis_label`: the unit in the parentheses of a header cell.
+
+    None for a cell without one (legacy tables); ValueError for a unit the app does not know,
+    so that its numbers are never read in another unit.
+    """
     match = _LABEL_RE.match(label)
     if match is None:
         return None
-    try:
-        return Unit(match["unit"].strip())
-    except ValueError:
-        return None
+    name = match["unit"].strip()
+    unit = _UNIT_NAMES.get(name.lower())
+    if unit is None:
+        known = ", ".join(u.value for u in Unit)
+        raise ValueError(f"unknown energy unit {name!r} in the header (use {known})")
+    return unit

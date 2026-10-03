@@ -7,6 +7,7 @@ from pathlib import Path
 
 import numpy as np
 
+from mag_opt_detective.core.spectra import file_errors
 from mag_opt_detective.core.units import Unit, axis_label, from_cm1, parse_axis_label, to_cm1
 
 
@@ -83,19 +84,34 @@ class PointTable:
         """Read a table written by :meth:`save_tsv`, converting the energies to cm^-1.
 
         Legacy tables have an empty first header cell; their energies are taken to be
-        in *default_unit*.
+        in *default_unit*. Two curves with one name are an error.
         """
-        text = Path(path).read_text(encoding="utf-8").splitlines()
-        rows = [line.rstrip("\r").split("\t") for line in text if line.strip()]
-        if not rows:
-            raise ValueError(f"{Path(path).name}: empty file")
-        unit = parse_axis_label(rows[0][0]) or Unit(default_unit)
-        names = [n.strip() or f"unnamed_{i}" for i, n in enumerate(rows[0][1:], start=1)]
-        field = []
-        data = []
-        for cells in rows[1:]:
-            cells = cells + [""] * (len(names) + 1 - len(cells))
-            field.append(float(cells[0]))
-            data.append([float(c) if c.strip() else np.nan for c in cells[1 : len(names) + 1]])
+        name = Path(path).name
+        with file_errors(path):
+            text = Path(path).read_text(encoding="utf-8").splitlines()
+            rows = [
+                (n, line.rstrip("\r").split("\t"))
+                for n, line in enumerate(text, start=1)
+                if line.strip()
+            ]
+            if not rows:
+                raise ValueError(f"{name}: empty file")
+            header = rows[0][1]
+            unit = parse_axis_label(header[0]) or Unit(default_unit)
+            names = [n.strip() or f"unnamed_{i}" for i, n in enumerate(header[1:], start=1)]
+            twice = sorted({n for n in names if names.count(n) > 1})
+            if twice:
+                raise ValueError(f"{name}: more than one curve is named {twice[0]!r}")
+            field = []
+            data = []
+            for line, cells in rows[1:]:
+                cells = cells + [""] * (len(names) + 1 - len(cells))
+                try:
+                    field.append(float(cells[0]))
+                    data.append(
+                        [float(c) if c.strip() else np.nan for c in cells[1 : len(names) + 1]]
+                    )
+                except ValueError as exc:
+                    raise ValueError(f"{name}: line {line}: {exc}") from exc
         values = to_cm1(np.array(data, dtype=float).reshape(len(field), len(names)), unit)
         return cls(np.array(field), {n: values[:, i] for i, n in enumerate(names)})

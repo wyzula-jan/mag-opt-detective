@@ -10,7 +10,7 @@ from pathlib import Path
 import numpy as np
 
 from mag_opt_detective.core.opus import is_opus_file, read_opus
-from mag_opt_detective.core.spectra import FieldMap, energy_mask
+from mag_opt_detective.core.spectra import FieldMap, energy_mask, file_errors
 from mag_opt_detective.core.units import Unit
 
 # Field encoded in file names, e.g. ``..._Sam2_a01p250T.txt`` -> 1.25 T.
@@ -43,7 +43,8 @@ def sort_paths(paths: Iterable[str | Path]) -> list[str]:
 
 def read_text(path: str | Path) -> tuple[np.ndarray, np.ndarray]:
     """Two-column text file (x, y), any whitespace delimiter, CRLF safe."""
-    data = np.loadtxt(path, ndmin=2)
+    with file_errors(path):
+        data = np.loadtxt(path, ndmin=2)
     if data.shape[1] < 2:
         raise ValueError(f"{Path(path).name}: expected two columns (energy, intensity)")
     x, y = data[:, 0], data[:, 1]

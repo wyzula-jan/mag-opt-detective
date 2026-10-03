@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import dataclasses
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -100,31 +102,49 @@ def save_tsv(fmap: FieldMap, path: str | Path) -> None:
     np.savetxt(path, table, delimiter="\t", header=header, comments="", fmt="%.12g")
 
 
+@contextmanager
+def file_errors(path: str | Path) -> Iterator[None]:
+    """Name the file *path* in the ValueErrors raised inside the block (parse and decoding
+    errors), unless the message names it already."""
+    name = Path(path).name
+    try:
+        yield
+    except UnicodeDecodeError as exc:
+        raise ValueError(
+            f"{name}: not a text file in UTF-8 ({exc.reason} at byte {exc.start})"
+        ) from exc
+    except ValueError as exc:
+        if str(exc).startswith(f"{name}:"):
+            raise
+        raise ValueError(f"{name}: {exc}") from exc
+
+
 def load_tsv(path: str | Path, default_unit: Unit | str = Unit.CM1) -> FieldMap:
     """Read a table written by :func:`save_tsv` or by the legacy pandas exports.
 
     The first header cell may be empty (merged legacy exports); then *default_unit*
     is assumed. Field values are parsed from column labels such as ``0.25T``.
     """
-    with open(path, encoding="utf-8", newline=None) as fh:
-        header = fh.readline().rstrip("\r\n").split("\t")
-    if len(header) < 2:
-        raise ValueError(f"{Path(path).name}: expected a tab-separated table with a header")
-    unit = parse_axis_label(header[0]) or Unit(default_unit)
-    try:
-        field = np.array([parse_field_label(h) for h in header[1:]])
-    except ValueError as exc:
-        raise ValueError(f"{Path(path).name}: cannot parse field from header ({exc})") from exc
-
-    try:
-        table = np.loadtxt(path, delimiter="\t", skiprows=1, ndmin=2)
-    except ValueError:
-        # empty cells (NaN) are not supported by loadtxt
-        table = np.genfromtxt(path, delimiter="\t", skip_header=1)
-        table = np.atleast_2d(table)
+    name = Path(path).name
+    with file_errors(path):
+        with open(path, encoding="utf-8", newline=None) as fh:
+            header = fh.readline().rstrip("\r\n").split("\t")
+        if len(header) < 2:
+            raise ValueError(f"{name}: expected a tab-separated table with a header")
+        unit = parse_axis_label(header[0]) or Unit(default_unit)
+        try:
+            field = np.array([parse_field_label(h) for h in header[1:]])
+        except ValueError as exc:
+            raise ValueError(f"{name}: cannot parse field from header ({exc})") from exc
+        try:
+            table = np.loadtxt(path, delimiter="\t", skiprows=1, ndmin=2)
+        except ValueError:
+            # empty cells (NaN) are not supported by loadtxt
+            table = np.genfromtxt(path, delimiter="\t", skip_header=1)
+            table = np.atleast_2d(table)
     if table.shape[1] != field.size + 1:
         raise ValueError(
-            f"{Path(path).name}: {table.shape[1] - 1} data columns but {field.size} header labels"
+            f"{name}: {table.shape[1] - 1} data columns but {field.size} header labels"
         )
     order = np.argsort(table[:, 0], kind="stable")
     table = table[order]

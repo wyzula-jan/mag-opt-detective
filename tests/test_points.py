@@ -62,3 +62,19 @@ def test_legacy_points_are_read_in_the_default_unit(tmp_path, unit, factor):
     table = PointTable.load_tsv(path, default_unit=unit)
     np.testing.assert_allclose(table.column("LL 1"), [40.1 * factor, np.nan])
     np.testing.assert_allclose(table.column("LL 2"), [np.nan, 2 * factor])
+
+
+@pytest.mark.parametrize(
+    ("text", "message"),
+    [
+        (b"Energy (meV)\tLL 1\tLL 1\n0.5\t1\t2\n", "more than one curve is named 'LL 1'"),
+        (b"Energy (eV)\tLL 1\n0.5\t1\n", "unknown energy unit 'eV'"),
+        (b"Energy (meV)\tLL 1\n0.5\t1\n\n1.0\tx\n", "line 4: .*'x'"),
+        (b"Energy (meV)\tLL 1\n0.5\t\xff\n", "not a text file in UTF-8"),
+    ],
+)
+def test_point_import_errors_name_the_file(tmp_path, text, message):
+    path = tmp_path / "picked.csv"
+    path.write_bytes(text)
+    with pytest.raises(ValueError, match=f"picked.csv: {message}"):
+        PointTable.load_tsv(path)

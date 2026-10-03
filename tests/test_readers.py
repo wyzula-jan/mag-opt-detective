@@ -97,3 +97,17 @@ def test_load_measurement_errors(sweep, tmp_path):
     shifted = write_text(tmp_path / "s_a05p000T.txt", sweep["x"] + 1, sweep["base"])
     with pytest.raises(ValueError, match="energy axis differs"):
         load_measurement(sweep["zero"], [*sweep["field"], shifted])
+
+
+@pytest.mark.parametrize(
+    ("data", "message"),
+    [
+        (b"100.0\t1.0\n101.0\tx\n", r"broken_a01p000T\.txt: .*'x'"),
+        (b"100.0\t1.0\n" + bytes(range(128, 160)), r"broken_a01p000T\.txt: not a text file"),
+    ],
+)
+def test_a_broken_spectrum_names_its_file(sweep, tmp_path, data, message):
+    broken = tmp_path / "broken_a01p000T.txt"
+    broken.write_bytes(data)
+    with pytest.raises(ValueError, match=message):
+        load_measurement(sweep["zero"], [*sweep["field"], broken])

@@ -27,7 +27,11 @@ def test_units():
     np.testing.assert_allclose(convert([1.0], Unit.THZ, Unit.CM1), [33.35641])
     assert parse_axis_label(axis_label(Unit.MEV)) is Unit.MEV
     assert parse_axis_label("") is None
-    assert parse_axis_label("Energy (eV)") is None
+    assert parse_axis_label("Energy") is None
+    assert parse_axis_label(" Energy (cm^-1) ") is Unit.CM1
+    assert parse_axis_label("E (thz)") is Unit.THZ
+    with pytest.raises(ValueError, match="unknown energy unit 'eV'"):
+        parse_axis_label("Energy (eV)")
 
 
 def test_to_and_from_cm1():
@@ -119,6 +123,21 @@ def test_load_tsv_errors(tmp_path):
     with pytest.raises(ValueError, match="field"):
         load_tsv(path)
     assert field_label(1.0) == "1.00T"
+
+
+@pytest.mark.parametrize(
+    ("text", "message"),
+    [
+        (b"Energy (eV)\t0.25T\n1\t2\n", r"bad\.csv: unknown energy unit 'eV'"),
+        (b"Energy (meV)\t0.25T\n1\t2\n1\t2\t3\n", r"(?s)bad\.csv: .*got 3 columns"),
+        (b"Energy (meV)\t0.25T\n1\t\x80\n", r"bad\.csv: not a text file in UTF-8"),
+    ],
+)
+def test_load_tsv_errors_name_the_file(tmp_path, text, message):
+    path = tmp_path / "bad.csv"
+    path.write_bytes(text)
+    with pytest.raises(ValueError, match=message):
+        load_tsv(path, default_unit=Unit.MEV)
 
 
 def make_cm1_map() -> FieldMap:

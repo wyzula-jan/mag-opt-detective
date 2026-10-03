@@ -940,10 +940,8 @@ class AppController(QObject):
     def curve_name_problem(self, name: str, old: str | None = None) -> str | None:
         """Why *name* cannot name a curve (renaming *old*), or None if it can."""
         name = name.strip()
-        if not name:
-            return "enter a curve name"
-        if not CURVE_NAME.fullmatch(name):
-            return "use letters, digits, spaces and _ . + - (at most 32)"
+        if problem := _curve_name_rule(name):
+            return problem
         if name != old and name in self.curve_names():
             return f"a curve named {name!r} exists already"
         return None
@@ -1086,6 +1084,9 @@ class AppController(QObject):
         """Read a point table; one without a unit in its header is in the display unit."""
         with in_panel("points"):
             table = PointTable.load_tsv(path, default_unit=self._unit)
+            for name in table.names:
+                if problem := _curve_name_rule(name):
+                    raise ValueError(f"{Path(path).name}: curve {name!r}: {problem}")
         with self.point_edit(f"Import {Path(path).name}"):
             self.points = table
             if table.names:
@@ -1278,6 +1279,15 @@ class AppController(QObject):
         logger.info("-" * 40)
         logger.info("Averaged %s (%d datasets).", names, len(parts))
         return self._show_library(averaged, "Average: " + " + ".join(names))
+
+
+def _curve_name_rule(name: str) -> str | None:
+    """Why *name* (stripped) breaks the rule for curve names, or None."""
+    if not name:
+        return "enter a curve name"
+    if not CURVE_NAME.fullmatch(name):
+        return "use letters, digits, spaces and _ . + - (at most 32)"
+    return None
 
 
 def _mirrored(

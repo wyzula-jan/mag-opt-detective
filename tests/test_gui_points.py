@@ -658,3 +658,14 @@ def test_dropping_the_last_curve_leaves_an_empty_one(ctl):
     assert c.points.names == ["LL 1"] and c.curve == "LL 1"
     c.points_undo.undo()
     assert c.points.names == ["CR"] and c.curve == "CR"
+
+
+def test_imported_curve_names_follow_the_rules(ctl, tmp_path):
+    path = tmp_path / "points.csv"
+    path.write_text("Energy (cm-1)\tLL/1?*\n0.5\t300\n")
+    with pytest.raises(ValueError, match=r"points.csv: curve 'LL/1\?\*': use letters"):
+        ctl.load_points(path)
+    path.write_text("Energy (cm-1)\tLL 1\tLL 1\n0.5\t300\t310\n")
+    with pytest.raises(ValueError, match="more than one curve is named 'LL 1'"):
+        ctl.load_points(path)
+    assert ctl.points_undo.count() == 0
