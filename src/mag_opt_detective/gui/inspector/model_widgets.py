@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import math
 
-from PySide6.QtCore import QEvent, QRectF, QSignalBlocker, QSize, Qt, Signal
+from PySide6.QtCore import QEvent, QPointF, QRectF, QSignalBlocker, QSize, Qt, Signal
 from PySide6.QtGui import (
     QColor,
     QFont,
@@ -41,7 +41,7 @@ from mag_opt_detective.gui.panels.common import UnitField, mono_font, scaled_fon
 from mag_opt_detective.gui.theme import current_tokens
 from mag_opt_detective.gui.widgets import parse_float
 
-SHADOW = QColor(10, 6, 14, 150)  # outline of the colour dots, as the curve chips
+SHADOW = QColor(10, 6, 14, 150)  # data colour: the dark shadow of curves and dots
 
 
 def muted_label(text: str, factor: float = 0.88) -> QLabel:
@@ -62,6 +62,40 @@ def tool_button(icon: str, tooltip: str, color: str = "muted") -> QToolButton:
     button.setFixedSize(24, 24)
     icons.set_icon(button, icon, color)
     return button
+
+
+class IconButton(QToolButton):
+    """A small icon button painted as the kit tool buttons but without their padding, so the
+    icon keeps its size in a tight row (the card header in a narrow inspector)."""
+
+    def __init__(self, icon: str, tooltip: str, width: int, icon_size: int = 13):
+        super().__init__()
+        self.setToolTip(tooltip)
+        self.setAccessibleName(tooltip)
+        self.setFixedSize(width, 20)
+        self.setIconSize(QSize(icon_size, icon_size))
+        icons.set_icon(self, icon, "muted")
+
+    def paintEvent(self, event) -> None:
+        tokens = current_tokens()
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        hot = self.underMouse() and self.isEnabled()
+        if hot or self.hasFocus():
+            painter.setPen(QPen(tokens["accent"], 1) if self.hasFocus() else Qt.PenStyle.NoPen)
+            painter.setBrush(tokens["hover"] if hot else Qt.BrushStyle.NoBrush)
+            painter.drawRoundedRect(QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5), 5, 5)
+        mode = QIcon.Mode.Normal if self.isEnabled() else QIcon.Mode.Disabled
+        self.icon().paint(painter, self.rect(), Qt.AlignmentFlag.AlignCenter, mode)
+        painter.end()
+
+    def enterEvent(self, event) -> None:
+        self.update()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event) -> None:
+        self.update()
+        super().leaveEvent(event)
 
 
 def compact(field: UnitField) -> UnitField:
@@ -386,23 +420,23 @@ class CodeBox(QWidget):
         painter.end()
 
 
-CHIP = QColor(34, 26, 40)  # the dark chip a model's dashed line is shown on (as on a map)
-
-
-def paint_line_chip(painter: QPainter, rect: QRectF, color: str, border: QColor) -> None:
-    """A dark rounded chip with a dashed line in *color*: how the model's curves look."""
-    painter.setPen(QPen(border, 1))
-    painter.setBrush(CHIP)
-    painter.drawRoundedRect(rect, 3, 3)
+def paint_line_sample(painter: QPainter, rect: QRectF, color: str) -> None:
+    """A short model curve as the map draws it: dashed in *color* over its dark shadow, so
+    light colours show in both themes."""
+    middle = rect.center().y()
+    shadow = QPen(SHADOW, rect.height())
+    shadow.setCapStyle(Qt.PenCapStyle.RoundCap)
+    painter.setPen(shadow)
+    inset = rect.height() / 2
+    painter.drawLine(QPointF(rect.left() + inset, middle), QPointF(rect.right() - inset, middle))
     pen = QPen(QColor(color), 2)
     pen.setDashPattern([2.0, 1.5])
     painter.setPen(pen)
-    middle = rect.center().y()
-    painter.drawLine(rect.left() + 3, middle, rect.right() - 3, middle)
+    painter.drawLine(QPointF(rect.left() + 2, middle), QPointF(rect.right() - 2, middle))
 
 
-def color_icon(color: str, size: int = 16) -> QIcon:
-    """The line chip of *color* (menu entries of the colour swatch)."""
+def color_icon(color: str, selected: bool = False, size: int = 16) -> QIcon:
+    """The line sample of *color* (menu entries of the colour swatch); *selected* rings it."""
     icon = QIcon()
     for scale in (1.0, 2.0):
         pixmap = QPixmap(round(size * scale), round(size * scale))
@@ -410,17 +444,21 @@ def color_icon(color: str, size: int = 16) -> QIcon:
         pixmap.fill(Qt.GlobalColor.transparent)
         painter = QPainter(pixmap)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        paint_line_chip(painter, QRectF(0.5, 3.5, size - 1, size - 7), color, SHADOW)
+        if selected:
+            painter.setPen(QPen(current_tokens()["accent"], 1.5))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawRoundedRect(QRectF(0.75, 0.75, size - 1.5, size - 1.5), 4, 4)
+        paint_line_sample(painter, QRectF(2.5, size / 2 - 3, size - 5, 6), color)
         painter.end()
         icon.addPixmap(pixmap)
     return icon
 
 
 class ColorSwatch(QAbstractButton):
-    """The model colour as a dashed line on a dark chip; a click offers the other colours."""
+    """The model colour as a short curve (as on the map); a click offers the other colours."""
 
     colorChosen = Signal(str)
-    WIDTH, HEIGHT = 26, 22
+    WIDTH, HEIGHT = 20, 22
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -443,9 +481,14 @@ class ColorSwatch(QAbstractButton):
     def menu(self) -> QMenu:
         menu = QMenu(self)
         for color, name in zip(MODEL_COLORS, COLOR_NAMES, strict=True):
-            action = menu.addAction(color_icon(color), name)
+            chosen = color == self._color
+            action = menu.addAction(color_icon(color, chosen), name)
             action.setCheckable(True)
-            action.setChecked(color == self._color)
+            action.setChecked(chosen)
+            if chosen:  # the style may not draw the check next to an icon
+                font = QFont(menu.font())
+                font.setWeight(QFont.Weight.DemiBold)
+                action.setFont(font)
             action.triggered.connect(lambda _checked=False, c=color: self.colorChosen.emit(c))
         return menu
 
@@ -460,8 +503,7 @@ class ColorSwatch(QAbstractButton):
             painter.setPen(QPen(tokens["accent"] if self.hasFocus() else tokens["line-strong"], 1))
             painter.setBrush(tokens["hover"])
             painter.drawRoundedRect(QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5), 5, 5)
-        chip = QRectF(4.5, 6.5, self.WIDTH - 9, self.HEIGHT - 13)
-        paint_line_chip(painter, chip, self._color, tokens["line-strong"])
+        paint_line_sample(painter, QRectF(2, self.HEIGHT / 2 - 3, self.WIDTH - 4, 6), self._color)
         painter.end()
 
     def enterEvent(self, event) -> None:

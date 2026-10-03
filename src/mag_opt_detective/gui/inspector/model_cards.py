@@ -30,6 +30,7 @@ from mag_opt_detective.gui.inspector import model_state as ms
 from mag_opt_detective.gui.inspector.model_widgets import (
     CodeBox,
     ColorSwatch,
+    IconButton,
     NumberField,
     SliderField,
     TableBox,
@@ -570,19 +571,18 @@ class ModelCard(QWidget):
     def __init__(self, entry: ms.ModelEntry, owner: Owner, fit_area: QWidget, parent=None):
         super().__init__(parent)
         self.entry, self.owner = entry, owner
-        self.chevron = tool_button("chevron-down", "Collapse")
-        self.chevron.setFixedSize(20, 20)
-        self.chevron.setIconSize(QSize(13, 13))
+        self.chevron = IconButton("chevron-down", "Collapse", 14, 12)
         self.swatch = ColorSwatch()
         self.name = _Name(self)
         self.visible_switch = Switch()
         self.visible_switch.setToolTip("Show the curves on the map")
-        self.remove_button = tool_button("trash-2", "Remove model")
-        head = QHBoxLayout()
-        head.setContentsMargins(6, 5, 6, 5)
-        head.setSpacing(4)
+        self.remove_button = IconButton("trash-2", "Remove model", 18, 12)
+        head = QHBoxLayout()  # tight: the name keeps its room in a narrow inspector
+        head.setContentsMargins(4, 5, 4, 5)
+        head.setSpacing(2)
         head.addWidget(self.chevron)
         head.addWidget(self.swatch)
+        head.addSpacing(2)
         head.addWidget(self.name, stretch=1)
         head.addWidget(self.visible_switch)
         head.addWidget(self.remove_button)
