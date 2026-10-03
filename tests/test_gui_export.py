@@ -1,6 +1,7 @@
 """The journal figure window (Export > Image…): menus, presets, checks, preview and saving."""
 
 import json
+import os
 import re
 import subprocess
 import sys
@@ -200,14 +201,44 @@ def test_export_menu_entries(window):
     ]
 
 
+NEW_WINDOW_IMPORTS = """
+import sys
+
+import shiboken6
+
+
+class Excluded:  # the bundle leaves pyplot out (packaging/mag-opt-detective.spec)
+    def find_spec(self, name, path=None, target=None):
+        if name == "matplotlib.pyplot":
+            raise ModuleNotFoundError(f"No module named {name!r}", name=name)
+
+
+sys.meta_path.insert(0, Excluded())
+from PySide6.QtWidgets import QApplication
+
+app = QApplication([])
+from mag_opt_detective.gui.main_window import MainWindow
+
+window = MainWindow()
+loaded = ("mag_opt_detective.export", "matplotlib.font_manager", "matplotlib.pyplot")
+print([name for name in loaded if name in sys.modules])
+window.close()
+shiboken6.delete(window)
+"""
+
+
 def test_the_export_package_is_loaded_only_for_the_export_window():
-    """matplotlib (and its font cache, slow in a bundle) is imported when the window opens."""
-    code = (
-        "import sys, mag_opt_detective.gui.main_window\n"
-        "print('mag_opt_detective.export' in sys.modules)"
+    """A new main window (without pyplot, as in the bundle) loads neither the export package nor
+    matplotlib's font manager, whose font cache is slow to build the first time."""
+    env = {**os.environ, "QT_QPA_PLATFORM": "offscreen"}
+    out = subprocess.run(
+        [sys.executable, "-c", NEW_WINDOW_IMPORTS],
+        capture_output=True,
+        text=True,
+        check=True,
+        env=env,
     )
-    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True)
-    assert out.stdout.strip() == "False"
+    assert out.stdout.strip().splitlines()[-1] == "[]"
 
 
 def test_image_needs_processed_data(window, errors):
@@ -351,7 +382,7 @@ def test_preview_follows_changes_and_the_window(processed, qtbot, no_dialogs):
     dialog = open_export(w, qtbot)
     first = dialog.preview.image()
     dialog.widths["nature"].set_value("double")
-    assert dialog._debounce.isActive() and dialog._debounce.interval() == 150  # after a pause
+    assert not dialog.is_idle() and dialog.preview.image() is first  # drawn after a pause
     redraw(dialog, qtbot)
     image = dialog.preview.image()
     assert image is not first
