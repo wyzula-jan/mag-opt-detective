@@ -1,11 +1,30 @@
 name: App bundles
 
-# Standalone apps for computers without Python. Built for every version tag (v5.0.0) and on
-# demand; a tag also publishes them as a GitHub release.
+# Standalone apps for computers without Python. Built for every version tag (v5.0.0), on demand,
+# and whenever a change touches the packaging, so that spec changes are tested before a release.
+# Only a tag publishes them as a GitHub release.
 on:
   push:
     tags: ["v[0-9]+.[0-9]+.[0-9]+*"]
+    branches: [main]
+    paths: # not checked for tags
+      - "packaging/**"
+      - "pyproject.toml"
+      - "uv.lock"
+      - "src/mag_opt_detective/smoke.py"
+      - ".github/workflows/bundles.yml"
+  pull_request:
+    paths:
+      - "packaging/**"
+      - "pyproject.toml"
+      - "uv.lock"
+      - "src/mag_opt_detective/smoke.py"
+      - ".github/workflows/bundles.yml"
   workflow_dispatch:
+
+concurrency:
+  group: bundles-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
 
 jobs:
   bundle:
@@ -15,8 +34,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
+          # pinned: the README states the glibc this bundle needs (2.39, Ubuntu 24.04)
+          - os: ubuntu-24.04
             archive: mag-opt-detective-linux.tar.gz
+          # Apple silicon (arm64) only
           - os: macos-latest
             archive: mag-opt-detective-macos.zip
           - os: windows-latest
