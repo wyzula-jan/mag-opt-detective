@@ -1349,6 +1349,8 @@ class ExportDialog(QDialog):
     # ------------------------------------------------------------------ saving
     def save(self) -> None:
         """Ask for a file (suffix of the chosen format) and save the figure there."""
+        if (ranges := getattr(self.main_window, "view_ranges", None)) is not None:
+            ranges.finish()  # a pan or zoom on the window's plot not yet in its view state
         size = self.print_size()
         if self.problems() or self.renderer.saving():
             return

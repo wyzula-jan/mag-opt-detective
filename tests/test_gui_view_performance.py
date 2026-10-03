@@ -305,6 +305,32 @@ def test_a_lost_release_does_not_keep_a_gesture_open(shown, qtbot):
     QTest.mouseRelease(w.statusBar(), LEFT, PLAIN, QPoint(1, 1))  # Qt's button state
 
 
+def test_saving_a_figure_during_a_zoom_saves_the_zoom(shown, qtbot, tmp_path, monkeypatch):
+    w, c = shown, shown.controller
+    w.commands["export_figure"].trigger()
+    dialog = w.export_dialog
+    qtbot.waitUntil(lambda: dialog.preview.image() is not None and dialog.is_idle(), timeout=20000)
+    jobs = []
+    monkeypatch.setattr(dialog.renderer, "save", lambda job, out: jobs.append(job))
+    gui_helpers.save_to(monkeypatch, tmp_path / "figure.pdf")
+    wheel(w, "map")
+    zoomed = plot_range(w)
+    dialog.save()  # within GESTURE_MS: the zoom goes into the state first
+    assert not w.view_ranges.in_gesture()
+    assert c.view.field_range == pytest.approx(zoomed[0])
+    assert c.view.energy_range == pytest.approx(zoomed[1])
+    (job,) = jobs
+    assert job.state.x_range == pytest.approx(zoomed[0])
+    assert job.state.y_range == pytest.approx(zoomed[1])
+
+    wheel(w, "map")  # the quick image of the plot as well
+    gui_helpers.save_to(monkeypatch, tmp_path / "plot.png")
+    w.commands["export_image"].trigger()
+    assert not w.view_ranges.in_gesture()
+    assert c.view.energy_range == pytest.approx(plot_range(w)[1])
+    assert (tmp_path / "plot.png").exists()
+
+
 def test_a_drag_in_progress_is_saved(qtbot, tmp_path, sweep):
     ini = str(tmp_path / "settings.ini")
     w = MainWindow(settings=QSettings(ini, QSettings.Format.IniFormat))

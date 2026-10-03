@@ -662,6 +662,7 @@ def export_table(window) -> None:
 
 @user_action("Save image")
 def save_image(window) -> None:
+    window.view_ranges.finish()  # a pan or zoom not yet in the view state
     if window.controller.result is None:
         raise ValueError("nothing to save – process data first")
     view = window.plots[window.plot_area.current_view()]
