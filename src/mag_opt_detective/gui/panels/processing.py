@@ -294,18 +294,23 @@ def guide_ranges(energy_cut: Range | None, baseline: Range | None, unit: Unit):
 
 
 def region_limits(
-    energy: np.ndarray, energy_cut: Range | None, unit: Unit
+    energy: np.ndarray, energy_cut: Range | None, unit: Unit, values: np.ndarray | None = None
 ) -> tuple[float, float, float]:
     """Where the baseline region may be dragged, in *unit*: over the data's *energy* (cm^-1),
     inside the energy window (cm^-1) when it is set; and its smallest width, the widest step
-    between energies (so it always holds data)."""
+    between energies (so it always holds data). With the map's *values*, steps to or from an
+    energy without any value (the gap of a map merged by energy) do not count."""
     shown = from_cm1(np.asarray(energy, dtype=float), unit)
     lo, hi = float(np.min(shown)), float(np.max(shown))
     window, _region = guide_ranges(energy_cut, None, unit)
     if window is not None:
         lo = lo if window[0] is None else max(lo, window[0])
         hi = hi if window[1] is None else min(hi, window[1])
-    width = float(np.abs(np.diff(shown)).max()) if shown.size > 1 else 0.0
+    steps = np.abs(np.diff(shown))
+    if values is not None and steps.size:
+        empty = ~np.isfinite(np.asarray(values, dtype=float)).any(axis=1)
+        steps = steps[~(empty[:-1] | empty[1:])]
+    width = float(steps.max()) if steps.size else 0.0
     return lo, hi, width
 
 
@@ -570,7 +575,9 @@ def install(window) -> None:
         ends = (panel.baseline_lo.cm1(), panel.baseline_hi.cm1())
         if not on or pulling or c.result is None or c.is_restoring() or ends != (None, None):
             return
-        lo, hi, width = region_limits(c.result.ratio.energy, c.processing.energy_cut, c.unit)
+        lo, hi, width = region_limits(
+            c.result.ratio.energy, c.processing.energy_cut, c.unit, c.result.ratio.values
+        )
         if lo < hi:
             set_baseline(*default_region(lo, hi, width))
 
@@ -623,7 +630,9 @@ def install(window) -> None:
         wanted = c.result is not None and region is not None
         wanted = wanted and (panel_open() or panel.edit_on_plot.isChecked())
         if wanted:
-            lo, hi, width = region_limits(c.result.ratio.energy, p.energy_cut, c.unit)
+            lo, hi, width = region_limits(
+                c.result.ratio.energy, p.energy_cut, c.unit, c.result.ratio.values
+            )
             wanted = lo < hi and region[0] < hi and region[1] > lo  # some of it in reach
         for item in regions.values():
             if wanted:

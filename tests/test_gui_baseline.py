@@ -280,6 +280,15 @@ def test_region_limits():
     assert (lo, hi, width) == pytest.approx((100 / 8.0656, 160 / 8.0656, 30 / 8.0656))
 
 
+def test_region_limits_leave_out_a_gap():
+    """The empty samples of a map merged by energy do not make the region's width the gap."""
+    energy = np.array([100.0, 102.0, 104.0, 106.0, 200.0, 300.0, 302.0, 304.0])
+    values = np.ones((energy.size, 3))
+    values[[4]] = np.nan  # the gap 106 - 300, marked by an empty sample
+    assert region_limits(energy, None, Unit.CM1, values) == (100, 304, 2)
+    assert region_limits(energy, None, Unit.CM1) == (100, 304, 100)  # (without the values)
+
+
 # ---------------------------------------------------------------------- Live off
 def test_without_live_the_region_waits_for_process(processed):
     w, c = processed, processed.controller
