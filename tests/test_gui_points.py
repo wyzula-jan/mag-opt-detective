@@ -194,7 +194,7 @@ def test_new_table_on_the_next_process(shown):
     np.testing.assert_allclose(c.points.points("LL 1")[1], [300.0])
 
 
-def test_import_export_round_trip_and_legacy_files(processed, tmp_path, monkeypatch, errors):
+def test_import_export_round_trip_and_unitless_files(processed, tmp_path, monkeypatch, errors):
     w = processed
     c, panel = w.controller, w.panels["points"]
     set_unit(w, "meV")
@@ -212,9 +212,9 @@ def test_import_export_round_trip_and_legacy_files(processed, tmp_path, monkeypa
     np.testing.assert_allclose(c.points.points("LL 1")[1], [37.2 * MEV, 38.5 * MEV])
     assert w.points_undo.undoText() == "Import points.csv"
 
-    legacy = tmp_path / "Points_V1.csv"  # no unit in the header: read in the display unit
-    legacy.write_text("\tLL 2\tCR\n0.5\t40\t\n1.0\t\t\n1.5\t\t44\n2.0\t41\t\n")
-    open_from(monkeypatch, legacy)
+    unitless = tmp_path / "unitless.csv"  # no unit in the header: read in the display unit
+    unitless.write_text("\tLL 2\tCR\n0.5\t40\t\n1.0\t\t\n1.5\t\t44\n2.0\t41\t\n")
+    open_from(monkeypatch, unitless)
     panel.import_button.click()
     assert chips(w) == [("LL 2", "2", True), ("CR", "1", False)]
     assert panel.column_name.text() == "LL 2"

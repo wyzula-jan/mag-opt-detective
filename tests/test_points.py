@@ -70,8 +70,8 @@ def test_round_trip_in_unit(tmp_path, unit):
     np.testing.assert_allclose(back.column("LL 1"), table.column("LL 1"), rtol=1e-9)
 
 
-def test_load_legacy_points_with_empty_column_name(tmp_path):
-    path = tmp_path / "Points_V1.csv"
+def test_load_points_with_empty_column_name(tmp_path):
+    path = tmp_path / "unitless.csv"
     path.write_text("\t\tLL 1\n0.25\t\t40.1\n0.5\t\t\n")
     table = PointTable.load_tsv(path)
     assert table.names == ["unnamed_1", "LL 1"]
@@ -79,9 +79,9 @@ def test_load_legacy_points_with_empty_column_name(tmp_path):
 
 
 @pytest.mark.parametrize(("unit", "factor"), [(Unit.MEV, 8.0656), (Unit.THZ, 33.35641)])
-def test_legacy_points_are_read_in_the_default_unit(tmp_path, unit, factor):
+def test_points_without_unit_are_read_in_the_default_unit(tmp_path, unit, factor):
     """Files without a unit in the header (first cell empty) use *default_unit*."""
-    path = tmp_path / "Points_V1.csv"
+    path = tmp_path / "unitless.csv"
     path.write_bytes(b"\tLL 1\tLL 2\r\n0.25\t40.1\t\r\n0.5\t\t2\r\n")
     table = PointTable.load_tsv(path, default_unit=unit)
     np.testing.assert_allclose(table.column("LL 1"), [40.1 * factor, np.nan])

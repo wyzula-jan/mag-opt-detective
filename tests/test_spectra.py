@@ -112,7 +112,7 @@ def test_tsv_round_trip(tmp_path):
     np.testing.assert_allclose(back.values, fmap.values, rtol=1e-11)
 
 
-def test_load_legacy_merged_export(tmp_path):
+def test_load_table_without_unit_and_crlf(tmp_path):
     """A table with an empty first header cell and CRLF line ends loads."""
     path = tmp_path / "merged.csv"
     path.write_bytes(b"\t0.25T\t0.50T\r\n0.0\t1.0\t2.0\r\n0.1\t1.5\t2.5\r\n")
