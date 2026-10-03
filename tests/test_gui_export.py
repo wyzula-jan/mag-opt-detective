@@ -222,9 +222,10 @@ def test_export_menu_entries(window):
     file_menu = window.menuBar().actions()[0].menu()  # File > Export is the same menu
     assert window.toolbar.export_menu.menuAction() in file_menu.actions()
     texts = [a.text() for a in file_menu.actions() if a.text()]
-    assert texts[:4] == [  # sentence case, as the toolbar
+    assert texts[:5] == [  # sentence case, as the toolbar
         "Open sample sweep…",
         "Load sample zero field…",
+        "Watch a folder…",
         "Open reference sweep…",
         "Load reference zero field…",
     ]
