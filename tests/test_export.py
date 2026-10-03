@@ -46,7 +46,12 @@ from mag_opt_detective.export import (
     resolve_font,
     save,
 )
-from mag_opt_detective.export.figure import FIELD_LABEL, INTENSITY_LABEL, figure_rc
+from mag_opt_detective.export.figure import (
+    FIELD_LABEL,
+    INTENSITY_LABEL,
+    figure_rc,
+    legend_labels,
+)
 from mag_opt_detective.export.user_presets import FIGURE_FORMATS, read_stored
 
 MM = 25.4
@@ -803,6 +808,7 @@ def test_the_legend_lists_the_curves_and_the_models_once(map_state):
     ax = fig.axes[0]
     rows = _legend_rows(ax)
     assert [text for text, _sample in rows] == ["L0", "L1", "n=0", "Zeeman / magnon"]
+    assert legend_labels(state) == (["L0", "L1"], ["n=0", "Zeeman / magnon"])
     _assert_drawn_as(ax, rows)  # markers, fill, edges, dashes and outlines as on the map
     (_, current), (_, other), (_, dirac), (_, model) = rows
     assert current.get_marker() == "o" and other.get_marker() == "s"
@@ -844,15 +850,15 @@ def test_the_legend_of_spectra_leaves_out_curves_not_on_the_traces_shown(map_sta
     state = dataclasses.replace(
         map_state, kind="stacked", stacked=StackedOptions(0.05, 2), points=[*map_state.points, odd]
     )
-    ax = render(state, preset=APS, width_mm=86, height_mm=60, style=FigureStyle(legend=True)).axes[
-        0
-    ]
-    assert [text for text, _sample in _legend_rows(ax)] == ["L0", "L1"]  # every 2nd: 0, 2, 4 T
+    style = FigureStyle(legend=True)
+    fig = render(state, preset=APS, width_mm=86, height_mm=60, style=style)
+    rows = _legend_rows(fig.axes[0])
+    assert [text for text, _sample in rows] == ["L0", "L1"]  # every 2nd: 0, 2, 4 T
+    assert legend_labels(state) == (["L0", "L1"], [])  # what the export window counts
     every = dataclasses.replace(state, stacked=StackedOptions(0.05, 1))
-    ax = render(every, preset=APS, width_mm=86, height_mm=60, style=FigureStyle(legend=True)).axes[
-        0
-    ]
-    assert [text for text, _sample in _legend_rows(ax)] == ["L0", "L1", "odd"]
+    fig = render(every, preset=APS, width_mm=86, height_mm=60, style=style)
+    assert [text for text, _sample in _legend_rows(fig.axes[0])] == ["L0", "L1", "odd"]
+    assert legend_labels(every) == (["L0", "L1", "odd"], [])
 
 
 def test_a_legend_needs_labels(map_state):

@@ -1220,6 +1220,25 @@ def test_the_legend_lists_the_names_of_the_window(processed, qtbot, no_dialogs):
     assert fig.axes[0].get_legend() is None
 
 
+def test_the_legend_note_counts_what_the_stacked_figure_lists(processed, qtbot, no_dialogs):
+    w, c = processed, processed.controller
+    c.record_points([0.5, 1.5], [300.0, 320.0], unit="cm-1")  # on the 1st and 3rd traces
+    c.add_curve("odd")
+    c.record_points([1.0, 2.0], [500.0, 520.0], unit="cm-1")  # on the 2nd and 4th only
+    c.set_view(stacked_every=2)
+    dialog = open_export(w, qtbot)
+    dialog.view.set_value("stacked")
+    dialog.legend.setChecked(True)
+    redraw(dialog, qtbot)
+    assert dialog.legend_row.description_label.text() == "1 picked curve"
+    job = dialog.job(150)
+    fig = executor().submit(job.figure).result()  # matplotlib draws on the export thread only
+    assert [t.get_text() for t in fig.axes[0].get_legend().get_texts()] == ["LL 1"]
+    c.set_view(stacked_every=1)
+    redraw(dialog, qtbot)
+    assert dialog.legend_row.description_label.text() == "2 picked curves"
+
+
 def test_the_legend_switch_is_remembered_and_kept_in_presets(qtbot, tmp_path, sweep, errors):
     ini = str(tmp_path / "settings.ini")
     w = make_window(qtbot, ini, sweep)

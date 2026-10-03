@@ -35,7 +35,7 @@ from mag_opt_detective import __version__
 from mag_opt_detective.core import colormaps
 from mag_opt_detective.core.units import Unit
 from mag_opt_detective.export.presets import JournalPreset, get_preset
-from mag_opt_detective.export.state import Curve, FigureState, Range
+from mag_opt_detective.export.state import Curve, FigureState, PointSet, Range
 from mag_opt_detective.export.style import MINOR_WIDTH, FigureStyle, TickStyle
 
 logger = logging.getLogger(__name__)
@@ -384,7 +384,7 @@ def _draw_map(
             scalex=False,
             scaley=False,
         )
-        if points.label:
+        if _listed(points, points.x):
             rows.append((line, points.label))
     if state.colorbar:
         _colorbar(fig, ax, image, state.colorbar_label, lw, style)
@@ -399,6 +399,22 @@ def _line_style(curve: Curve, curves: list[Curve]):
         return "-"
     models = list(dict.fromkeys(c.label for c in curves if c.style == "model"))
     return _MODEL_DASHES[models.index(curve.label) % len(_MODEL_DASHES)]
+
+
+def _listed(points: PointSet, xs) -> bool:
+    """Whether the legend lists *points*: labelled, with markers drawn (*xs*, their x)."""
+    return bool(points.label) and len(xs) > 0
+
+
+def legend_labels(state: FigureState) -> tuple[list[str], list[str]]:
+    """The picked curves and the models the legend of *state* lists (as :func:`render` draws
+    it): the labelled point sets with markers drawn (on stacked spectra those on the traces
+    shown), then each model's label once (maps only)."""
+    if state.kind == "map":
+        models = list(dict.fromkeys(c.label for c in state.curves if c.label))
+        return [p.label for p in state.points if _listed(p, p.x)], models
+    placed = zip(state.points, stacked_points(state), strict=True)
+    return [p.label for p, (xs, _ys) in placed if _listed(p, xs)], []
 
 
 def _legend(ax: Axes, rows: list[tuple[Line2D, str]], fs: float, lw: float, dark: bool) -> None:
@@ -459,21 +475,16 @@ def _field_tolerance(field: np.ndarray) -> float:
     return 0.5 if steps.size == 0 else 0.5 * float(steps.min())
 
 
-def _draw_stacked(
-    fig: Figure, ax: Axes, state: FigureState, fs: float, lw: float, style: FigureStyle
-) -> None:
+def stacked_points(state: FigureState) -> list[tuple[list[float], list[float]]]:
+    """(energies, heights drawn) of each point set of stacked spectra: every point on the trace
+    of its field, with that trace's offset; points on traces not shown are left out."""
     fmap, options = state.fmap, state.stacked
     order = np.argsort(fmap.energy, kind="stable")
     energy, values = fmap.energy[order], fmap.values[order]
-    shown = np.arange(0, fmap.field.size, options.every)
-    position = {int(j): k for k, j in enumerate(shown)}
-    for k, (j, colour) in enumerate(zip(shown, _trace_colours(state, shown), strict=True)):
-        ax.plot(energy, values[:, j] + k * options.offset, color=colour, linewidth=lw)
-
+    position = {j: k for k, j in enumerate(range(0, fmap.field.size, options.every))}
     tolerance = _field_tolerance(fmap.field)
-    size = 0.55 * fs
-    rows = []
-    for n, points in enumerate(state.points):
+    placed = []
+    for points in state.points:
         xs, ys = [], []
         for b, e in zip(points.x, points.y, strict=True):
             if not (np.isfinite(b) and np.isfinite(e)):
@@ -486,6 +497,24 @@ def _draw_stacked(
             if np.isfinite(y):
                 xs.append(e)
                 ys.append(y + k * options.offset)
+        placed.append((xs, ys))
+    return placed
+
+
+def _draw_stacked(
+    fig: Figure, ax: Axes, state: FigureState, fs: float, lw: float, style: FigureStyle
+) -> None:
+    fmap, options = state.fmap, state.stacked
+    order = np.argsort(fmap.energy, kind="stable")
+    energy, values = fmap.energy[order], fmap.values[order]
+    shown = np.arange(0, fmap.field.size, options.every)
+    for k, (j, colour) in enumerate(zip(shown, _trace_colours(state, shown), strict=True)):
+        ax.plot(energy, values[:, j] + k * options.offset, color=colour, linewidth=lw)
+
+    size = 0.55 * fs
+    rows = []
+    placed = zip(state.points, stacked_points(state), strict=True)
+    for n, (points, (xs, ys)) in enumerate(placed):
         (line,) = ax.plot(
             xs,
             ys,
@@ -499,7 +528,7 @@ def _draw_stacked(
             scalex=False,
             scaley=False,
         )
-        if points.label and xs:  # only the curves drawn on the traces shown
+        if _listed(points, xs):  # only the curves drawn on the traces shown
             rows.append((line, points.label))
     ax.set_xlabel(energy_label(fmap.unit) if state.x_label is None else state.x_label)
     ax.set_ylabel(INTENSITY_LABEL if state.y_label is None else state.y_label)

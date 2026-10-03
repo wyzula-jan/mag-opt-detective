@@ -34,6 +34,7 @@ from PySide6.QtWidgets import (
 
 from mag_opt_detective.core.units import Unit
 from mag_opt_detective.export import PRESETS, FigureStyle, JournalPreset, get_preset
+from mag_opt_detective.export.figure import legend_labels
 from mag_opt_detective.export.style import COLORBAR_LOCATIONS, MINOR_INTERVALS, TICK_DIRECTIONS
 from mag_opt_detective.export.user_presets import COLOUR_RANGES, UserPreset
 from mag_opt_detective.gui import icons
@@ -1291,10 +1292,8 @@ class ExportDialog(QDialog):
         self._keep_shown_levels()
         names = model_names(self.main_window)
         state = figure_state(self.controller, self.content(), snapshot, model_names=names)
-        self._legend_counts = (
-            sum(bool(s.label) for s in state.points),
-            len({c.label for c in state.curves if c.label}),
-        )
+        curves, models = legend_labels(state)  # what the figure's legend lists
+        self._legend_counts = (len(curves), len(models))
         return state
 
     def _draw_preview(self) -> None:
