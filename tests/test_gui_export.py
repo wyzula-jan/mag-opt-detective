@@ -688,7 +688,7 @@ def test_colour_range_window_auto_and_fixed(processed, qtbot, no_dialogs):
     assert dialog.figure_state().levels == (0.97, 1.01)
     assert dialog.settings.settings_value() == stored  # drawing it changes nothing
     assert c.current_levels() == pytest.approx((0.95, 1.05))  # the window keeps its own
-    assert "Remembered for R(B)/R(0)" in dialog.levels_note.text()
+    assert dialog.levels_note.text() == "In the plot's values. Remembered for R(B)/R(0)."
     redraw(dialog, qtbot)
     first = dialog.preview.image()
 
@@ -718,6 +718,7 @@ def test_fixed_levels_are_kept_per_plot_in_cm1(processed, qtbot):
     in_window = c.figure_state().levels
     lo, hi = (float(dialog.level_lo.edit.text()), float(dialog.level_hi.edit.text()))
     assert (lo, hi) == pytest.approx(in_window, rel=1e-5)  # prefilled from the window
+    assert dialog.levels_note.text().startswith("In the plot's values, per cm⁻¹. Remembered")
     dialog.level_lo.edit.setText("-0.002")
     dialog.level_hi.edit.setText("0.004")
     assert dialog.figure_state().levels == (-0.002, 0.004)
@@ -726,12 +727,15 @@ def test_fixed_levels_are_kept_per_plot_in_cm1(processed, qtbot):
     assert stored[key] == pytest.approx([-0.002, 0.004])  # per cm-1
 
     set_unit(w, "meV")  # per meV: the same levels, in the new unit's scale
+    assert dialog.levels_note.text().startswith("In the plot's values, per meV.")
     assert float(dialog.level_lo.edit.text()) == pytest.approx(-0.002 * MEV)
     assert float(dialog.level_hi.edit.text()) == pytest.approx(0.004 * MEV)
     assert dialog.figure_state().levels == pytest.approx((-0.002 * MEV, 0.004 * MEV))
     dialog.level_hi.edit.setText(f"{0.005 * MEV:g}")
     assert dialog.settings.values["fixed_levels"][key] == pytest.approx([-0.002, 0.005])
 
+    select(w, order=2)  # 2nd derivative per meV: values per meV²
+    assert dialog.levels_note.text().startswith("In the plot's values, per meV².")
     select(w, order=0)  # back to the ratio: its own values, not the derivative's
     assert [dialog.level_lo.edit.text(), dialog.level_hi.edit.text()] == ["0.97", "1.03"]
     assert dialog.figure_state().levels == (0.97, 1.03)

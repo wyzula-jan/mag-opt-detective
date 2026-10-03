@@ -47,7 +47,7 @@ from mag_opt_detective.export.style import (
 )
 from mag_opt_detective.export.user_presets import COLOUR_RANGES
 from mag_opt_detective.gui.controller import parse_level_key
-from mag_opt_detective.gui.display import energy_label
+from mag_opt_detective.gui.display import energy_label, unit_text
 from mag_opt_detective.gui.widgets import parse_float
 
 KINDS = ("map", "stacked")
@@ -181,6 +181,22 @@ def canonical_levels(key: str, levels: tuple[float, float], unit: Unit) -> tuple
 def display_levels(key: str, levels: tuple[float, float], unit: Unit) -> tuple[float, float]:
     """Stored levels of *key* (see :func:`canonical_levels`) as shown in *unit*."""
     return convert_levels(levels, Unit.CM1, unit, *_level_scale(key))
+
+
+_SQUARED = {1: "", 2: "²"}
+
+
+def per_unit_text(key: str, unit: Unit) -> str:
+    """What the values of a per-unit derivative are divided by, e.g. "per meV²" ("" for
+    maps whose values have no unit)."""
+    k = parse_level_key(key)
+    if not (k.order and k.physical):
+        return ""
+    if not k.axis_is_energy:
+        return f"per T{_SQUARED[k.order]}"
+    if Unit(unit) is Unit.CM1:
+        return "per cm⁻¹" if k.order == 1 else "per cm⁻²"
+    return f"per {unit_text(unit)}{_SQUARED[k.order]}"
 
 
 def levels_problem(lo: float | None, hi: float | None) -> str:

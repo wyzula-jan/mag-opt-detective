@@ -66,6 +66,7 @@ from mag_opt_detective.gui.export_state import (
     levels_problem,
     map_levels,
     model_curves,
+    per_unit_text,
     point_sets,
     print_size,
     with_format,
@@ -1203,7 +1204,10 @@ class ExportDialog(QDialog):
         if not is_map:
             note = "Stacked traces are coloured by field: the range is for maps."
         elif mode == RANGE_FIXED:
-            note = f"In the plot's values. Remembered for {level_label(self.level_key())}."
+            key = self.level_key()
+            per = per_unit_text(key, Unit(self.controller.unit))
+            values = f"In the plot's values, {per}." if per else "In the plot's values."
+            note = f"{values} Remembered for {level_label(key)}."
         else:
             note = RANGE_NOTES[mode]
         self.levels_note.setText(note)
