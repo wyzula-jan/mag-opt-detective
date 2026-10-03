@@ -43,7 +43,13 @@ from mag_opt_detective.core.processing import (
     merge_energy,
     merge_field,
 )
-from mag_opt_detective.core.readers import Measurement, load_measurement, sort_paths
+from mag_opt_detective.core.readers import (
+    Measurement,
+    SpectrumCache,
+    load_measurement,
+    read_spectrum,
+    sort_paths,
+)
 from mag_opt_detective.core.spectra import FieldMap, energy_mask, load_tsv, sample_at
 from mag_opt_detective.core.units import (
     Range,
@@ -515,6 +521,7 @@ class AppController(QObject):
         self._processed_with: ProcessingState | None = None
         self._changed = False
         self._live_baseline = False  # the baseline region is applied as it changes
+        self._spectra: SpectrumCache | None = None  # while a folder is watched
         self._data_states = {part: DATA_EMPTY for part in DATA_PARTS}
         self._restoring = 0
         self.curve = "LL 1"
@@ -803,7 +810,9 @@ class AppController(QObject):
             field_values = None
             if self._processing.custom_field:
                 field_values = field_range.values(expected=len(files.field) or None)
-            return load_measurement(files.zero, files.field, field=field_values)
+            return load_measurement(
+                files.zero, files.field, field=field_values, read=self.read_spectrum
+            )
 
     def _cut(self, measurement: Measurement) -> Measurement:
         cut = self._processing.energy_cut
@@ -814,11 +823,12 @@ class AppController(QObject):
         mask = energy_mask(spectra.energy, *cut)
         return Measurement(spectra=crop_energy(spectra, *cut), zero=measurement.zero[mask])
 
-    def process(self) -> ProcessResult:
+    def process(self, quiet: bool = False) -> ProcessResult:
         """Load the sweep(s), process them and show the result.
 
         A separate reference sweep without files is left out: the sample is processed as
-        without a reference, and :attr:`referenceMissing` says so after the result is shown.
+        without a reference, and :attr:`referenceMissing` says so after the result is shown
+        (unless *quiet*: the repeated updates of a watched folder, :meth:`process_update`).
         """
         p = self._processing
         unit = self._unit
@@ -842,7 +852,7 @@ class AppController(QObject):
         reference = None
         mode = p.reference_used()
         missing = mode is not p.reference_mode  # a separate sweep without files
-        if missing:
+        if missing and not quiet:
             logger.warning(NO_REFERENCE_FILES)
         if mode is ReferenceMode.SEPARATE:
             reference = self._cut(self._load(p.reference_files, p.reference_field, "reference"))
@@ -867,7 +877,8 @@ class AppController(QObject):
             lo, hi = from_cm1(np.array(baseline), unit)
             logger.info("Baseline corrected in range %.6g – %.6g %s.", lo, hi, unit)
         self.set_result(result)
-        if missing:  # after resultChanged, whose listeners close the bar a note shows in
+        # after resultChanged, whose listeners close the bar a note shows in
+        if missing and not quiet:
             self.referenceMissing.emit(NO_REFERENCE_FILES)
         return result
 
@@ -894,6 +905,37 @@ class AppController(QObject):
             self.check_energy_range("baseline region", baseline, fmap.energy, "processing")
         result = ProcessResult.from_map(fmap, baseline)
         self.set_result(result, processed=False)
+        return result
+
+    # --- watched folder (gui/watch.py) ------------------------------------------------
+    # While a folder is watched, the spectra read are kept (SpectrumCache: by path, size and
+    # modification time), so an update reads only the new or changed files; Process reads
+    # through the same cache then. process_update processes as Process does.
+    def set_spectrum_cache(self, on: bool) -> None:
+        """Keep the spectra read (*on*), or read every file each time (off: they are freed)."""
+        if not on:
+            self._spectra = None
+        elif self._spectra is None:
+            self._spectra = SpectrumCache()
+
+    def spectrum_cache(self) -> SpectrumCache | None:
+        return self._spectra
+
+    def read_spectrum(self, path: str | Path) -> tuple[np.ndarray, np.ndarray]:
+        """Read one spectrum (cm^-1), through the cache while there is one."""
+        cache = self._spectra
+        return read_spectrum(path) if cache is None else cache.read(path)
+
+    def process_update(self, first: bool = False) -> ProcessResult:
+        """Process again for an update of a watched folder, exactly as :meth:`process` does
+        with the current options; points, view and levels stay. Only the *first* update of a
+        watch gives the note about missing reference files. The cache then keeps only the
+        files in use."""
+        result = self.process(quiet=not first)
+        if self._spectra is not None:
+            p = self._processing
+            files = (p.sample_files, p.reference_files)
+            self._spectra.retain(path for f in files for path in (*f.zero, *f.field))
         return result
 
     # --- live baseline -----------------------------------------------------------------
