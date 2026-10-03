@@ -339,9 +339,11 @@ def test_live_coalesces_a_drag(processed, qtbot):
     runs = live.runs
     plot = w.plots.map
     steps = [(1.2, 550.0 + 10 * k) for k in range(31)]  # the upper edge, up by 300 cm-1
+    start = time.perf_counter()
     mouse_drag(qtbot, plot, steps, release=False)
+    elapsed = (time.perf_counter() - start) * 1000
     during = live.runs - runs
-    assert 1 <= during <= 30 * move_pause_ms() / live.INTERVAL + 2  # at most ~10 a second
+    assert 1 <= during <= elapsed / live.INTERVAL + 1  # at once, then at most ~10 a second
     QTest.mouseRelease(plot.view.viewport(), LEFT, PLAIN, viewport_pos(plot, *steps[-1]))
     assert not live.is_pending()  # applied when let go
     assert c.result.baseline_region == c.processing.baseline
