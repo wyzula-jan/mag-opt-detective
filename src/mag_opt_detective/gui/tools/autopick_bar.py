@@ -1,15 +1,16 @@
-"""The options bar of the Auto-pick tool, floating over the top of the map.
+"""The options bar of the Auto-pick tool: a strip above the map while the tool is active.
 
-A card in the window colour with an accent border, like the pick hint chip: the mode, the
-feature, the search window, the smoothing and the prominence, then a status line with Discard
-and Accept. The controls wrap onto more rows when the plot is narrow.
+The strip takes its room from the plot (the map moves down, nothing is covered): the mode,
+the feature, the search window, the smoothing and the prominence, then a status line with
+Discard and Accept. The controls wrap onto more rows when the plot is narrow.
 """
 
 from __future__ import annotations
 
-from PySide6.QtCore import QEvent, QObject, QRectF, QSize, Qt
-from PySide6.QtGui import QPainter, QPen
+from PySide6.QtCore import QSize, Qt
+from PySide6.QtGui import QPainter
 from PySide6.QtWidgets import (
+    QBoxLayout,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -74,6 +75,13 @@ def _label(text: str) -> QLabel:
     return label
 
 
+def _title() -> QLabel:
+    """The tool's name, first in the strip."""
+    text = QLabel("Auto-pick")
+    text.setFont(scaled_font(text, 0.94, bold=True))
+    return text
+
+
 def _segmented(options, name: str) -> SegmentedControl:
     control = SegmentedControl(size="xs")
     for value, text, tooltip in options:
@@ -96,11 +104,10 @@ def _group(*widgets: QWidget) -> QWidget:
 class AutoPickBar(QFrame):
     """Options, status and Accept/Discard of the Auto-pick tool.
 
-    It sits at the top centre of *host* (the plot box), below *avoid* (the error bar) while
-    that is shown, and is as wide as its controls in one row or as the host allows.
+    A strip at the top of *host* (the plot box): it goes first in the host's box layout, so
+    the plot below it gets smaller while it is shown instead of being covered. *avoid* (the
+    error bar) floats over the plot below the strip, so the two never overlap.
     """
-
-    MARGIN = 10
 
     def __init__(self, host: QWidget, avoid: QWidget | None = None):
         super().__init__(host)
@@ -137,8 +144,10 @@ class AutoPickBar(QFrame):
             button.setIconSize(QSize(14, 14))
             button.setFixedHeight(24)
 
+        self.title = _title()
         self.controls = QWidget()
         self._flow = FlowLayout(self.controls, spacing=SPACING, row_spacing=5)
+        self._flow.addWidget(self.title)
         self._flow.addWidget(self.mode)
         self._flow.addWidget(self.feature)
         self.window_label = _label("Window")
@@ -156,15 +165,15 @@ class AutoPickBar(QFrame):
         footer.addWidget(self.discard_button, 0, Qt.AlignmentFlag.AlignTop)
         footer.addWidget(self.accept_button, 0, Qt.AlignmentFlag.AlignTop)
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(10, 6, 10, 6)
+        layout.setContentsMargins(10, 7, 10, 8)
         layout.setSpacing(6)
         layout.addWidget(self.controls)
         layout.addLayout(footer)
 
-        host.installEventFilter(self)
-        if avoid is not None:
-            avoid.installEventFilter(self)
         self.hide()
+        box = host.layout()
+        if isinstance(box, QBoxLayout):
+            box.insertWidget(0, self)
 
     # --- content -----------------------------------------------------------------------
     def set_prominence_unit(self, slope: bool, unit_text: str) -> None:
@@ -174,52 +183,20 @@ class AutoPickBar(QFrame):
         self.prominence_edit.setToolTip(tip)
         self.prominence_field.setToolTip(tip)
         self.prominence_label.setToolTip(tip)
-        self.place()
 
     def set_status(self, text: str, level: str = "info") -> None:
         self.status.set_text(text, level)
         self.status.setToolTip(text)
-        self.place()
 
     def status_text(self) -> str:
         return self.status.text()
 
-    # --- placement ---------------------------------------------------------------------
-    def _row_width(self) -> int:
-        """Width of the controls in one row (with the margins)."""
-        hints = [self._flow.itemAt(i).sizeHint().width() for i in range(self._flow.count())]
-        margins = self.layout().contentsMargins()
-        spacing = SPACING * (len(hints) - 1)
-        return sum(hints) + spacing + margins.left() + margins.right()
-
-    def place(self) -> None:
-        if self.isHidden():
-            return
-        area = self._host.rect()
-        width = max(160, min(self._row_width(), area.width() - 2 * self.MARGIN))
-        height = max(self.heightForWidth(width), self.minimumSizeHint().height())
-        top = self.MARGIN
-        avoid = self._avoid
-        if avoid is not None and avoid.isVisible() and avoid.parentWidget() is self._host:
-            top = avoid.geometry().bottom() + 8
-        self.setGeometry((area.width() - width) // 2, top, width, height)
-        self.raise_()
-
-    def showEvent(self, event) -> None:
-        super().showEvent(event)
-        self.place()
-
-    def eventFilter(self, watched: QObject, event: QEvent) -> bool:
-        kinds = (QEvent.Type.Resize, QEvent.Type.Move, QEvent.Type.Show, QEvent.Type.Hide)
-        if event.type() in kinds:
-            self.place()
-        return False
-
     def paintEvent(self, event) -> None:
+        """The window colour, a line below and an accent mark at the start (the tool is on)."""
         tokens = current_tokens()
         painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.setPen(QPen(tokens["accent"], 1))
-        painter.setBrush(tokens["win"])
-        painter.drawRoundedRect(QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5), 8, 8)
+        rect = self.rect()
+        painter.fillRect(rect, tokens["win"])
+        painter.fillRect(0, rect.height() - 1, rect.width(), 1, tokens["line"])
+        painter.fillRect(0, 0, 3, rect.height() - 1, tokens["accent"])
         painter.end()

@@ -126,12 +126,27 @@ def test_the_tool_sits_with_pan_zoom_and_pick(shown):
     QTest.keyClick(w.plots.map.view, Qt.Key.Key_W)
     assert tools.active() == "autopick" and tool.button.isChecked()
     assert bar.isVisible()
-    assert bar.geometry().top() >= 10 and bar.width() <= w.plot_area.plot_box.width() - 20
     QTest.keyClick(w.plots.map.view, Qt.Key.Key_W)
     assert tools.active() == "navigate" and bar.isHidden()
     w.plot_area.set_current_view("stacked")
     assert not tool.button.isEnabled()
     assert not tools.set_active("autopick")
+
+
+def test_the_options_strip_moves_the_map_down_instead_of_covering_it(shown, qtbot):
+    w, bar, area = shown, shown.autopick.bar, shown.plot_area
+    stack = area.stack
+    qtbot.waitUntil(lambda: stack.geometry().top() > bar.geometry().bottom())
+    assert bar.geometry().top() == 0 and bar.width() == area.plot_box.width()
+    assert stack.geometry().bottom() == area.plot_box.height() - 1  # the plot gave the room
+    w.report_error("Process", "something went wrong")  # the error bar floats below the strip
+    qtbot.waitUntil(lambda: not w.infobar.isHidden())
+    assert w.infobar.geometry().top() >= stack.geometry().top()
+    w.resize(1100, 800)  # narrow: the controls wrap, the strip grows and the map shrinks more
+    qtbot.waitUntil(lambda: stack.geometry().top() > bar.geometry().bottom())
+    assert bar.controls.height() > bar.mode.height() * 2
+    w.tools.set_active("navigate")
+    qtbot.waitUntil(lambda: stack.geometry().top() == 0)
 
 
 def test_nothing_happens_without_a_processed_map(window):
