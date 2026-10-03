@@ -6,7 +6,10 @@ Desktop app to plot, pick, fit and export magneto-optical FTIR measurements: fie
 recorded with Bruker OPUS, either as OPUS binary files (`*.0`, `*.1`, …) or as two-column
 text files written by the OPUS export macro.
 
-![The main window: the Sample panel, an R(B)/R(0) map with picked points and a Dirac model, and the inspector](docs/images/main-window.png)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/main-window-dark.webp">
+  <img alt="The main window: the Sample panel, an R(B)/R(0) map with picked points, a Dirac model and a legend, and the inspector" src="docs/images/main-window-light.webp">
+</picture>
 
 *All screenshots show a synthetic Landau fan, drawn by
 [`docs/make_screenshots.py`](docs/make_screenshots.py).*
@@ -94,9 +97,15 @@ range, then merge spectral ranges, merge field ranges or average repeated sweeps
 Choices (units, ranges, levels, colours, layout) are remembered between sessions;
 *View › Reset settings* restores the defaults (and keeps your figure presets).
 
-![Picked points in the dark appearance, in meV, with the slim colour bar](docs/images/points-dark.png)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/points-dark.webp">
+  <img alt="Picked points in meV, with the slim colour bar" src="docs/images/points-light.webp">
+</picture>
 
-![The journal figure window with a Nature single-column preview](docs/images/export-window.png)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/export-window-dark.webp">
+  <img alt="The journal figure window with a Nature single-column preview" src="docs/images/export-window-light.webp">
+</picture>
 
 ## Installation
 

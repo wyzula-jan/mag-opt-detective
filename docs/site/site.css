@@ -66,6 +66,7 @@ body {
   flex-direction: column;
 }
 img { max-width: 100%; height: auto; }
+picture { display: block; } /* a screenshot in the appearance of the page (light or dark) */
 h1, h2, h3 { font-family: var(--font-display); font-weight: 600; line-height: 1.15; text-wrap: balance; }
 h1 { font-size: clamp(2rem, 1.4rem + 2.6vw, 2.9rem); letter-spacing: -0.01em; margin: 0 0 0.4em; }
 h2 { font-size: clamp(1.4rem, 1.2rem + 0.8vw, 1.7rem); margin: 2.2em 0 0.6em; }
@@ -196,7 +197,7 @@ blockquote { margin: 0 0 1rem; padding: 0.2rem 0 0.2rem 1rem; border-left: 3px s
 
 /* screenshots */
 .shot { margin: 1.6em 0 2em; }
-.shot img, .shot picture img {
+.shot img {
   display: block; width: 100%; height: auto;
   border: 1px solid var(--line-strong); border-radius: 10px;
   box-shadow: var(--shadow); background: var(--surface);

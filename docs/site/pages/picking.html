@@ -9,8 +9,11 @@ description: Record transition energies by hand on the map or the stacked plot, 
 
 <h2 id="points-panel">The Points panel</h2>
 <figure class="shot">
-  <img src="images/points-dark.png" width="1400" height="900" loading="lazy" decoding="async" alt="The dark appearance with energies in meV: the Points panel lists the curves LL 1, LL 2 and CR as chips and the points of LL 2 in a table; the pick tool is active and the picked points sit on the lines of the map.">
-  <figcaption>Picking in meV, in the dark appearance: the curves as chips, the points of the current curve in the table, and the points on the map.</figcaption>
+  <picture>
+    <source srcset="images/points-dark.webp" media="(prefers-color-scheme: dark)">
+    <img src="images/points-light.webp" width="1400" height="900" loading="lazy" decoding="async" alt="Picking with energies in meV: the Points panel lists the curves LL 1, LL 2 and CR as chips and the points of LL 2 in a table; the pick tool is active and the picked points sit on the lines of the map.">
+  </picture>
+  <figcaption>Picking in meV: the curves as chips, the points of the current curve in the table, and the points on the map.</figcaption>
 </figure>
 <p>The first Process creates a point table with a row for every field of the map. The <b>Points</b> panel shows it:</p>
 <dl class="terms">
@@ -45,7 +48,10 @@ description: Record transition energies by hand on the map or the stacked plot, 
 
 <h2 id="autopick">Auto-pick</h2>
 <figure class="shot">
-  <img src="images/autopick-light.png" width="1400" height="900" loading="lazy" decoding="async" alt="Auto-pick in Detect mode on the R(B)/R(0) map: the options strip above the map with Track and Detect, Max, Min, Rising and Falling, the window, smoothing and prominence; a dashed box on the map with five lines found in it, and the line that continues LL 2 marked with diamonds.">
+  <picture>
+    <source srcset="images/autopick-dark.webp" media="(prefers-color-scheme: dark)">
+    <img src="images/autopick-light.webp" width="1400" height="900" loading="lazy" decoding="async" alt="Auto-pick in Detect mode on the R(B)/R(0) map: the options strip above the map with Track and Detect, the shapes Box, Rotated, Ellipse and Polygon, Max, Min, Rising and Falling, the window, smoothing and prominence; a dashed box on the map with five lines found in it, and the line that continues LL 2 marked with diamonds.">
+  </picture>
   <figcaption>Detect in a box from 3 to 12 T: five lines found, and the one that continues the curve LL 2 chosen (diamonds). Accept puts its points into LL 2.</figcaption>
 </figure>
 <p>The <b>Auto-pick</b> tool (<kbd>W</kbd>, the wand in the plot toolbar, or <b>Auto-pick</b> in the Points panel) finds the points of a line for you. It works on the map, on whatever map is shown: plot kind, derivative and unit. A strip of options opens above the map.</p>

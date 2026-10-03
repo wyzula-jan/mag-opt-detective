@@ -10,8 +10,8 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 SITE = ROOT / "docs" / "site"
 RELEASES = "https://github.com/wyzula-jan/mag-opt-detective/releases/latest/download/"
-MAX_IMAGE_BYTES = 400_000
-MAX_IMAGES = 15
+MAX_IMAGE_BYTES = 200_000  # lossless WebP of a 1400 x 900 window: about 140 kB
+MAX_IMAGES = 24  # 10 scenes, each light and dark, and room for two more
 
 
 def load_build():
@@ -122,7 +122,7 @@ def test_images_are_used_have_alt_text_and_stay_small(site):
     images = sorted(SITE.joinpath("images").glob("*"))
     assert 0 < len(images) <= MAX_IMAGES
     for image in images:
-        assert image.suffix == ".png", image.name
+        assert image.suffix == ".webp", image.name
         assert image.stat().st_size <= MAX_IMAGE_BYTES, image.name
         assert f"images/{image.name}" in text, f"{image.name} is not used"
     for path in pages:

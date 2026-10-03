@@ -42,7 +42,10 @@ description: What Process does with a sweep: zero-field drift correction, the fo
 
 <h2 id="energy-window">Energy window</h2>
 <figure class="shot">
-  <img src="images/processing-light.png" width="1400" height="900" loading="lazy" decoding="async" alt="The Processing panel with the energy window 420 to 3100 cm⁻¹ and the baseline 2650 to 2950 cm⁻¹ switched on; the map shows the baseline region as a shaded band near its top.">
+  <picture>
+    <source srcset="images/processing-dark.webp" media="(prefers-color-scheme: dark)">
+    <img src="images/processing-light.webp" width="1400" height="900" loading="lazy" decoding="async" alt="The Processing panel with the energy window 420 to 3100 cm⁻¹ and the baseline 2650 to 2950 cm⁻¹ switched on; the map shows the baseline region as a shaded band near its top.">
+  </picture>
   <figcaption>The Processing panel. While it is open, the map shows the energy window and the baseline region.</figcaption>
 </figure>
 <p>The <b>Energy window</b> in the Processing panel drops the data outside it, for example the noisy edges of a detector range. Type its ends in the unit shown; an empty end leaves that side open. The window changes the data, so it applies when you process.</p>

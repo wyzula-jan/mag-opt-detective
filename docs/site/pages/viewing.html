@@ -29,8 +29,11 @@ description: Plot kinds, derivatives per data point or per unit, the live energy
 
 <h2 id="colour">Colour maps and levels</h2>
 <figure class="shot">
-  <img src="images/derivative-dark.png" width="1400" height="900" loading="lazy" decoding="async" alt="The dark appearance with the energy unit in meV: the first derivative along the field per tesla, drawn with the bipolar colour map; the side panel is closed, the map has a slim colour bar, and the Colour section shows Symmetric levels and an open histogram.">
-  <figcaption>The 1st derivative d/dB per tesla in meV with the bipolar colour map, symmetric levels and slim colour bars, in the dark appearance with the side panel closed.</figcaption>
+  <picture>
+    <source srcset="images/derivative-dark.webp" media="(prefers-color-scheme: dark)">
+    <img src="images/derivative-light.webp" width="1400" height="900" loading="lazy" decoding="async" alt="The first derivative along the field per tesla, with energies in meV, drawn with the bipolar colour map; the side panel is closed, the map has a slim colour bar, and the Colour section shows Symmetric levels and an open histogram.">
+  </picture>
+  <figcaption>The 1st derivative d/dB per tesla in meV with the bipolar colour map, symmetric levels and slim colour bars, with the side panel closed.</figcaption>
 </figure>
 <p>The <b>inspector › Colour</b> chooses the colour map and its levels:</p>
 <ul>
@@ -56,7 +59,10 @@ description: Plot kinds, derivatives per data point or per unit, the live energy
 
 <h2 id="stacked">Stacked spectra</h2>
 <figure class="shot">
-  <img src="images/stacked-light.png" width="1400" height="900" loading="lazy" decoding="async" alt="The Stacked tab: the spectra of the sweep drawn above one another with an offset, coloured from dark to light by field, with the picked points on the traces.">
+  <picture>
+    <source srcset="images/stacked-dark.webp" media="(prefers-color-scheme: dark)">
+    <img src="images/stacked-light.webp" width="1400" height="900" loading="lazy" decoding="async" alt="The Stacked tab: the spectra of the sweep drawn above one another with an offset, coloured from dark to light by field, with the picked points on the traces.">
+  </picture>
   <figcaption>The Stacked tab: every spectrum offset from the last, coloured by field, with the picked points on the traces.</figcaption>
 </figure>
 <p>The <b>Stacked</b> tab draws the spectra above one another. The <b>inspector › Traces</b> section sets the <b>offset between spectra</b>, which spectra are shown (all, every 2nd or every 4th) and <b>colour by field</b>, which takes the colours from the colour map (Auto uses viridis). The intensity range follows the offset while it is on Auto. Picked points are drawn on their traces, and you can <a href="picking.html#stacked">pick on this plot too</a>.</p>

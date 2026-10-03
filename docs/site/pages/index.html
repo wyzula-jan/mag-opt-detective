@@ -13,8 +13,8 @@ description: Magneto-Optical Detective is a desktop app for magneto-optical FTIR
   </div>
   <figure class="shot hero-shot">
     <picture>
-      <source srcset="images/main-window-dark.png" media="(prefers-color-scheme: dark)">
-      <img src="images/main-window-light.png" width="1400" height="900" alt="The main window. On the left the Sample panel lists 64 field files from 0.25 to 16 T; in the middle an R(B)/R(0) colour map shows a fan of Landau-level transitions with picked points and the dashed curves of a Dirac model; on the right the inspector holds the View, Colour and Models settings.">
+      <source srcset="images/main-window-dark.webp" media="(prefers-color-scheme: dark)">
+      <img src="images/main-window-light.webp" width="1400" height="900" alt="The main window. On the left the Sample panel lists 64 field files from 0.25 to 16 T; in the middle an R(B)/R(0) colour map shows a fan of Landau-level transitions with picked points, the dashed curves of a Dirac model and a legend; on the right the inspector holds the View, Colour and Models settings.">
     </picture>
     <figcaption>The main window: the Sample panel, an R(B)/R(0) map with picked points and a Dirac model, and the inspector. Every screenshot on this site shows a synthetic Landau fan.</figcaption>
   </figure>
@@ -27,42 +27,60 @@ description: Magneto-Optical Detective is a desktop app for magneto-optical FTIR
   </div>
   <ul class="features">
     <li>
-      <img src="images/processing-light.png" width="1400" height="900" loading="lazy" decoding="async" alt="The Processing panel with an energy window and a baseline region; the baseline region is shaded on the R(B)/R(0) map.">
+      <picture>
+        <source srcset="images/processing-dark.webp" media="(prefers-color-scheme: dark)">
+        <img src="images/processing-light.webp" width="1400" height="900" loading="lazy" decoding="async" alt="The Processing panel with an energy window and a baseline region; the baseline region is shaded on the R(B)/R(0) map.">
+      </picture>
       <div class="feature-text">
         <h3>Maps from a sweep</h3>
         <p>Drop a folder of OPUS files or OPUS-macro text files. The fields are read from the file names, the zero-field drift is corrected, and Process draws R(B)/R(0), the data, R(B)/R(B-AVR) and R(B)/R(B-ΔB), with 1st and 2nd derivatives along energy or field. <a href="processing.html">Processing</a></p>
       </div>
     </li>
     <li>
-      <img src="images/derivative-dark.png" width="1400" height="900" loading="lazy" decoding="async" alt="The dark appearance: the first field derivative per tesla in meV, drawn with the bipolar colour map and symmetric levels, next to the Colour section with its histogram.">
+      <picture>
+        <source srcset="images/derivative-dark.webp" media="(prefers-color-scheme: dark)">
+        <img src="images/derivative-light.webp" width="1400" height="900" loading="lazy" decoding="async" alt="The first field derivative per tesla in meV, drawn with the bipolar colour map and symmetric levels, next to the Colour section with its histogram.">
+      </picture>
       <div class="feature-text">
         <h3>Live units, clear colours</h3>
         <p>Switch between cm⁻¹, meV and THz at any time: maps, axes, ranges, picked points, models and exports change at once, without processing again. Seven colour maps, with levels kept per plot. <a href="viewing.html">Viewing</a></p>
       </div>
     </li>
     <li>
-      <img src="images/autopick-light.png" width="1400" height="900" loading="lazy" decoding="async" alt="Auto-pick in Detect mode: a dashed box on the map, the lines found inside it, and the chosen line marked with diamonds; the options strip above the map reads 5 lines found.">
+      <picture>
+        <source srcset="images/autopick-dark.webp" media="(prefers-color-scheme: dark)">
+        <img src="images/autopick-light.webp" width="1400" height="900" loading="lazy" decoding="async" alt="Auto-pick in Detect mode: a dashed box on the map, the lines found inside it, and the chosen line marked with diamonds; the options strip above the map reads 5 lines found.">
+      </picture>
       <div class="feature-text">
         <h3>Pick the transitions</h3>
         <p>Click the map to record a transition energy at a field, or let auto-pick follow a line field by field or find every line in a region. Every edit can be undone. <a href="picking.html">Picking points</a></p>
       </div>
     </li>
     <li>
-      <img src="images/fit-light.png" width="1400" height="900" loading="lazy" decoding="async" alt="A Dirac model fitted to three picked curves: the fitted curves on the map, and the result in the Models section, the Fermi velocity and the half-gap with their errors and chi squared.">
+      <picture>
+        <source srcset="images/fit-dark.webp" media="(prefers-color-scheme: dark)">
+        <img src="images/fit-light.webp" width="1400" height="900" loading="lazy" decoding="async" alt="A Dirac model fitted to three picked curves: the fitted curves on the map, and the result in the Models section, the Fermi velocity and the half-gap with their errors and chi squared.">
+      </picture>
       <div class="feature-text">
         <h3>Fit models</h3>
         <p>Massive Dirac transitions, Zeeman or magnon branches with optional coupling, or your own expression in B. Fit them to the picked curves and read every parameter as value ± σ, with χ². <a href="models.html">Models and fitting</a></p>
       </div>
     </li>
     <li>
-      <img src="images/export-window-light.png" width="1080" height="720" loading="lazy" decoding="async" alt="The journal figure window: a live preview of a Nature single-column figure on the left, and the journal, size, format and content settings on the right.">
+      <picture>
+        <source srcset="images/export-window-dark.webp" media="(prefers-color-scheme: dark)">
+        <img src="images/export-window-light.webp" width="1120" height="720" loading="lazy" decoding="async" alt="The journal figure window: a live preview of a Nature single-column figure on the left, and the journal, size, format and content settings on the right.">
+      </picture>
       <div class="feature-text">
         <h3>Journal figures</h3>
         <p>Nature, APS or your own sizes in mm, text and lines in pt. PDF, SVG and EPS keep their text editable; PNG and TIFF carry the dpi. The preview follows the main window live. <a href="figures.html">Journal figures</a></p>
       </div>
     </li>
     <li>
-      <img src="images/library-light.png" width="1400" height="900" loading="lazy" decoding="async" alt="The Library panel with two ticked maps, the energy and field limits of the first one, and the Merge by energy, Merge by field and Average buttons.">
+      <picture>
+        <source srcset="images/library-dark.webp" media="(prefers-color-scheme: dark)">
+        <img src="images/library-light.webp" width="1400" height="900" loading="lazy" decoding="async" alt="The Library panel with two ticked maps, the energy and field limits of the first one, and the Merge by energy, Merge by field and Average buttons.">
+      </picture>
       <div class="feature-text">
         <h3>Combine measurements</h3>
         <p>Keep processed maps in the library, then join spectral ranges such as FIR and MIR, join field ranges, or average repeated sweeps. <a href="library.html">Library</a></p>

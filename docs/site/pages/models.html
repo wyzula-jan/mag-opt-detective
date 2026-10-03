@@ -9,7 +9,10 @@ description: Draw massive Dirac, Zeeman or magnon and custom E(B) models over th
 
 <h2 id="models">Adding a model</h2>
 <figure class="shot">
-  <img src="images/models-light.png" width="1400" height="900" loading="lazy" decoding="async" alt="The Models section of the inspector with a Massive Dirac card: sliders and fields for the Fermi velocity, the half-gap and the number of transitions, and the formula; its dashed curves follow the picked points on the map.">
+  <picture>
+    <source srcset="images/models-dark.webp" media="(prefers-color-scheme: dark)">
+    <img src="images/models-light.webp" width="1400" height="900" loading="lazy" decoding="async" alt="The Models section of the inspector with a Massive Dirac card: sliders and fields for the Fermi velocity, the half-gap and the number of transitions, and the formula; its dashed curves follow the picked points on the map.">
+  </picture>
   <figcaption>A massive Dirac model in the Models section; its dashed curves follow the picked transitions.</figcaption>
 </figure>
 <p>Models live in <b>inspector › Models</b>, on the Map tab. <b>Add model…</b> offers three kinds. Each model is a card with a colour, its name, a switch that shows or hides its curves, and a button that removes it. Visible models are drawn dashed in their colour, in the unit shown, and they go into <a href="figures.html">journal figures</a>.</p>
@@ -62,7 +65,10 @@ hbar*e*B/(m*9.1093837e-31)    # CR, m in electron masses</code></pre>
 
 <h2 id="fitting">Fitting to the picked points</h2>
 <figure class="shot">
-  <img src="images/fit-light.png" width="1400" height="900" loading="lazy" decoding="async" alt="The Dirac card with its fit area open: the assignment By branch, the curves LL 1, LL 2 and CR each assigned a transition, and the result: v = 5.4013 ± 0.0049 × 10⁵ m/s and Δ = 96.39 ± 0.97 cm⁻¹ with χ², reduced χ², 35 degrees of freedom and 37 points. The fitted curves run through the points on the map.">
+  <picture>
+    <source srcset="images/fit-dark.webp" media="(prefers-color-scheme: dark)">
+    <img src="images/fit-light.webp" width="1400" height="900" loading="lazy" decoding="async" alt="The Dirac card with its fit area open: the assignment By branch, the curves LL 1, LL 2 and CR each assigned a transition, and the result: v = 5.4013 ± 0.0049 × 10⁵ m/s and Δ = 96.39 ± 0.97 cm⁻¹ with χ², reduced χ², 35 degrees of freedom and 37 points. The fitted curves run through the points on the map.">
+  </picture>
   <figcaption>A Dirac model fitted to three picked curves. The fit started from v = 5 and Δ = 9 meV; the result is shown as value ± σ, and the fitted curves are drawn over the map until you apply or discard them.</figcaption>
 </figure>
 <p><b>Fit to points…</b> on a model card opens its fit area in its place (× closes it again):</p>
