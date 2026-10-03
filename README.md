@@ -123,6 +123,10 @@ uv run mag-opt-detective
 
 or `uv run python -m mag_opt_detective`.
 
+Once a day the app asks GitHub whether a newer version is out and says so in a bar above the
+plot; it never installs anything (*Help › Check for updates…*, and *Help › Check for updates at
+startup* to switch the daily check off).
+
 ### Without Python
 
 Standalone apps are attached to each

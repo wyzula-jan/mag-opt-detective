@@ -238,3 +238,20 @@ its notes and the bundles attached; versions before 1.0.0 are marked as pre-rele
 push publishes nothing, and no version is published twice. If several versions were released
 between two pushes, only the newest gets a GitHub release; the others keep their tags and
 their `CHANGELOG.md` sections.
+
+**Update check.** The app tells people about a new release and never installs one.
+`updates.py` (no Qt) asks GitHub's API for the newest releases with one anonymous GET
+(`/repos/wyzula-jan/mag-opt-detective/releases?per_page=10`, a 5 s timeout, no account, no
+cookies), leaves out drafts and compares the `vX.Y.Z` tags with `__version__` as SemVer does
+(`X.Y.Z.devN` counts as a pre-release of `X.Y.Z`); while the app is 0.x GitHub pre-releases
+count, from 1.0.0 only regular releases (the `updates/channel` setting overrides that).
+`gui/updates.py` runs the request on a worker thread once a day, a few seconds after `app.main`
+has shown the window, and shows a newer version in the info bar; a Download from an app bundle
+gets the archive for its system, by the names the *App bundles* workflow gives them (a test
+checks them). Windows in tests and the smoke test never check by themselves, and no test
+reaches the network: `tests/test_updates.py` and `tests/test_gui_updates.py` read
+`tests/data/github_releases.json` (written by hand in the API's format) through a fake
+transport, replace `window.updates.fetch` and make `urlopen` fail. To see the notice by hand,
+set `__version__` to an older version for a moment and choose *Help › Check for updates…*
+(that one request is real); *View › Reset settings* forgets a skipped version and the time of
+the last check.
