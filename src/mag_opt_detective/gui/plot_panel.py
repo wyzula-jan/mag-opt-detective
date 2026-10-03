@@ -38,7 +38,7 @@ from mag_opt_detective.core.units import Unit
 from mag_opt_detective.gui import icons
 from mag_opt_detective.gui.controller import KIND_LABELS, level_key, level_label, user_action
 from mag_opt_detective.gui.kit import SlidePanel
-from mag_opt_detective.gui.plots import ColorMapPlot, PlotColors, StackedPlot
+from mag_opt_detective.gui.plots import ColorMapPlot, PlotColors, StackedPlot, robust_levels
 from mag_opt_detective.gui.theme import current_tokens
 from mag_opt_detective.gui.widgets import IMAGE_FILTER, CheckableSetting, Separator, save_file
 
@@ -491,8 +491,14 @@ def update_description(window) -> None:
     area.description.setToolTip(area.description.text())
 
 
-def _store_levels(window, key: str, lo: float, hi: float) -> None:
-    window.controller.set_levels(key, lo, hi)
+def _store_levels(window, view: str, key: str, lo: float, hi: float) -> None:
+    c = window.controller
+    if not lo < hi:  # both ends dragged onto one level: draw the kept levels again
+        fmap = c.current_map() if view == "map" else c.reference_map()
+        levels = c.current_levels() if view == "map" else c.reference_levels()
+        window.plots[view].set_levels(*(levels or robust_levels(fmap.values)))
+        return
+    c.set_levels(key, lo, hi)
     logger.info("Colour range of %s set to %.4g … %.4g", level_label(key), lo, hi)
 
 
@@ -719,10 +725,12 @@ def install(window) -> None:
     c.viewChanged.connect(lambda: redraw(window))
     c.unitChanged.connect(lambda _old, _new: redraw(window))
     window.plots.map.levelsEdited.connect(
-        lambda lo, hi: _store_levels(window, c.selection.level_key, lo, hi)
+        lambda lo, hi: _store_levels(window, "map", c.selection.level_key, lo, hi)
     )
     window.plots.reference.levelsEdited.connect(
-        lambda lo, hi: _store_levels(window, level_key(c.selection.reference_kind), lo, hi)
+        lambda lo, hi: _store_levels(
+            window, "reference", level_key(c.selection.reference_kind), lo, hi
+        )
     )
 
     # cursor read-out

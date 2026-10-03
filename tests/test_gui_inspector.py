@@ -502,6 +502,27 @@ def test_histogram_drag_recolours_the_map_live(processed):
     assert hist.centre.isVisible()
 
 
+def test_levels_dragged_onto_one_value_are_refused(processed, errors):
+    w, c = processed, processed.controller
+    style = w.plot_area.scale_style_button
+    for style_bar in (False, True):
+        style.setChecked(style_bar)
+        scale = w.plots.map.scale
+        if isinstance(scale, BarScale):
+            scale.bar.set_levels(1.0, 1.0)
+            scale.bar.levelsChosen.emit(1.0, 1.0)
+        else:  # the histogram's handles block each other: both ends at one level
+            w.plots.map.hist.region.setRegion((1.0, 1.0))
+        assert c.view.levels["Ratio"] == (0.9, 1.1)
+        assert w.plots.map.levels() == pytest.approx((0.9, 1.1))  # put back on the plot
+    select(w, kind=PlotKind.DATA)  # on Auto the percentile levels are put back
+    w.plot_area.scale_style_button.setChecked(False)
+    w.plots.map.hist.region.setRegion((5.0, 5.0))
+    assert c.current_levels() is None
+    assert w.plots.map.levels() == pytest.approx(robust_levels(map_values(w)))
+    assert not errors
+
+
 def test_reference_levels_follow_the_symmetric_mode(window, sweep):
     c = window.controller
     load_sweep(window, sweep)
