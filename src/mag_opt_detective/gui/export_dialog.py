@@ -155,6 +155,30 @@ def _row(
     return box
 
 
+def _labelled_row(*items: tuple[str, QWidget, int], spacing: int = 8) -> QWidget:
+    """Labelled controls side by side: the labels in one line, the controls centred on one
+    band as tall as the tallest of them."""
+    for _text, widget, _stretch in items:
+        widget.ensurePolished()
+    height = max(widget.sizeHint().height() for _text, widget, _stretch in items)
+    box = QWidget()
+    layout = QHBoxLayout(box)
+    layout.setContentsMargins(0, 0, 0, 0)
+    layout.setSpacing(spacing)
+    for text, widget, stretch in items:
+        band = QWidget()
+        band.setFixedHeight(height)
+        centred = QVBoxLayout(band)
+        centred.setContentsMargins(0, 0, 0, 0)
+        centred.addWidget(widget, 0, Qt.AlignmentFlag.AlignVCenter)
+        label = QLabel(text)
+        label.setProperty("kit", "muted")
+        label.setFont(scaled_font(label, 0.88))
+        label.setBuddy(widget.edit if isinstance(widget, UnitField) else widget)
+        layout.addWidget(block(label, band, spacing=3), stretch, Qt.AlignmentFlag.AlignTop)
+    return box
+
+
 def _stored_levels(value) -> tuple[float, float] | None:
     """A stored ``[lo, hi]`` pair, if it can be drawn."""
     if not isinstance(value, list | tuple) or len(value) != 2:
@@ -546,24 +570,22 @@ class ExportDialog(QDialog):
         self.levels_box = block(
             labelled("Colour range", self.levels_mode), levels_row, self.levels_note, spacing=6
         )
-        bar_row = _row(
-            (labelled("Position", self.colorbar_position), 0),
-            (labelled("Label", self.colorbar_label), 1),
-            spacing=10,
+        bar_row = _labelled_row(
+            ("Position", self.colorbar_position, 0), ("Label", self.colorbar_label, 1), spacing=10
         )
         self.colorbar_box = block(self.colorbar_row, bar_row, spacing=8)
         layout.addWidget(
             block(section_label("Colour"), self.levels_box, self.colorbar_box, spacing=12)
         )
-        tick_sizes = _row(
-            (labelled("Direction", self.tick_direction), 1),
-            (labelled("Length", self.tick_length), 1),
-            (labelled("Width", self.tick_width), 1),
+        tick_sizes = _labelled_row(
+            ("Direction", self.tick_direction, 1),
+            ("Length", self.tick_length, 1),
+            ("Width", self.tick_width, 1),
         )
-        minor_sizes = _row(
-            (labelled("Intervals", self.minor_intervals), 1),
-            (labelled("Length", self.minor_length), 1),
-            (QWidget(), 1),
+        minor_sizes = _labelled_row(
+            ("Intervals", self.minor_intervals, 1),
+            ("Length", self.minor_length, 1),
+            ("", QWidget(), 1),
         )
         self.minor_box = block(self.minor_row, minor_sizes, spacing=8)
         layout.addWidget(

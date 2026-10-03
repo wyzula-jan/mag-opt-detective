@@ -14,7 +14,7 @@ from PIL import Image
 from PySide6.QtCore import QSettings, Qt
 from PySide6.QtGui import QKeySequence
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QFileDialog, QMessageBox
+from PySide6.QtWidgets import QFileDialog, QLabel, QMessageBox
 
 import gui_helpers
 from gui_helpers import (
@@ -790,6 +790,27 @@ def test_colour_bar_position_and_ticks(processed, qtbot, no_dialogs):
     assert dialog.save_button.isEnabled()
     dialog.colorbar.setChecked(False)
     assert not dialog.colorbar_position.isEnabled()
+
+
+def test_labels_of_a_row_are_in_line(processed, qtbot):
+    dialog = open_export(processed, qtbot)
+    column = dialog.settings_scroll.widget()
+    labels = {label.buddy(): label for label in column.findChildren(QLabel) if label.buddy()}
+
+    def y(widget, where="top"):
+        widget = widget.edit if hasattr(widget, "edit") else widget
+        box = labels[widget] if where == "top" else widget
+        point = box.rect().topLeft() if where == "top" else box.rect().center()
+        return box.mapTo(column, point).y()
+
+    for row in (
+        (dialog.tick_direction, dialog.tick_length, dialog.tick_width),
+        (dialog.colorbar_position, dialog.colorbar_label),
+        (dialog.minor_intervals, dialog.minor_length),
+    ):
+        assert len({y(widget) for widget in row}) == 1  # the labels in one line
+        centres = [y(w, "centre") for w in row if w is not dialog.tick_length]
+        assert max(centres) - min(centres) <= 1  # the controls on one band
 
 
 def test_save_uses_the_colour_range_and_style(processed, qtbot, tmp_path, monkeypatch):
