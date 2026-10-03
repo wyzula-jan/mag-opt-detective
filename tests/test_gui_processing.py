@@ -8,6 +8,7 @@ import golden
 import gui_helpers
 from gui_helpers import (
     energy_label,
+    hover,
     infobar_text,
     inspector_page,
     load_sweep,
@@ -73,7 +74,7 @@ def test_process_and_switch_plots(window, sweep, errors):
     np.testing.assert_allclose(shown_image(window), result.get(PlotKind.DATA, 2, Axis.FIELD).values)
     select(window, kind=PlotKind.AVERAGE, order=0)
     np.testing.assert_allclose(shown_image(window), result.average.values)
-    assert len(window.plots.stacked._curves) == sweep["fields"].size
+    assert len(window.plots.stacked.curves()) == sweep["fields"].size
     assert window.plot_area.description.text() == "R(B)/R(B-AVR)"
 
 
@@ -291,26 +292,24 @@ def test_colour_map_choice(window, sweep):
     assert window.controller.view.colormap == "viridis"
 
 
-def test_cursor_shows_value(window, sweep):
+def test_cursor_shows_value(window, sweep, qtbot):
     load_sweep(window, sweep)
     set_unit(window, "meV")
     process(window)
     plot = window.plots.map
     ratio = window.controller.result.get(PlotKind.RATIO, unit=Unit.MEV)
-    text = plot._cursor_text(ratio.field[1], ratio.energy[3])
-    assert f"E = {ratio.energy[3]:.3f} meV" in text
-    assert f"value = {ratio.values[3, 1]:.5g}" in text
-    assert "value" not in plot._cursor_text(100.0, ratio.energy[3])
+    hover(qtbot, plot, ratio.field[1], ratio.energy[3])
+    assert f"E = {ratio.energy[3]:.3f} meV" in plot.label.text
+    assert f"value = {ratio.values[3, 1]:.5g}" in plot.label.text
+    assert plot.value_at(100.0, ratio.energy[3]) is None  # no value outside the map
     plot.cursorMoved.emit(1.0, 50.0, 1.25)  # the value is named by the plot kind
-    assert window._cursor_label.text() == "B = 1 T    E = 50 meV    R(B)/R(0) = 1.25"
+    assert window.cursor_text() == "B = 1 T    E = 50 meV    R(B)/R(0) = 1.25"
     window.plots.stacked.cursorMoved.emit(50.0, 1.5, None)
-    assert window._cursor_label.text() == "E = 50 meV    I = 1.5"
+    assert window.cursor_text() == "E = 50 meV    I = 1.5"
     select(window, order=1)
     set_unit(window, "cm-1")
     plot.cursorMoved.emit(1.25, 403.28, -0.0021)
-    assert (
-        window._cursor_label.text() == "B = 1.25 T    E = 403.28 cm⁻¹    1st derivative = -0.0021"
-    )
+    assert window.cursor_text() == "B = 1.25 T    E = 403.28 cm⁻¹    1st derivative = -0.0021"
 
 
 @pytest.mark.parametrize("suffix", [".png", ".svg"])
@@ -348,7 +347,7 @@ def test_changed_since_process(window, sweep):
 
     window.panels["processing"].baseline_on.setChecked(True)
     assert c.changed_since_process() and tb.process_button.dot
-    assert window._rail_buttons["processing"].badge
+    assert window.rail_button("processing").badge
     assert "Settings changed" in window.state_text()
     window.panels["processing"].baseline_on.setChecked(False)
     assert not tb.process_button.dot  # back to the settings that were used
@@ -362,7 +361,7 @@ def test_changed_since_process(window, sweep):
     reference.set_reference_mode(ReferenceMode.SELF)
     assert tb.process_button.dot
     process(window)
-    assert not tb.process_button.dot and not window._rail_buttons["processing"].badge
+    assert not tb.process_button.dot and not window.rail_button("processing").badge
 
 
 def test_library_maps_leave_the_process_state(window, sweep, errors):

@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 import shiboken6
 from PySide6.QtCore import QEvent, QPoint, Qt
-from PySide6.QtGui import QGuiApplication
+from PySide6.QtGui import QGuiApplication, QImage
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QComboBox, QToolButton
 
@@ -53,7 +53,7 @@ def test_window_exposes_its_areas(window):
 
 def test_rail_switches_and_closes_the_side_panel(shown):
     w = shown
-    buttons = w._rail_buttons
+    buttons = {name: w.rail_button(name) for name in w.panels}
     assert w.current_panel() == "sample" and buttons["sample"].isChecked()
     buttons["library"].click()
     assert w.current_panel() == "library" and w.side_panel.is_open()
@@ -177,7 +177,13 @@ def test_colour_scale_style_switch_applies_to_every_map(shown, sweep, errors, qt
     assert not errors
 
 
-def test_show_and_hide_all_colour_scales(shown, sweep, qtbot):
+def export_widths(plot, path) -> tuple[int, int]:
+    """Width of an image of *plot* exported at scale 1, and the width of the plot alone."""
+    plot.export_image(path, scale=1.0)
+    return QImage(str(path)).width(), int(plot.view.ci.sceneBoundingRect().width())
+
+
+def test_show_and_hide_all_colour_scales(shown, sweep, qtbot, tmp_path):
     w = shown
     load_sweep(w, sweep)
     process(w)
@@ -187,10 +193,13 @@ def test_show_and_hide_all_colour_scales(shown, sweep, qtbot):
     qtbot.waitUntil(lambda: not any(p.is_animating() for p in panels.values()), timeout=30_000)
     assert not any(p.is_open() for p in panels.values())
     assert not w.plots.map.scale_visible()  # exported images match the screen
-    assert len(w.plots.map._export_parts(100)) == 1
+    image, plot = export_widths(w.plots.map, tmp_path / "map.png")
+    assert image == plot
     area.scales_button.click()
     assert all(p.is_open() for p in panels.values())
-    assert w.plots.map.scale_visible() and len(w.plots.map._export_parts(100)) == 2
+    assert w.plots.map.scale_visible()
+    image, plot = export_widths(w.plots.map, tmp_path / "map.png")
+    assert image > plot
 
     panels["map"].set_open(False, animate=False)  # one plot alone
     assert not area.scales_button.isChecked()

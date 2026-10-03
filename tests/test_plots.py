@@ -6,6 +6,7 @@ from PySide6.QtGui import QColor, QImage, QWheelEvent
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtTest import QTest
 
+from gui_helpers import hover
 from mag_opt_detective.core.colormaps import lut
 from mag_opt_detective.core.spectra import FieldMap, cell_edges
 from mag_opt_detective.gui.plots import (
@@ -319,7 +320,7 @@ def test_apply_theme(make_plot, style):
     assert plot.view.backgroundBrush().color() == QColor("#ffffff")
     assert plot.plot.vb.background.brush().color() == QColor("#e9e6ed")
     assert plot.plot.getAxis("left").textPen().color() == QColor("#3b3443")
-    assert plot._vline.pen.color() == qcolor("#3b344366")
+    assert all(line.pen.color() == qcolor("#3b344366") for line in plot.crosshair())
     corner = plot.scale_container.grab().toImage().pixelColor(0, 0)
     assert corner == QColor("#ffffff")
     scale_image = plot.scale.widget.grab().toImage()
@@ -382,19 +383,16 @@ def test_cursor_moved(make_plot, qtbot):
     fmap = ramp_map()
     plot.set_map(fmap)
     b, e = fmap.field[3], fmap.energy[5]
-    pos = plot.plot.vb.mapViewToScene(QPointF(b, e))
-    with qtbot.waitSignal(plot.cursorMoved) as blocker:
-        plot._on_mouse_moved((pos,))
-    x, y, value = blocker.args
+    x, y, value = hover(qtbot, plot, b, e)
     assert (x, y) == pytest.approx((b, e), abs=1e-6)
     assert value == pytest.approx(fmap.values[5, 3])
     assert "value =" in plot.label.text
+    vline, hline = plot.crosshair()
+    assert (vline.value(), hline.value()) == pytest.approx((b, e), abs=1e-6)
 
     plot.set_map(fmap, x_range=(-5, 5))
-    pos = plot.plot.vb.mapViewToScene(QPointF(-4, e))
-    with qtbot.waitSignal(plot.cursorMoved) as blocker:
-        plot._on_mouse_moved((pos,))
-    assert blocker.args[2] is None
+    assert hover(qtbot, plot, -4, e)[2] is None
+    assert "value" not in plot.label.text
 
 
 GAP = np.array([b for b in np.arange(0.25, 16.001, 0.25) if not 7.2 < b < 7.6])  # 7.25, 7.5
@@ -489,8 +487,8 @@ def stacked_with(qtbot, fmap, offset=1.0) -> StackedPlot:
 def test_stacked_defaults_unchanged(qtbot):
     fmap = ramp_map(n_field=5)
     stacked = stacked_with(qtbot, fmap, 0.5)
-    assert len(stacked._curves) == 5
-    for j, curve in enumerate(stacked._curves):
+    assert len(stacked.curves()) == 5
+    for j, curve in enumerate(stacked.curves()):
         assert pg.mkPen(curve.opts["pen"]).color() == pg.intColor(j, hues=5)
         np.testing.assert_allclose(curve.getData()[1], fmap.values[:, j] + 0.5 * j)
 
@@ -505,15 +503,15 @@ def test_trace_options_and_trace_y(qtbot):
     assert stacked.trace_y(9, e) is None
 
     stacked.set_trace_options(every=2)
-    assert len(stacked._curves) == 3
+    assert len(stacked.curves()) == 3
     np.testing.assert_array_equal(stacked.shown_fields(), [0, 2, 4])
     assert stacked.trace_y(1, e) is None
     assert stacked.trace_y(2, e) == pytest.approx(expected - 1.0)  # second trace shown
 
     stacked.set_trace_options(every=1, color_by_field=True, cmap="grey")
     table = lut("grey")
-    first = pg.mkPen(stacked._curves[0].opts["pen"]).color()
-    last = pg.mkPen(stacked._curves[-1].opts["pen"]).color()
+    first = pg.mkPen(stacked.curves()[0].opts["pen"]).color()
+    last = pg.mkPen(stacked.curves()[-1].opts["pen"]).color()
     assert first.red() == table[round(0.1 * 255)][0]
     assert last.red() == table[round(0.82 * 255)][0]
     with pytest.raises(ValueError):
@@ -572,7 +570,7 @@ def test_export_png_contains_the_scale(make_plot, tmp_path, style):
     image = QImage(str(out))
     assert image.width() == int((plot_width + scale_width) * 2)
     assert image.width() > plot_width * 2
-    assert plot._vline.isVisible()
+    assert all(line.isVisible() for line in plot.crosshair())  # hidden only while exporting
 
     plot.set_scale_visible(False)
     assert not plot.scale_visible()
@@ -581,10 +579,11 @@ def test_export_png_contains_the_scale(make_plot, tmp_path, style):
 
 
 @pytest.mark.parametrize("style", SCALE_STYLES)
-def test_export_svg_contains_the_scale(make_plot, tmp_path, style):
+def test_export_svg_contains_the_scale(make_plot, qtbot, tmp_path, style):
     plot = make_plot(style)
-    plot.set_map(ramp_map(), cmap="bipolar")
-    plot._on_mouse_moved((plot.plot.vb.sceneBoundingRect().center(),))
+    fmap = ramp_map()
+    plot.set_map(fmap, cmap="bipolar")
+    hover(qtbot, plot, fmap.field[5], fmap.energy[20])
     label = plot.label.text
     out = tmp_path / "map.svg"
     plot.export_image(out)

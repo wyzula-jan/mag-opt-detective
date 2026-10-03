@@ -624,12 +624,12 @@ def test_traces_options(processed, sweep, qtbot):
     assert c.view.stacked_every == 2
     assert list(stacked.shown_fields()) == [0, 2]
     assert c.view.stacked_by_field and page.by_field.isChecked()  # coloured by field
-    pen = stacked._curves[0].opts["pen"]
+    pen = stacked.curves()[0].opts["pen"]
     expected = lut("viridis")[round(0.1 * 255)]  # Auto colours the fields with viridis
     assert pen.color().getRgb()[:3] == tuple(int(v) for v in expected)
     assert page.legend.labels() == ("0.5 T", "2 T") and not page.legend.isHidden()
     colour_page(w).picker.swatches["plasma"].click()  # the selected map colours the traces
-    pen = stacked._curves[0].opts["pen"]
+    pen = stacked.curves()[0].opts["pen"]
     assert pen.color().getRgb()[:3] == tuple(int(v) for v in lut("plasma")[round(0.1 * 255)])
     page.by_field.click()
     assert not c.view.stacked_by_field and page.legend.isHidden()

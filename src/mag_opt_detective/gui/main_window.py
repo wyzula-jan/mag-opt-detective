@@ -822,6 +822,14 @@ class MainWindow(QMainWindow):
     def current_panel(self) -> str:
         return self._panel
 
+    def rail_button(self, name: str) -> QToolButton:
+        """The rail button of panel *name*; its ``badge`` marks a panel that needs attention."""
+        return self._rail_buttons[name]
+
+    def cursor_text(self) -> str:
+        """The cursor read-out in the status bar."""
+        return self._cursor_label.text()
+
     def show_panel(self, name: str, open: bool | None = True) -> None:
         """Show panel *name* in the side panel; *open*: also open (True) or leave it (None)."""
         self._side_stack.setCurrentWidget(self.panel_pages[name])

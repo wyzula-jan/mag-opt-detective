@@ -13,6 +13,7 @@ import pytest
 from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.collections import QuadMesh
 from matplotlib.image import AxesImage
+from matplotlib.text import Text
 from PIL import Image
 
 from mag_opt_detective.core import colormaps
@@ -361,9 +362,10 @@ def test_panel_label(map_state):
     fig = nature_single(map_state, panel_label="A")
     label = fig.get_suptitle()
     assert label == "a"
-    assert fig._suptitle.get_fontweight() == "bold"
-    assert fig._suptitle.get_fontsize() == 8.0
-    assert fig._suptitle.get_horizontalalignment() == "left"
+    (text,) = [t for t in fig.findobj(Text) if t.get_text() == label]
+    assert text.get_fontweight() == "bold"
+    assert text.get_fontsize() == 8.0
+    assert text.get_horizontalalignment() == "left"
     fig = render(map_state, preset=APS, width_mm=86, height_mm=60, panel_label="b")
     assert fig.get_suptitle() == "(b)"
     assert nature_single(map_state).get_suptitle() == ""

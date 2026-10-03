@@ -184,6 +184,10 @@ class PlotView(OverlayMixin, QWidget):
     def _cursor_value(self, x: float, y: float) -> object:
         return None
 
+    def crosshair(self) -> tuple[pg.InfiniteLine, pg.InfiniteLine]:
+        """The cursor's vertical and horizontal lines (hidden while an image is exported)."""
+        return self._vline, self._hline
+
     def _on_mouse_moved(self, event) -> None:
         pos = event[0]
         vb = self.plot.vb

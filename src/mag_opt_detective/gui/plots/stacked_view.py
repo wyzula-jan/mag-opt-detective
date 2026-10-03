@@ -107,6 +107,10 @@ class StackedPlot(PlotView):
         """Field indices of the traces shown, bottom first."""
         return self._shown.copy()
 
+    def curves(self) -> list[pg.PlotDataItem]:
+        """The traces drawn, bottom first (one per entry of :meth:`shown_fields`)."""
+        return list(self._curves)
+
     def _traces_at(self, energy: float) -> np.ndarray | None:
         """Plotted y of every shown trace at *energy* (NaN where missing), None outside."""
         fmap = self._fmap

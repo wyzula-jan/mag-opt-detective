@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QPointF, Qt
 from PySide6.QtWidgets import QFileDialog, QMessageBox
 
 from mag_opt_detective.gui.main_window import MainWindow
@@ -90,6 +90,14 @@ def click_stacked(window, b: float, energy: float, modifiers=Qt.KeyboardModifier
     stacked = window.plots.stacked
     j = int(np.abs(window.controller.current_map().field - b).argmin())  # the map drawn
     return window.tools.click("stacked", energy, stacked.trace_y(j, energy), modifiers)
+
+
+def hover(qtbot, plot, x: float, y: float) -> tuple:
+    """Move the mouse to (*x*, *y*) on *plot* (a map or stacked view); the cursorMoved args."""
+    pos = plot.plot.vb.mapViewToScene(QPointF(x, y))
+    with qtbot.waitSignal(plot.cursorMoved) as blocker:
+        plot.plot.scene().sigMouseMoved.emit(pos)
+    return tuple(blocker.args)
 
 
 def save_to(monkeypatch, path) -> None:
