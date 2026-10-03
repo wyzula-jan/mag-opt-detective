@@ -764,10 +764,16 @@ class ExportDialog(QDialog):
         return self.controller.selection.level_key
 
     def fixed_levels(self) -> tuple[float, float] | None:
-        """The fixed colour range kept for the map on screen, in the display unit."""
-        key = self.level_key()
+        """The fixed colour range of the map on screen, in the display unit: the kept one, else
+        the window's levels shown in the fields until they are drawn or typed (None if none)."""
+        key, unit = self.level_key(), Unit(self.controller.unit)
         kept = self._fixed.get(key)
-        return None if kept is None else display_levels(key, kept, Unit(self.controller.unit))
+        if kept is not None:
+            return display_levels(key, kept, unit)
+        lo, hi = number(self.level_lo), number(self.level_hi)
+        if self._shown_levels == (key, unit) and not levels_problem(lo, hi):
+            return lo, hi
+        return None
 
     def colour_range_problem(self) -> str:
         """Why the typed colour range cannot be used ("" if it can, or does not apply)."""
@@ -842,33 +848,37 @@ class ExportDialog(QDialog):
         except ValueError:
             return None
 
-    def _start_fixed(self) -> None:
-        """In Fixed, a plot without fixed levels gets the window's levels (and keeps them, as
-        typed ones). Called where the mode, the settings or the window's plot change."""
-        key = self.level_key()
+    def _keep_shown_levels(self) -> None:
+        """In Fixed, keep the levels shown for the plot on screen (the window's, until typed)
+        once its preview is drawn: plots only passed through get none."""
+        key, unit = self.level_key(), Unit(self.controller.unit)
         if self.levels_mode.value() != RANGE_FIXED or key in self._fixed:
             return
-        snapshot = self._snapshot()
-        if snapshot is None:
-            return
-        unit = Unit(self.controller.unit)
-        self._fixed[key] = canonical_levels(key, tuple(snapshot.levels), unit)
-        self.settings.update(fixed_levels=self._stored_fixed())
+        levels = self.fixed_levels()
+        if levels is not None:
+            self._fixed[key] = canonical_levels(key, levels, unit)
+            self.settings.update(fixed_levels=self._stored_fixed())
 
     def _stored_fixed(self) -> dict[str, list[float]]:
         return {key: [lo, hi] for key, (lo, hi) in self._fixed.items()}
 
     def _sync_level_fields(self, snapshot=None) -> None:
-        """Show the colour range in the fields: the fixed levels of the plot on screen (again
-        when the plot or the unit changed), else the levels Window or Auto draw with."""
+        """Show the colour range in the fields: the fixed levels of the plot on screen, or the
+        window's until they are kept (again when the plot or the unit changed), else the levels
+        Window or Auto draw with."""
         mode = self.levels_mode.value()
         key, unit = self.level_key(), Unit(self.controller.unit)
         if mode == RANGE_FIXED:
             if self._shown_levels == (key, unit):
                 return
-            levels = self.fixed_levels()
-            if levels is None:
-                return
+            kept = self._fixed.get(key)
+            if kept is not None:
+                levels = display_levels(key, kept, unit)
+            else:
+                snapshot = snapshot if snapshot is not None else self._snapshot()
+                if snapshot is None:
+                    return
+                levels = tuple(snapshot.levels)
             texts = [_number_text(v) for v in levels]
             self._shown_levels = (key, unit)
         else:
@@ -1060,7 +1070,6 @@ class ExportDialog(QDialog):
     def _follow_window(self, *_args) -> None:
         """The main window changed what it shows: show it here too (no reprocessing)."""
         if self.isVisible():
-            self._start_fixed()
             self._update_form()
             self._schedule()
 
@@ -1068,7 +1077,6 @@ class ExportDialog(QDialog):
         if self._quiet:
             return
         self._note = None
-        self._start_fixed()
         self._update_form()
         self._store()
         self._schedule()
@@ -1266,6 +1274,7 @@ class ExportDialog(QDialog):
             sum(s.x.size for s in sets),
         )
         self._sync_level_fields(snapshot)
+        self._keep_shown_levels()
         return figure_state(self.controller, self.content(), snapshot=snapshot)
 
     def _draw_preview(self) -> None:

@@ -678,10 +678,12 @@ def test_colour_range_window_auto_and_fixed(processed, qtbot, no_dialogs):
     assert dialog.figure_state().levels == pytest.approx(auto)
     assert float(dialog.level_lo.edit.text()) == pytest.approx(auto[0], rel=1e-3)
 
-    dialog.levels_mode.set_value("fixed")  # starts from the window's levels, kept at once
-    assert dialog.settings.values["fixed_levels"] == {"Ratio": [0.95, 1.05]}
+    dialog.levels_mode.set_value("fixed")  # starts from the window's levels ...
     assert dialog.level_lo.isEnabled()
     assert [dialog.level_lo.edit.text(), dialog.level_hi.edit.text()] == ["0.95", "1.05"]
+    assert dialog.settings.values["fixed_levels"] == {}
+    redraw(dialog, qtbot)  # ... kept once drawn
+    assert dialog.settings.values["fixed_levels"] == {"Ratio": [0.95, 1.05]}
     dialog.level_lo.edit.setText("0.97")
     dialog.level_hi.edit.setText("1.01")
     stored = dialog.settings.settings_value()
@@ -739,6 +741,30 @@ def test_fixed_levels_are_kept_per_plot_in_cm1(processed, qtbot):
     select(w, order=0)  # back to the ratio: its own values, not the derivative's
     assert [dialog.level_lo.edit.text(), dialog.level_hi.edit.text()] == ["0.97", "1.03"]
     assert dialog.figure_state().levels == (0.97, 1.03)
+
+
+def test_fixed_levels_are_kept_only_for_plots_drawn(processed, qtbot):
+    """Several toolbar changes at once draw one preview: the plots passed through on the way
+    keep no fixed levels."""
+    w = processed
+    dialog = open_export(w, qtbot)
+    dialog.levels_mode.set_value("fixed")
+    redraw(dialog, qtbot)
+    select(w, order=1)  # Ratio_der1_E ...
+    select(w, axis="B")  # ... Ratio_der1_B ...
+    select(w, per_unit=True)  # ... Ratio_der1_B_unit, the plot drawn
+    assert set(dialog.settings.values["fixed_levels"]) == {"Ratio"}
+    shown = (float(dialog.level_lo.edit.text()), float(dialog.level_hi.edit.text()))
+    assert shown == pytest.approx(w.controller.figure_state().levels, rel=1e-5)
+    assert dialog.figure_state().levels == pytest.approx(shown)  # drawn as shown
+    redraw(dialog, qtbot)
+    assert set(dialog.settings.values["fixed_levels"]) == {"Ratio", "Ratio_der1_B_unit"}
+    select(w, order=0)
+    select(w, kind="Data")  # typed values are kept at once, without a drawing
+    dialog.level_lo.edit.setText("0.5")
+    dialog.level_hi.edit.setText("2")
+    assert dialog.settings.values["fixed_levels"]["Data"] == [0.5, 2.0]
+    assert set(dialog.settings.values["fixed_levels"]) == {"Ratio", "Ratio_der1_B_unit", "Data"}
 
 
 def test_the_colour_range_is_for_maps(processed, qtbot):
