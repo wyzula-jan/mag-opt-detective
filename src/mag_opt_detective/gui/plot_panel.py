@@ -764,8 +764,8 @@ def _set_mouse_mode(window, mode) -> None:
 
 # ---------------------------------------------------------------------- install
 def migrate_reference_kind(persistence) -> None:
-    """Keep a reference map choice stored as two buttons (R(B)/R(0) and Data) by earlier
-    versions as the one setting of the segmented control."""
+    """Keep a reference map choice stored as two buttons (R(B)/R(0) and Data) by an earlier
+    build as the one setting of the segmented control."""
     data = to_bool(persistence.value("plot/reference_data"))
     if data is not None and persistence.value("plot/reference_kind") is None:
         kind = PlotKind.DATA if data else PlotKind.RATIO

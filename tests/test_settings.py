@@ -178,7 +178,7 @@ def test_version_1_values_are_ignored(qtbot, ini):
     ("ratio", "data", "kind"), [("false", "true", "Data"), ("true", "false", "Ratio")]
 )
 def test_the_reference_map_choice_of_two_buttons_is_kept(qtbot, ini, ratio, data, kind):
-    """Earlier versions stored the reference map choice as two buttons."""
+    """An earlier build stored the reference map choice as two buttons."""
     raw = QSettings(ini, QSettings.Format.IniFormat)
     raw.setValue(f"{PREFIX}/plot/reference_ratio", ratio)
     raw.setValue(f"{PREFIX}/plot/reference_data", data)

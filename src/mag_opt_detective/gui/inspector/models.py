@@ -557,7 +557,7 @@ class ModelsSetting:
             if n_lines is not None and n_lines.is_integer() and 1 <= n_lines <= ms.DIRAC_MAX_LINES:
                 dirac.model.n_lines = int(n_lines)
             self.models.rebuild()
-            logger.info("Took over the Dirac overlay settings of the previous version.")
+            logger.info("Took over the Dirac overlay settings of an earlier build.")
         for key in LEGACY_KEYS:
             p.settings.remove(f"{PREFIX}/{key}")
 
