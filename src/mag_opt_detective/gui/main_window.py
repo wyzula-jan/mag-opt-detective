@@ -40,7 +40,7 @@ from PySide6.QtWidgets import (
 from mag_opt_detective import __version__
 from mag_opt_detective.core.processing import Axis
 from mag_opt_detective.core.units import Unit
-from mag_opt_detective.gui import console, icons, plot_panel
+from mag_opt_detective.gui import console, export_menu, icons, plot_panel
 from mag_opt_detective.gui.controller import AppController
 from mag_opt_detective.gui.inspector import colour, models, traces, view
 from mag_opt_detective.gui.kit import CollapsibleSection, InfoBar, SegmentedControl, SlidePanel
@@ -57,7 +57,7 @@ SIDE_WIDTH, INSPECTOR_WIDTH, LOG_HEIGHT = 292, 300, 180
 SHORTCUTS = [
     ("Ctrl+Return (or Ctrl+F)", "Process"),
     ("Ctrl+E", "Export the shown data as a table"),
-    ("Ctrl+Shift+E", "Save the visible plot as an image"),
+    ("Ctrl+Shift+E", "Export a journal figure (PDF, SVG, EPS, PNG, TIFF)"),
     ("Ctrl+L / Ctrl+Shift+L", "Open sample field / zero-field files"),
     ("Ctrl+R / Ctrl+Shift+R", "Load reference field / zero-field files"),
     ("Ctrl+1 / 2 / 3 / 4", "Plot R(B)/R(0) / Data / R(B)/R(B-AVR) / R(B)/R(B-ΔB)"),
@@ -340,6 +340,8 @@ class MainWindow(QMainWindow):
         for module in (view, colour, traces, models):
             module.install(self)
         autopick.install(self)
+
+        export_menu.install(self)
         self._wire_frame()
         self.show_panel(next(iter(self.panels)), open=None)
         if self.persistence is not None:
@@ -361,7 +363,7 @@ class MainWindow(QMainWindow):
         process.setToolTip("Process the loaded files (Ctrl+Return)")
         table = self._action("export_table", "Data table…", ("Ctrl+E",))
         icons.set_icon(table, "file-text")
-        image = self._action("export_image", "Image (PNG, SVG)…", ("Ctrl+Shift+E",))
+        image = self._action("export_image", "Quick image (PNG/SVG)…")
         icons.set_icon(image, "image")
         suffix = self._action("export_suffix", "Add plot type to the file name")
         suffix.setCheckable(True)

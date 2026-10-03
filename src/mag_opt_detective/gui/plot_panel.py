@@ -667,7 +667,7 @@ def install(window) -> None:
         "panel-right", "Show or hide the inspector", checkable=True
     )
     area.inspector_button.setChecked(window.inspector_panel.is_open())
-    image = area.add_tool_button("image", "Save image (Ctrl+Shift+E)")
+    image = area.add_tool_button("image", "Quick image (PNG/SVG)")
     image.clicked.connect(window.commands["export_image"].trigger)
 
     area.scale_style_button.toggled.connect(
