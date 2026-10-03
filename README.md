@@ -207,18 +207,27 @@ then one row per parameter: `parameter`, `value`, `sigma`, `unit`.
 
 ## Library
 
-The Library panel keeps processed maps: **Save current map** adds the R(B)/R(0) map
-shown, **Load table…** adds exported tables. Tick the maps to combine and open a map's
-row to give it an energy (E min / E max, in the energy unit shown) and field (B min /
-B max) range; empty limits mean no cut.
+The Library panel keeps processed maps: **Add** (in the Processed sweep box) adds the
+R(B)/R(0) map of the last Process (also *File › Add processed map to library*), **Load
+table…** adds exported tables. **Tick maps to plot them**: ticked maps of one kind are drawn
+together, the one ticked or clicked last on top, and where they overlap the upper ones are
+drawn with the **Overlap** opacity. The top map is the one you pick on, fit and export; the
+list highlights the maps on the plot (a map not drawn says why) and the plot head names them. Open a map's row to give it an energy (E min / E max, in the
+energy unit shown) and field (B min / B max) range; empty limits mean no cut.
 
-- **Merge by energy** joins spectral ranges (e.g. FIR + MIR) and re-grids the energy
-  axis to a uniform step.
-- **Merge by field** joins field ranges (e.g. 0–8 T and 8–16 T sweeps); fields measured
-  twice are averaged.
+**Combine** joins the ticked maps, each cut to its limits, into a product, with a preview of
+the result (or why it cannot be made) before you create it:
+
+- **By energy** joins spectral ranges (e.g. FIR + MIR): an overlap is split at its middle,
+  every measured energy is kept (no resampling; per-point derivatives count the typical
+  step as one point) and a gap stays empty.
+- **By field** joins field ranges (e.g. 0–8 T and 8–16 T sweeps); fields measured twice are
+  averaged.
 - **Average** averages repeated measurements with the same field values.
 
-They need at least two ticked maps.
+The **Product** box names the product (editable), lists the maps it was made of with their
+limits, and plots it, saves it to the library or exports it as a data table as plotted
+(with a `<file>_provenance.txt` note of how it was made) or a journal figure.
 
 ## Keyboard shortcuts
 

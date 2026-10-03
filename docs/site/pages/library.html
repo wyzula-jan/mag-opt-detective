@@ -1,9 +1,9 @@
 <!--
 title: Library
-description: Keep processed maps, load exported tables, cut them to energy and field limits, then merge spectral or field ranges or average repeated sweeps.
+description: Keep processed maps, plot several of them together to see how they overlap, then merge spectral or field ranges or average repeated sweeps into a product you can save and export.
 -->
 <h1>Library</h1>
-<p>The Library panel keeps processed maps side by side, so you can plot them again, join measurements of different spectral or field ranges, or average repeated sweeps.</p>
+<p>The Library panel keeps processed maps side by side, so you can plot them again, lay several over each other, join measurements of different spectral or field ranges, or average repeated sweeps.</p>
 
 <!-- toc -->
 
@@ -11,29 +11,42 @@ description: Keep processed maps, load exported tables, cut them to energy and f
 <figure class="shot">
   <picture>
     <source srcset="images/library-dark.webp" media="(prefers-color-scheme: dark)">
-    <img src="images/library-light.webp" width="1400" height="900" loading="lazy" decoding="async" alt="The Library panel with two ticked maps, Demo_Sam1_0-8T and Demo_Sam1_8-16T. The first is open and shows its limits E min, E max, B min and B max, with B max set to 8 T; the Merge by energy, Merge by field and Average buttons sit at the bottom of the panel.">
+    <img src="images/library-light.webp" width="1400" height="900" loading="lazy" decoding="async" alt="The Library panel with two ticked maps, Demo_Sam1_0-8T and Demo_Sam1_8-16T, drawn together on the map, each cut to its limits. The first one is open and shows its limits E min, E max, B min and B max, with B max set to 8 T; the Combine section at the bottom of the panel is set to By field.">
   </picture>
-  <figcaption>Two halves of a sweep, ready for Merge by field: the first one is cut at B max = 8 T.</figcaption>
+  <figcaption>Two halves of a sweep, ticked and plotted together, ready to be merged by field: the first one is cut at B max = 8 T.</figcaption>
 </figure>
 <ul>
-  <li><b>Save current map</b> adds the R(B)/R(0) map shown: the processed sweep, or a merged or averaged result.</li>
-  <li><b>Load table…</b> adds data tables exported earlier (<kbd>Ctrl</kbd>+<kbd>E</kbd>; see the <a href="settings.html#data-tables">format</a>). You can drop tables on the panel, too.</li>
+  <li><b>Add</b>, in the <i>Processed sweep</i> box at the top of the panel, adds the R(B)/R(0) map of the last Process, with how it was made (files, reference, energy window, baseline). <b>File › Add processed map to library</b> does the same with the panel closed.</li>
+  <li><b>Load table…</b> adds data tables exported earlier (<kbd>Ctrl</kbd>+<kbd>E</kbd>; see the <a href="settings.html#data-tables">format</a>). You can drop tables on the panel, too. The kind of map comes from the name the export gave the table (<code>…_Data.csv</code> is Data; R(B)/R(0) otherwise).</li>
   <li><b>Field from the table header</b> reads the fields from the table's header (<code>0.25T</code>, <code>0.50T</code>, …); off, loaded tables take the Sample panel's custom field range.</li>
 </ul>
-<p>There is no limit to the number of maps.</p>
+<p>There is no limit to the number of maps. Hover over a map's name to see where it came from.</p>
 
-<h2 id="limits">Plotting and limits</h2>
-<p>Each map has a tick, its name, a <b>Plot</b> button and a button that opens its limits: <b>E min</b> and <b>E max</b> (in the unit shown) and <b>B min</b> and <b>B max</b> (in tesla). An empty limit means no cut.</p>
-<p><b>Plot</b> shows the map on the plots. With <b>Plot the full energy range</b> off, it is cut to its E limits first. While a library map is shown, the status bar says <i>Showing a library map</i>; you can view it, pick on it, fit it and export it like a processed sweep.</p>
+<h2 id="plotting">Plotting and limits</h2>
+<p><b>Tick a map to show it.</b> Ticked maps are drawn together on the map, each on its own field and energy range; the one ticked (or clicked) last is on top. Click a map to bring it on top; a click on the top map plots it again (with the Processing panel's baseline region). The maps on the plot are highlighted in the list, the top one is framed, and the plot head and the status bar name them (<i>R(B)/R(0) · FIR over MIR</i>). The plot's ranges fit all of them while they are on Auto, and <b>Fit to data</b> does the same.</p>
+<p>Where maps overlap, the ones above the lowest are drawn with the <b>Overlap</b> opacity (50 % at first; the slider sits above the list), so you can see how they line up; everywhere else each map shows in full colour. All maps share the colour scale of the top one, so only maps of the same kind as the top one are drawn below it: a map that is not drawn says why in its row (another kind, or no data within its limits or the baseline region).</p>
+<p>The top map is the one you work with: the Stacked tab shows its spectra, and you pick points on it, fit models to it and export it like a processed sweep. Picks beyond its field range do not go to the maps below.</p>
+<p>Each map opens to its limits: <b>E min</b> and <b>E max</b> (in the unit shown) and <b>B min</b> and <b>B max</b> (in tesla). An empty limit means no cut; a limit that holds none of the map's data is marked. With <b>Plot the full ranges</b> off, the maps are plotted cut to their limits, redrawn when you pause typing or press <kbd>Return</kbd>.</p>
+<p><b>Process</b> shows the processed sweep again and keeps the ticks; <b>Show</b> next to <i>Maps</i> brings the ticked maps back, and <b>Show</b> in the Processed sweep box goes back to the sweep without processing it again.</p>
 
 <h2 id="combining">Merging and averaging</h2>
-<p>Tick the maps to combine; the buttons need at least two. Each ticked map is first cut to its own limits.</p>
+<p>The <b>Combine</b> section at the bottom of the panel joins the ticked maps, each cut to its E and B limits, into a <b>product</b>. With fewer than two ticked maps it takes one line; its arrow folds it away. Choose how:</p>
 <dl class="terms">
-  <dt>Merge by energy</dt>
-  <dd>Joins maps measured in different spectral ranges, such as FIR and MIR, each cut to its E limits, and puts the result on one energy axis with a uniform step.</dd>
-  <dt>Merge by field</dt>
-  <dd>Joins maps measured over different field ranges, such as 0 – 8 T and 8 – 16 T, each cut to its B limits. Fields measured in both are averaged.</dd>
+  <dt>By energy</dt>
+  <dd>Joins maps measured in different spectral ranges, such as FIR and MIR. Where two maps overlap, each energy comes from one of them: the lower map up to the middle of the overlap, the upper one above it; set E limits to choose where they join. Nothing is resampled: the result keeps every measured energy of the maps, so its energy step changes where they join. Derivatives along E take that into account: per unit as always, and per point they count the map's typical step as one point, so the parts stay comparable. Auto-pick's smoothing window counts samples and its largest jump between fields is a number of typical steps, so in a part sampled more finely they reach over a shorter energy range. A gap between two ranges stays empty, marked by an empty sample one step beyond each side. The maps need the same fields.</dd>
+  <dt>By field</dt>
+  <dd>Joins maps measured over different field ranges, such as 0 – 8 T and 8 – 16 T, over the energies they all share. Fields measured in more than one map are averaged.</dd>
   <dt>Average</dt>
-  <dd>Averages repeated measurements of the same fields, each cut to its E and B limits.</dd>
+  <dd>Averages repeated measurements of the same fields, over the energies they all share.</dd>
 </dl>
-<p>The result is shown like a library map. To keep it, export it as a data table, or save it into the library again.</p>
+<p>Before you create it, the section shows what the product will be (fields, field and energy range, number of energies, where the maps join), or why the maps cannot be combined, for example maps of different kinds or with different fields. <b>Create product</b> makes it and shows it.</p>
+
+<h2 id="product">The product</h2>
+<p>The <b>Product</b> box shows its name, which you can edit, the maps it was made of with their limits, its size and how the maps were joined. Its buttons:</p>
+<ul>
+  <li><b>Plot</b> shows it again after you plotted other maps.</li>
+  <li><b>Save to library</b> adds it to the library, with how it was made.</li>
+  <li><b>Table…</b> exports it as a <a href="settings.html#data-tables">data table</a> as it is plotted (in the unit shown, with the baseline region applied), suggesting its name as the file name; next to the file, <code>&lt;file&gt;_provenance.txt</code> says how it was made and with which baseline region.</li>
+  <li><b>Figure…</b> shows it and opens the <a href="figures.html">journal figure</a> window.</li>
+</ul>
+<p>A new product replaces the one before; the × discards it.</p>
