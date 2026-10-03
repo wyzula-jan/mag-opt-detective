@@ -12,7 +12,7 @@ from mag_opt_detective.core.expressions import (
     parse,
 )
 from mag_opt_detective.core.fitting import Assignment, Model, Observation, fit
-from mag_opt_detective.core.units import Unit
+from mag_opt_detective.core.units import CM1_PER_UNIT, Unit, from_cm1
 from mag_opt_detective.core.zeeman import MU_B, branch_energy
 
 FIELD = np.linspace(0.0, 16.0, 9)
@@ -144,7 +144,8 @@ def test_expression_model_parameters_and_branches():
         ("g", 2.0, "other"),
     ]
     assert model.branch_names() == ["up", "E0 - g*muB*B"]
-    np.testing.assert_allclose(model.evaluate(FIELD)[0], 1.0 + 2.0 * MU_B * FIELD)
+    mu_b_thz = MU_B * CM1_PER_UNIT[Unit.MEV] / CM1_PER_UNIT[Unit.THZ]  # THz/T
+    np.testing.assert_allclose(model.evaluate(FIELD)[0], 1.0 + 2.0 * mu_b_thz * FIELD)
 
 
 def test_set_text_keeps_parameters_by_name():
@@ -189,3 +190,25 @@ def test_sorted_assignment_uses_the_rank_of_the_energy():
     result = fit(model, observations, Assignment.SORTED)
     assert result.values["a"] == pytest.approx(1.0, abs=1e-6)
     assert result.chi2 == pytest.approx(0.0, abs=1e-12)
+
+
+@pytest.mark.parametrize("unit", list(Unit))
+def test_energy_constants_follow_the_output_unit(unit):
+    """muB, hbar and kB are in the output unit, so a fit gives the same g in any unit."""
+    field = np.linspace(0.5, 10.0, 20)
+    e_cm1 = (50.0 + 30.0 * MU_B * field) * CM1_PER_UNIT[Unit.MEV]  # E0 = 50 meV, g = 30
+    model = ExpressionModel("E0 + g*muB*B", unit, initial={"E0": 1.0, "g": 10.0})
+    result = fit(model, [Observation(field, from_cm1(e_cm1, unit), 0)])
+    assert result.values["g"] == pytest.approx(30.0, rel=1e-6)
+    assert result.values["E0"] == pytest.approx(50.0 * CM1_PER_UNIT[Unit.MEV] / CM1_PER_UNIT[unit])
+
+    def value(text):
+        return parse(text).evaluate(np.array([1.0]), {}, unit)[0, 0]
+
+    factor = CM1_PER_UNIT[Unit.MEV] / CM1_PER_UNIT[unit]  # unit per meV
+    k_b = physical_constants["Boltzmann constant in eV/K"][0] * 1e3  # meV/K
+    hbar = physical_constants["reduced Planck constant in eV s"][0] * 1e3  # meV s
+    assert value("muB") == pytest.approx(MU_B * factor)
+    assert value("kB") == pytest.approx(k_b * factor)
+    assert value("hbar/kB") == pytest.approx(hbar / k_b)  # K s in any unit
+    assert (value("e"), value("c"), value("pi")) == (e, c, math.pi)  # not energies

@@ -1,7 +1,8 @@
 """User-defined transition energies E(B): one safe arithmetic expression per branch.
 
 Each non-empty line is one branch and ``#`` starts a comment. ``B`` is the field in T, the
-constants below are known, and every other name is a fit parameter shared between lines.
+constants below are known, and every other name is a fit parameter shared between lines. The
+energy constants (muB, hbar, kB) are in the expression's output unit, like its parameters.
 Expressions are checked against a strict whitelist of the Python syntax tree and evaluated
 by walking it with numpy, never with ``eval``. All literals are floats.
 """
@@ -18,14 +19,14 @@ import numpy as np
 from scipy import constants
 
 from mag_opt_detective.core.fitting import Param, param_values
-from mag_opt_detective.core.units import Unit
+from mag_opt_detective.core.units import Unit, convert
 from mag_opt_detective.core.zeeman import MU_B
 
 MAX_LENGTH = 2000
 MAX_NODES = 500
 VARIABLE = "B"
 
-CONSTANTS: dict[str, float] = {
+CONSTANTS: dict[str, float] = {  # the energy constants are in meV here
     "muB": MU_B,  # meV/T
     "hbar": constants.physical_constants["reduced Planck constant in eV s"][0] * 1e3,  # meV s
     "kB": constants.physical_constants["Boltzmann constant in eV/K"][0] * 1e3,  # meV/K
@@ -33,6 +34,18 @@ CONSTANTS: dict[str, float] = {
     "c": constants.c,  # m/s
     "pi": math.pi,
 }
+# constants with an energy in them: evaluated in the expression's output unit
+ENERGY_CONSTANTS = frozenset({"muB", "hbar", "kB"})
+
+
+def constants_in(unit: Unit | str) -> dict[str, float]:
+    """:data:`CONSTANTS` with the energy constants converted from meV to *unit*."""
+    factor = float(convert(1.0, Unit.MEV, unit))
+    return {
+        name: value * factor if name in ENERGY_CONSTANTS else value
+        for name, value in CONSTANTS.items()
+    }
+
 
 # name -> (numpy function, number of arguments)
 FUNCTIONS: dict[str, tuple[Callable[..., np.ndarray], int]] = {
@@ -131,10 +144,14 @@ class CompiledExpression:
         self.parameters = parameters
         self._nodes = nodes
 
-    def evaluate(self, field: np.ndarray, values: Mapping[str, float]) -> np.ndarray:
-        """Energies of every branch, shape ``(n_branch, *field.shape)``."""
+    def evaluate(
+        self, field: np.ndarray, values: Mapping[str, float], unit: Unit | str = Unit.MEV
+    ) -> np.ndarray:
+        """Energies of every branch in *unit*, shape ``(n_branch, *field.shape)``; the energy
+        constants are taken in *unit*."""
         field = np.asarray(field, dtype=float)
         env: dict[str, np.ndarray] = {VARIABLE: field}
+        env.update({name: np.float64(v) for name, v in constants_in(unit).items()})
         for name in self.parameters:
             if name not in values:
                 raise ValueError(f"no value for parameter {name}")
@@ -203,7 +220,7 @@ class ExpressionModel:
 
     def evaluate(self, field: np.ndarray, values: Mapping[str, float] | None = None) -> np.ndarray:
         """Energies in :attr:`unit`, shape ``(n_branch, n_field)``."""
-        return self.expression.evaluate(field, param_values(self.params, values))
+        return self.expression.evaluate(field, param_values(self.params, values), self.unit)
 
 
 class _Compiler:
@@ -284,10 +301,7 @@ class _Compiler:
             raise self._error("names starting with an underscore are not allowed", node)
         if name in FUNCTIONS:
             raise self._error(f"{name} is a function, write {name}(...)", node)
-        if name in CONSTANTS:
-            number = np.float64(CONSTANTS[name])
-            return lambda env: number
-        if name != VARIABLE:
+        if name not in CONSTANTS and name != VARIABLE:
             self._first.setdefault(name, (self._line, node.col_offset))
         return lambda env: env[name]
 

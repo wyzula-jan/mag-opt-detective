@@ -306,7 +306,8 @@ def test_custom_expression_validates_as_you_type(window, sweep, errors):
     editor.unit.set_value("THz")  # the parameters stay as typed; the curve is converted
     assert ms.params(entry)["E0"].value == 40.0
     field, energy = models.curve_data()["custom"][0]
-    np.testing.assert_allclose(energy, convert(40 + 2 * MU_B * field, "THz", "cm-1"))
+    mu_b = float(convert(MU_B, "meV", "THz"))  # the constants follow the output unit
+    np.testing.assert_allclose(energy, convert(40 + 2 * mu_b * field, "THz", "cm-1"))
     assert not errors
 
 
