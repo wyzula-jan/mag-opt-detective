@@ -940,7 +940,12 @@ class AppController(QObject):
                     self.pointsChanged.emit()
 
     def _restore_points(self, state: PointsState) -> None:
-        self.points = state.table()
+        """Put back an undone or redone table, with rows for the fields of the map shown
+        (a table from before a map on another grid lacks them)."""
+        table = state.table()
+        if table is not None and self.result is not None:
+            table = table.with_fields(self.result.ratio.field)
+        self.points = table
         self.curve = state.curve
         self.pointsChanged.emit()
 

@@ -697,8 +697,8 @@ def test_a_new_field_grid_keeps_every_point_on_its_field(ctl):
 
 
 def test_points_recorded_into_an_older_table_get_their_own_rows(ctl):
-    """Undo can bring back a table from before a map on another grid: a pick or a batch
-    then adds the rows it needs, and a field given twice is counted once."""
+    """A table that lacks the map's fields (set from outside) gets the rows a pick or a
+    batch needs, and a field given twice is counted once."""
     c = ctl
     fine = np.arange(0.25, 2.01, 0.25)
     c.from_map(line_map(fine))
@@ -709,9 +709,23 @@ def test_points_recorded_into_an_older_table_get_their_own_rows(ctl):
     assert c.record_points([1.25, 1.25, 1.75], [625.0, 626.0, 635.0], unit="cm-1") == 2
     np.testing.assert_allclose(c.points.points("LL 1")[0], [0.75, 1.25, 1.75])
     np.testing.assert_allclose(c.points.points("LL 1")[1], [616.0, 626.0, 635.0])
-    c.points_undo.undo()
-    c.points_undo.undo()
-    np.testing.assert_allclose(c.points.field, [0.5, 1.0])  # the rows go with the step
+
+
+def test_undo_past_a_new_field_grid_keeps_the_rows_of_the_map(ctl):
+    """An undone table from before a map on another grid gets that map's rows back, so the
+    auto-pick count of replaced points and later picks see every field of the map."""
+    c, stack = ctl, ctl.points_undo
+    c.record_point(1.0, 300.0)
+    fine = np.arange(0.25, 2.01, 0.25)
+    c.from_map(line_map(fine))
+    c.record_point(0.75, 616.0)
+    stack.undo()
+    stack.undo()  # back to before the first pick, made on the 0.5 T grid
+    np.testing.assert_allclose(c.points.field, fine)
+    assert c.points.points("LL 1")[0].size == 0
+    stack.redo()
+    np.testing.assert_allclose(c.points.field, fine)
+    assert c.points.points("LL 1")[0].tolist() == [1.0]
 
 
 def test_picks_without_a_map_stay_on_the_table_rows(qapp):
