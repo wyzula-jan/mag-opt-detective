@@ -82,7 +82,6 @@ class LicencesDialog(QDialog):
         self.resize(760, 600)
         self.text = QPlainTextEdit(licences_text())
         self.text.setReadOnly(True)
-        self.text.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
         self.text.setFont(QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont))
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
         buttons.rejected.connect(self.reject)
@@ -92,8 +91,12 @@ class LicencesDialog(QDialog):
 
 
 def about_box(parent: QWidget, text: str) -> QMessageBox:
-    """The About box with *text* (rich text) and a Licences… button that opens the licences."""
+    """The About box with *text* (rich text) and a Licences… button that opens the licences.
+
+    The box deletes itself when it closes.
+    """
     box = QMessageBox(parent)
+    box.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
     box.setWindowTitle("About")
     box.setText(text)
     icon = parent.windowIcon()

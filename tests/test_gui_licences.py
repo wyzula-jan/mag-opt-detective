@@ -9,9 +9,8 @@ from mag_opt_detective.gui.licences import LicencesDialog
 window, errors = gui_helpers.window, gui_helpers.errors  # shared fixtures
 
 
-def test_about_opens_the_licences(window, qtbot):
+def test_about_opens_the_licences(window):
     box = licences.about_box(window, "<b>Magneto-Optical Detective</b>")
-    qtbot.addWidget(box)
     assert box.licences_button.text() == "Licences…"
     assert box.buttonRole(box.licences_button) == QMessageBox.ButtonRole.ActionRole
     box.licences_button.click()
