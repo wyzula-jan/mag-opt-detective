@@ -320,7 +320,8 @@ class LiveApply(QObject):
     A run costs more than *apply* itself: what it changed is drawn after it returns (on the
     stacked plot that takes longer than the run). So its cost is counted until the window is
     idle again, found with zero timers: the first that comes back within IDLE seconds (at most
-    SETTLE_MAX seconds after the start). The first change runs at once. Later ones wait, from
+    SETTLE_MAX seconds after the start). A run started meanwhile (:meth:`flush`) takes over the
+    measurement. The first change runs at once. Later ones wait, from
     that point, INTERVAL ms or twice the cost if that is longer, so the window keeps at least
     two thirds of the time to follow the mouse. A cost above SLOW seconds makes it slow:
     changes made while the region is dragged then wait until the drag ends (:meth:`flush`),
@@ -354,8 +355,9 @@ class LiveApply(QObject):
         self._pending = False
         self._dragging = False  # the waiting change was made while dragging
         self._busy = False  # the last run's cost is still being measured
+        self._run = 0  # number of the last run: its zero timers carry it, older ones stop
         self._start = 0.0  # clock() at the start of the last run
-        self._probe_at = 0.0  # clock() when the last zero timer was started
+        self._probe_at = 0.0  # clock() when its last zero timer was started
         self._done = -math.inf  # clock() when the window was idle after the last run
         self.slow = False  # see the class docstring
         self.runs = 0  # how many times *apply* did something
@@ -404,18 +406,21 @@ class LiveApply(QObject):
         if self._apply() is False:
             return
         self.runs += 1
+        self._run += 1
         self._start = start
         self._busy = True
-        self._probe()
+        self._probe(self._run)
 
-    def _probe(self) -> None:
+    def _probe(self, run: int) -> None:
         self._probe_at = self._clock()
-        QTimer.singleShot(0, self, self._probed)
+        QTimer.singleShot(0, self, lambda: self._probed(run))
 
-    def _probed(self) -> None:
+    def _probed(self, run: int) -> None:
+        if run != self._run:  # a later run took over the measurement
+            return
         now = self._clock()
         if now - self._probe_at > self.IDLE and now - self._start < self.SETTLE_MAX:
-            self._probe()  # the window was busy (drawing what the run changed): look again
+            self._probe(run)  # the window was busy (drawing what the run changed): look again
             return
         self._busy = False
         self._done = now

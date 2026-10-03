@@ -465,6 +465,34 @@ def test_live_apply_counts_the_drawing_a_run_leaves(qtbot):
     assert clock.calls == 1 and live.is_pending()
 
 
+def test_a_run_during_a_measurement_takes_it_over(qtbot):
+    """A run started while the last one is measured is measured from its own start, with the
+    drawing it leaves (an older zero timer does not end the measurement early)."""
+    clock = FakeClock()
+
+    def run():
+        clock.run()
+        if clock.calls == 2:
+            QTimer.singleShot(0, draw)  # (posted by the run, as a redraw is)
+
+    def draw():
+        measuring.append(live.is_busy())
+        clock.now += 2 * LiveApply.IDLE
+
+    measuring = []
+    live = LiveApply(run, clock=clock)
+    clock.cost = LiveApply.IDLE / 2
+    live.request()  # runs; its cost is then measured
+    assert live.is_busy()
+    live.request()
+    live.flush()  # e.g. the drag ended: runs now, while the first one is measured
+    assert clock.calls == 2 and live.is_busy()
+    settled(qtbot, live)
+    qtbot.wait(50)  # every zero timer has come back
+    assert measuring == [True]  # still measured while the second run is drawn
+    assert live.last_duration == pytest.approx(2.5 * LiveApply.IDLE)
+
+
 def test_live_apply_counts_only_runs_that_did_something(qtbot):
     clock = FakeClock()
 
