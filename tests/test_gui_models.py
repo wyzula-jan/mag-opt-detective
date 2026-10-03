@@ -1191,13 +1191,10 @@ def test_a_key_press_commits_the_value_once(window, sweep, qtbot, monkeypatch, e
     row.valueEdited.connect(lambda value, live: None if live else commits.append(value))
     original = models.draw
     monkeypatch.setattr(models, "draw", lambda: (draws.append(1), original())[1])
-    window.activateWindow()
-    row.slider.setFocus(Qt.FocusReason.OtherFocusReason)
-    qtbot.waitUntil(row.slider.hasFocus)
     qtbot.keyClick(row.slider, Qt.Key.Key_Right)  # live on the press, committed on release
     assert commits == [pytest.approx(2.02)] and len(draws) == 1
     assert ms.params(zeeman)["g_0"].value == pytest.approx(2.02)
-    qtbot.keyClick(row.slider, Qt.Key.Key_Left, Qt.KeyboardModifier.ShiftModifier)
+    qtbot.keyClick(row.slider, Qt.Key.Key_PageDown)  # ten steps (as Shift+Left)
     assert len(commits) == 2 and len(draws) == 2
     qtbot.wait(models_module.DRAW_INTERVAL * 3)  # no redraw left waiting
     assert len(draws) == 2

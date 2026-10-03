@@ -418,6 +418,7 @@ def test_nudge_slider_keyboard(qtbot, nudge):
     qtbot.keyClick(nudge, Qt.Key.Key_PageUp)
     assert nudge.value() == pytest.approx(20.2 * 0.9 * 1.1)
     assert len(finished) == 6 and nudge.handle_offset() == 0.0
+    qtbot.keyClick(nudge, Qt.Key.Key_Escape)  # QTest leaves Shift held until the next key
 
 
 def test_nudge_slider_whole_numbers(qtbot, nudge):
