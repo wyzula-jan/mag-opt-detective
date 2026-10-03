@@ -956,7 +956,8 @@ class MainWindow(QMainWindow):
         """Log an error; expected ones show in the bar above the plot, others in a dialog.
 
         The bar reads "Can't <action>: <message>." with *hint* (or the usual remedy of
-        *panel*) below it, as in the mockup; without a remedy, the message goes below.
+        *panel*) below it, as in the mockup; a message "<what>: <detail>" heads with *what*
+        and puts the detail before the remedy. Without a remedy, the message goes below.
         """
         logger.error("%s: %s", title, message)
         if not expected:
@@ -964,7 +965,11 @@ class MainWindow(QMainWindow):
             return
         action = ACTIONS.get(title, title[:1].lower() + title[1:])
         hint = hint or PANEL_HINTS.get(panel or "")
-        if hint:
+        what, _, detail = message.rstrip(".").partition(": ")
+        if hint and detail:
+            head = f"Can't {action}: {what}."
+            text = f"{detail[:1].upper()}{detail[1:]}. {hint}"
+        elif hint:
             head, text = f"Can't {action}: {message.rstrip('.')}.", hint
         else:
             head, text = f"Can't {action}", message[:1].upper() + message[1:]

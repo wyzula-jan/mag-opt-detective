@@ -158,6 +158,13 @@ def test_missing_reference_offers_the_reference_panel(window, sweep):
     assert bar.text_label.text() == (
         "Check the reference sweep in the Reference panel, or set Reference to None."
     )
+    message = "energy window: the first value must be below the second; it is 3 – 2 meV"
+    window.report_error("Process", message, panel="processing")  # one colon in the head
+    assert (bar.title_label.text(), bar.text_label.text()) == (
+        "Can't process: energy window.",
+        "The first value must be below the second; it is 3 – 2 meV. Check the energy window "
+        "and the baseline in the Processing panel.",
+    )
     window.report_error("Colour range", "invalid colour range 2 – 1")  # no panel: no remedy
     assert (bar.title_label.text(), bar.text_label.text()) == (
         "Can't set the colour range",
