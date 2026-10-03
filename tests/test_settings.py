@@ -10,6 +10,7 @@ from mag_opt_detective.core.units import Unit
 from mag_opt_detective.gui.controller import PlotSelection, ViewState
 from mag_opt_detective.gui.main_window import MainWindow
 from mag_opt_detective.gui.plots import BarScale
+from mag_opt_detective.gui.settings import PREFIX
 
 MEV = 8.0656
 
