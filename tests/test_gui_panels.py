@@ -76,6 +76,8 @@ def test_common_prefix():
     assert common_prefix(names[:1]) == "Demo_4p2K_Sam1_"
     assert common_prefix(["abc.txt", "abd.txt"]) == ""
     assert common_prefix([]) == ""
+    assert common_prefix(["A_1.txt", "A_12.txt", "B_1.txt"]) == ""
+    assert common_prefix(["Run 2_a.txt", "Run 2_b.txt", "Run 1_c.txt"]) == "Run "
 
 
 @pytest.mark.parametrize(

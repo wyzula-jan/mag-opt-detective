@@ -16,7 +16,6 @@ import dataclasses
 import functools
 import logging
 import math
-import os
 import re
 from collections.abc import Callable, Hashable, Iterator, Mapping
 from dataclasses import dataclass, field
@@ -1379,7 +1378,10 @@ def common_prefix(names: list[str]) -> str:
     """The start all *names* share, cut after its last separator (``_``, ``-`` or space)."""
     if not names:
         return ""
-    prefix = os.path.commonprefix(names)
+    prefix = names[0]
+    for name in names[1:]:
+        while not name.startswith(prefix):
+            prefix = prefix[:-1]
     cut = max(prefix.rfind(s) for s in SEPARATORS)
     return prefix[: cut + 1] if cut >= 0 else ""
 

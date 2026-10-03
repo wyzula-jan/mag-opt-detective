@@ -58,3 +58,5 @@ allowed-confusables = ["–", "×"]
 testpaths = ["tests"]
 addopts = "-ra"
 qt_api = "pyside6"
+# a deprecated call in our code fails the tests (e.g. on the newest Python in CI)
+filterwarnings = ["error::DeprecationWarning:mag_opt_detective"]
