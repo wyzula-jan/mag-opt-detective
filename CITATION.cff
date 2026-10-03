@@ -1,0 +1,23 @@
+cff-version: 1.2.0
+message: >-
+  If you use Magneto-Optical Detective for an analysis in a publication,
+  please cite it as below.
+type: software
+title: Magneto-Optical Detective
+abstract: >-
+  A desktop app to plot, pick, fit and export magneto-optical FTIR field
+  sweeps: R(B)/R(0) maps, Landau-level picking, model fitting and journal
+  figures.
+authors:
+  - family-names: Wyzula
+    given-names: Jan
+    email: wyzula.jan@gmail.com
+version: 5.0.0.dev0
+license: GPL-3.0-only
+repository-code: "https://github.com/wyzula-jan/mag-opt-detective"
+url: "https://wyzula-jan.github.io/mag-opt-detective/"
+keywords:
+  - magneto-optics
+  - infrared spectroscopy
+  - FTIR
+  - Landau levels

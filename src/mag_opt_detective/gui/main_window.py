@@ -1047,7 +1047,10 @@ class MainWindow(QMainWindow):
             self,
             f"<b>Magneto-Optical Detective {__version__}</b><br>"
             f"Python {platform.python_version()}, Qt {qVersion()}, PySide6 {pyside_version}<br>"
-            f"numpy {np.__version__}, scipy {scipy.__version__}, pyqtgraph {pg.__version__}",
+            f"numpy {np.__version__}, scipy {scipy.__version__}, pyqtgraph {pg.__version__}<br><br>"
+            "Free software under the GNU GPL v3; commercial licences on request. If you use it "
+            "for an analysis in a publication, please cite "
+            "it (see CITATION.cff in the repository).",
         ).exec()
 
     def event(self, event) -> bool:

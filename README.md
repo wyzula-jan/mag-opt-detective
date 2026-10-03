@@ -228,6 +228,27 @@ Tests that need real measurement data look for a `Data_to_test/` folder in the
 repository root and are skipped when it is missing. Measurement data is never
 committed.
 
+## Citing
+
+If you use Magneto-Optical Detective for an analysis in a publication, please cite it.
+[`CITATION.cff`](CITATION.cff) has the details (GitHub shows them under *Cite this
+repository*), for example:
+
+> J. Wyzula, *Magneto-Optical Detective*, version 5.0,
+> https://github.com/wyzula-jan/mag-opt-detective
+
+## Licence
+
+Copyright © 2026 Jan Wyzula.
+
+Magneto-Optical Detective is free software under the [GNU General Public License,
+version 3](LICENSE) (GPL-3.0-only): you may use, study, change and share it. What you
+share, changed or not, must stay under the same licence and come with its source code.
+It comes without any warranty.
+
+To build it into a product that is not released under the GPL, a commercial licence is
+available from the author: wyzula.jan@gmail.com.
+
 ## Third-party software
 
 The app is built on [Qt](https://www.qt.io) and [PySide6](https://pyside.org) (GNU LGPL
