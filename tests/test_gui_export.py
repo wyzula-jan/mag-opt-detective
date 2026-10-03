@@ -286,6 +286,7 @@ def test_presets_set_widths_text_and_notes(processed, qtbot):
     assert dialog.print_size().width_mm == 178
     assert dialog.width_caption.text() == "Double column · 17.8 cm"
     assert dialog.panel_label.button("b").toolTip() == "Panel (b): bold, top left"
+    assert dialog.panel_caption.text() == "Panel label · APS style: (a), bold"
 
     dialog.preset.set_value("custom")
     assert dialog.width_stack.currentWidget() is dialog.custom_width

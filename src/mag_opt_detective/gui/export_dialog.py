@@ -426,6 +426,8 @@ class ExportDialog(QDialog):
         dpi_line.addWidget(self.dpi_hint, 1, Qt.AlignmentFlag.AlignBottom)
         layout.addWidget(block(section_label("File"), self.format, dpi_row))
         self.colorbar_box = block(self.colorbar_row, self.colorbar_label, spacing=6)
+        panel_box = labelled("Panel label", self.panel_label)
+        self.panel_caption = panel_box.findChild(QLabel)  # shows the preset's style
         self.points_box = block(self.points_row, self.points_scope, spacing=6)
         layout.addWidget(
             block(
@@ -434,7 +436,7 @@ class ExportDialog(QDialog):
                 self.colorbar_box,
                 self.models_row,
                 self.points_box,
-                labelled("Panel label", self.panel_label),
+                panel_box,
                 spacing=12,
             )
         )
@@ -719,6 +721,8 @@ class ExportDialog(QDialog):
         for letter in PANEL_LETTERS:
             styled = preset.panel_label(letter)
             self.panel_label.button(letter).setToolTip(f"Panel {styled}: bold, top left")
+        name = PRESET_NAMES.get(preset.key, preset.name)
+        self.panel_caption.setText(f"Panel label · {name} style: {preset.panel_label('a')}, bold")
         for name, field in self._number_fields().items():
             field.set_invalid(name in size.invalid)
 
