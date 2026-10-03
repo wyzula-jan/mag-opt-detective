@@ -234,7 +234,8 @@ class RangeControl(QWidget):
         self._error = ""  # the fields get the stored values back
         width = self._b - self._a
         resolution = decimals_for(width if width > 0 else abs(self._hi - self._lo))
-        decimals = max(resolution, *(significant_decimals(v) for v in (self._lo, self._hi)))
+        shown = max(resolution, *(significant_decimals(v) for v in (self._lo, self._hi)))
+        decimals = min(8, shown + 2)  # kept finer than shown, so what shows is rounded once
         span = max(width, self._hi - self._lo, 1e-12)
         step = 10.0 ** (math.floor(math.log10(span)) - 2)
         low = min(self._a - 10 * span, self._lo)

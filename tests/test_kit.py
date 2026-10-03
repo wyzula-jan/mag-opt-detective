@@ -147,7 +147,7 @@ def test_range_control_shows_state(control):
     assert control.lo_spin.suffix() == " T"
     assert control.lo_spin.locale().decimalPoint() == "."
     assert (control.lo_spin.text(), control.hi_spin.text()) == ("0.25 T", "16 T")  # as the note
-    assert control.lo_spin.decimals() == 4  # 0.25 to four significant digits
+    assert control.lo_spin.decimals() == 6  # 0.25 to four significant digits, and two more
     assert control.slider.is_muted()
     assert control.mode.value() == "auto"
     assert control.accessibleName() == "Field B"  # the title without markup
@@ -166,10 +166,10 @@ def test_range_control_shows_state(control):
 
 def test_range_control_fields_and_note_show_the_same_digits(control):
     control.set_unit("meV")
-    control.set_extent(43.394, 396.75)
-    control.set_range(43.394, 396.75)
-    assert control.note.text() == "Data 43.39 – 396.8 meV"
-    assert (control.lo_spin.text(), control.hi_spin.text()) == ("43.39 meV", "396.8 meV")
+    control.set_extent(3500 / 80.656, 3200 / 8.0656)  # 43.394 – 396.746
+    control.set_range(*control.extent())
+    assert control.note.text() == "Data 43.39 – 396.7 meV"
+    assert (control.lo_spin.text(), control.hi_spin.text()) == ("43.39 meV", "396.7 meV")
     control.set_extent(0.995, 1.002)  # a narrow range keeps the digits that resolve it
     control.set_range(0.995123, 1.0019)
     assert control.lo_spin.text() == "0.995123 meV"
