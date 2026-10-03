@@ -9,6 +9,9 @@ applied to the maps of the last Process at once (:meth:`AppController.apply_base
 while it is dragged so that the window stays responsive (:class:`LiveApply`); otherwise it waits
 for the next Process. A library map keeps the baseline it was plotted with: the band only shows
 there.
+
+The status bar shows the baseline of the map on screen (:class:`BaselineChip`); a click on it
+opens this panel at the baseline (:func:`show_baseline`).
 """
 
 from __future__ import annotations
@@ -26,6 +29,7 @@ from PySide6.QtCore import QObject, Qt, QTimer
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QScrollArea, QStackedWidget, QWidget
 
 from mag_opt_detective.core.units import Range, Unit, from_cm1
+from mag_opt_detective.gui.baseline_chip import BaselineChip, baseline_mark
 from mag_opt_detective.gui.controller import fmt, user_action
 from mag_opt_detective.gui.display import unit_text
 from mag_opt_detective.gui.kit import Switch
@@ -136,16 +140,15 @@ class ProcessingPanel(QWidget):
                 self.view_energy_link,
             )
         )
-        layout.addWidget(
-            block(
-                self.baseline_row,
-                self._range_row(self.baseline_lo, self.baseline_hi),
-                self.baseline_note,
-                toggles,
-                self.live_note,
-                hint(BASELINE_HINT),
-            )
+        self.baseline_block = block(
+            self.baseline_row,
+            self._range_row(self.baseline_lo, self.baseline_hi),
+            self.baseline_note,
+            toggles,
+            self.live_note,
+            hint(BASELINE_HINT),
         )
+        layout.addWidget(self.baseline_block)
         layout.addStretch(1)
         for switch in (self.cut_on, self.baseline_on):
             switch.toggled.connect(self.check)
@@ -482,6 +485,16 @@ def show_view_energy(window) -> None:
         scroll.ensureWidgetVisible(target if isinstance(target, QWidget) else section)
 
 
+def show_baseline(window) -> None:
+    """Open this panel at the baseline (a click on the baseline chip): its first field, or its
+    switch while the baseline is off."""
+    panel: ProcessingPanel = window.panels["processing"]
+    window.show_panel("processing")
+    target = panel.baseline_lo if panel.baseline_on.isChecked() else panel.baseline_on
+    target.setFocus(Qt.FocusReason.OtherFocusReason)
+    window.panel_pages["processing"].scroll.ensureWidgetVisible(panel.baseline_block)
+
+
 @user_action("Live baseline")
 def settle_live(window) -> bool:
     """Apply what was changed with Live on before Live is turned off (see
@@ -761,6 +774,24 @@ def install(window) -> None:
     c.resultChanged.connect(draw_guides)
     c.unitChanged.connect(draw_guides)
     draw_guides()
+
+    # the baseline of the map shown, in the status bar beside its state (after on_live above,
+    # which tells the controller about Live first)
+    chip = BaselineChip()
+    window.baseline_chip = chip
+    window.add_status_chip(chip)
+    chip.clicked.connect(lambda: show_baseline(window))
+
+    def show_mark(*_args) -> None:
+        # while the band is dragged the chip keeps its width, so the summary beside it stays
+        chip.set_held(any(region.is_dragging() for region in regions.values()))
+        chip.set_mark(baseline_mark(c))
+
+    for signal in (c.resultChanged, c.processingChanged, c.unitChanged, c.restored):
+        signal.connect(show_mark)
+    panel.baseline_live.toggled.connect(show_mark)
+    window.themeChanged.connect(chip.update)
+    show_mark()
 
     window.commands["process"].triggered.connect(lambda: process(window))
 
