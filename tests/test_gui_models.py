@@ -299,6 +299,18 @@ def test_custom_expression_validates_as_you_type(window, sweep, errors):
     assert not errors
 
 
+def test_curves_with_gaps_are_drawn(window, sweep, recwarn, errors):
+    load_sweep(window, sweep)
+    process(window)
+    entry = add(window, "custom")
+    card_of(window, entry).editor.code.edit.setPlainText("100*sqrt(B - 1)\n1/(B - 1)")
+    (field, root), (_field, pole) = models_of(window).curve_data()["custom"]
+    assert np.isnan(root[field < 1]).all() and np.isfinite(root[field > 1]).all()
+    assert np.isfinite(pole).sum() >= field.size - 1  # inf became a gap
+    assert not [w for w in recwarn if issubclass(w.category, RuntimeWarning)]
+    assert not errors
+
+
 # ---------------------------------------------------------------------- fitting
 def test_fit_zeeman_branches_to_picked_points(window, sweep, tmp_path, errors):
     load_sweep(window, sweep)
