@@ -16,7 +16,7 @@ from mag_opt_detective.gui.baseline_chip import BaselineChip, BaselineMark, base
 from mag_opt_detective.gui.controller import SweepFiles
 from mag_opt_detective.gui.display import process_key, unit_text
 from mag_opt_detective.gui.panels import library
-from mag_opt_detective.gui.panels.processing import show_baseline
+from mag_opt_detective.gui.panels.processing import LiveApply, show_baseline
 
 window, errors = gui_helpers.window, gui_helpers.errors  # shared fixtures
 
@@ -358,6 +358,19 @@ def test_the_chip_keeps_its_width_while_held(qtbot):
     for region in ((707.0, 1087.0), (1000.0, 9999.0), (1.0, 2.0)):
         widget.set_mark(BaselineMark(region, Unit.CM1))
         assert widget.sizeHint().width() == wide
+    widget.set_mark(BaselineMark((999.5, 999.5), Unit.CM1))  # (a decimal not reserved)
+    assert widget.sizeHint().width() > wide
+    widget.set_held(False)
+    widget.set_mark(BaselineMark((612.0, 992.0), Unit.CM1))
+    widget.set_held(True, decimals=2)  # (a drag's values have two decimals)
+    assert widget.sizeHint().width() > wide
+    two = widget.sizeHint().width()
+    widget.set_mark(BaselineMark((9999.75, 9999.25), Unit.CM1))
+    assert widget.sizeHint().width() == two
+    widget.set_held(False)
+    widget.set_mark(BaselineMark((612.0, 992.0), Unit.CM1))
+    widget.set_held(True)
+    assert widget.sizeHint().width() == wide
     widget.set_mark(BaselineMark((99999.5, 99999.75), Unit.CM1))  # (more than one digit)
     wider = widget.sizeHint().width()
     assert wider > wide
@@ -467,6 +480,55 @@ def test_a_live_drag_neither_flickers_nor_moves_the_status_bar(dragging, qtbot):
     assert paints.forms and set(paints.forms) == {0}  # never painted without "Baseline"
     assert mark(w).text() == f"Baseline {region_text(*c.result.baseline_region, Unit.CM1)}"
     assert c.result.baseline_region == c.processing.baseline
+    assert chip(w).sizeHint().width() == chip(w).widths(mark(w))[0] + chip(w).MARGIN
+
+
+def test_a_zoomed_drag_reserves_room_for_decimals(dragging, qtbot):
+    w, c = dragging, dragging.controller
+    c.set_view(energy_range=(530.0, 1080.0))  # the band's values get a decimal
+    qtbot.wait(20)
+    band = w.panels["processing"].regions["map"]
+    assert band.step() == pytest.approx(0.1)
+    plot = w.plots.map
+    viewport = plot.view.viewport()
+
+    def energy(pixel: QPoint) -> float:
+        return plot.plot.vb.mapSceneToView(plot.view.mapToScene(pixel)).y()
+
+    press = viewport_pos(plot, 1.2, 550.0)  # the upper edge
+    # the first step lands on a whole number, so the drag starts without decimals
+    first = next(
+        press - QPoint(0, dy)
+        for dy in range(3, 80)
+        if (value := round(550.0 + energy(press - QPoint(0, dy)) - energy(press), 1))
+        == round(value)
+    )
+    steps = [first - QPoint(0, 50 * k) for k in range(12)]  # up to 1000 and more
+    paints = Paints(chip(w))
+    seen = []
+
+    def record() -> None:
+        seen.append((chip(w).mark(), chip(w).sizeHint().width()))
+
+    c.resultChanged.connect(record)
+    QTest.mouseMove(viewport, press)
+    QTest.mousePress(viewport, LEFT, PLAIN, press)
+    for step in steps:
+        qtbot.wait(move_pause_ms())
+        QTest.mouseMove(viewport, step)
+        if len(seen) == 1:
+            assert "." not in seen[0][0].range_text()  # the first change: no decimals
+    qtbot.wait(2 * LiveApply.INTERVAL)  # what is waiting applies while still dragged
+    during = list(seen)
+    QTest.mouseRelease(viewport, LEFT, PLAIN, steps[-1])
+    c.resultChanged.disconnect(record)
+    assert any("." in m.range_text() and m.region[1] > 1000 for m, _ in during)
+    assert len({width for _, width in during}) == 1  # never wider while dragged
+    # room for any value with a digit more than at the start and the drag's decimal (the
+    # widest digit is font-dependent: the drag above need not reach it)
+    widest = BaselineMark((8888.8, 8888.8), Unit.CM1, live=True)
+    assert during[0][1] >= chip(w).widths(widest)[0] + chip(w).MARGIN
+    assert paints.forms and set(paints.forms) == {0}
     assert chip(w).sizeHint().width() == chip(w).widths(mark(w))[0] + chip(w).MARGIN
 
 

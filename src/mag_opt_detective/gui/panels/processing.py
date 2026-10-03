@@ -785,7 +785,10 @@ def install(window) -> None:
     def show_mark(*_args) -> None:
         # while the band is dragged the chip keeps its width, so the summary beside it stays
         chip.set_mark(baseline_mark(c))
-        chip.set_held(any(region.is_dragging() for region in regions.values()))
+        dragged = [region for region in regions.values() if region.is_dragging()]
+        step = dragged[0].step() if dragged else 0.0
+        decimals = max(0, -round(math.log10(step))) if step > 0 else 0  # (dragged values')
+        chip.set_held(bool(dragged), decimals)
 
     for signal in (c.resultChanged, c.processingChanged, c.unitChanged, c.restored):
         signal.connect(show_mark)

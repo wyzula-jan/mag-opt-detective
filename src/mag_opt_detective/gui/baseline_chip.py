@@ -185,9 +185,16 @@ def distinct_digits(applied, wanted) -> int:
     return 17  # (enough for any two floats)
 
 
-def widest(text: str) -> str:
-    """*text* with each number as wide as one digit more can make it (for reserving room)."""
-    return NUMBER.sub(lambda m: "8" + re.sub("[0-9]", "8", m.group()), text)
+def widest(text: str, decimals: int = 0) -> str:
+    """*text* with each number as wide as one digit more and at least *decimals* decimals can
+    make it (for reserving room)."""
+
+    def wide(match: re.Match) -> str:
+        whole, _, fraction = match.group().partition(".")
+        places = max(len(fraction), decimals)
+        return "8" * (len(whole) + 1) + ("." + "8" * places if places else "")
+
+    return NUMBER.sub(wide, text)
 
 
 class BaselineChip(QAbstractButton):
@@ -241,16 +248,17 @@ class BaselineChip(QAbstractButton):
             self._relayout()
         self.update()
 
-    def set_held(self, held: bool) -> None:
+    def set_held(self, held: bool, decimals: int = 0) -> None:
         """Keep (True) or release (False) the width the chip asks for. Held, it starts with
-        room for one more digit at each end of the region shown."""
+        room for one more digit at each end of the region shown and for *decimals* decimals
+        (those of the values a drag gives)."""
         if held == self._holding:
             return
         self._holding = held
         if held:
             mark, reserve = self._mark, 0
             if mark is not None and mark.region:
-                texts = [("Baseline ", "muted"), (widest(mark.range_text()), "fg")]
+                texts = [("Baseline ", "muted"), (widest(mark.range_text(), decimals), "fg")]
                 reserve = self._width(texts, mark.live) + self.MARGIN
             changed = self._hold(reserve)
         else:
