@@ -79,8 +79,11 @@ range, then merge spectral ranges, merge field ranges or average repeated sweeps
 - **Data table…** (Ctrl+E): the map shown, tab-separated.
 - **Image…** (Ctrl+Shift+E): the journal figure window, with a live preview. Presets
   **Nature**, **APS** and **Custom**: width and height in mm, text and lines in pt, dpi;
-  the map or the stacked plot, colour bar, model curves, points and a panel label. Saves
-  PDF, SVG and EPS with editable text, and PNG and TIFF.
+  the map or the stacked plot, its colour range (as in the window, Auto or Fixed), the
+  colour bar on the right or on top, ticks (in or out, on all four sides, minor ticks),
+  model curves, points and a panel label. Your own presets keep these styles and can be
+  renamed, deleted, exported and imported (JSON). Saves PDF, SVG and EPS with editable
+  text, and PNG and TIFF.
 - **Quick image (PNG/SVG)…**: the plot as on screen, with its colour scale.
 
 Choices (units, ranges, levels, colours, layout) are remembered between sessions;

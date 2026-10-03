@@ -1,6 +1,6 @@
 <!--
 title: Journal figures
-description: Export the map or the stacked plot at print size with the Nature, APS or custom presets, as PDF, SVG, EPS, PNG or TIFF, and what the warnings mean.
+description: Export the map or the stacked plot at print size with the Nature, APS or custom presets or your own, as PDF, SVG, EPS, PNG or TIFF, with its colour range, colour bar and ticks, and what the warnings mean.
 -->
 <h1>Journal figures</h1>
 <p><b>Export › Journal figure…</b> (<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>E</kbd>) opens a window that draws the plot as a figure for print: at its exact size in millimetres, with text and lines in points, in the formats journals ask for.</p>
@@ -17,7 +17,7 @@ description: Export the map or the stacked plot at print size with the Nature, A
 <h2 id="settings">Settings</h2>
 <dl class="terms">
   <dt>Journal</dt>
-  <dd><b>Nature</b>, <b>APS</b> or <b>Custom</b> (see <a href="#presets">the presets</a>). The notes under it sum up the journal's rules; their sources are in the tooltip.</dd>
+  <dd><b>Nature</b>, <b>APS</b> or <b>Custom</b> (see <a href="#presets">the presets</a>), and <b>My presets</b> next to them for <a href="#my-presets">your own</a>. The notes under it sum up the journal's rules; their sources are in the tooltip.</dd>
   <dt>Width and height</dt>
   <dd>The journal's column widths, or any width in mm with Custom; the height in mm.</dd>
   <dt>Text and lines</dt>
@@ -26,18 +26,33 @@ description: Export the map or the stacked plot at print size with the Nature, A
   <dd>PDF, SVG, EPS, PNG or TIFF, and the resolution in dpi. For PNG and TIFF it sets the pixel size, which is shown; in PDF, SVG and EPS it is the resolution of the map image inside the file.</dd>
   <dt>View</dt>
   <dd><b>Map</b> or <b>Stacked</b>, by default the tab on screen.</dd>
-  <dt>Colour bar</dt>
-  <dd>On or off, with an optional label (e.g. ΔT/T). On a stacked figure it is offered when the traces are coloured by field.</dd>
   <dt>Model curves</dt>
   <dd>The visible models, dashed.</dd>
   <dt>Picked points</dt>
   <dd>On or off, for the <b>current curve</b> or <b>all curves</b>; it starts from the markers shown in the main window.</dd>
   <dt>Panel label</dt>
   <dd>None, or a to f, in the journal's style: a bold <b>a</b> for Nature, <b>(a)</b> for APS and Custom.</dd>
+  <dt>Colour range</dt>
+  <dd>The colours of a map: <b>Window</b> uses the levels of the main window and follows them; <b>Auto</b> uses the 1–99 % of the whole map, as the window's Auto, also when you zoomed in; <b>Fixed</b> uses the two values you type, in the plot's values (a per-unit derivative in the unit shown). The figure's colour range does not change the main window's. Fixed values start from the window's levels and are remembered for each plot, as in the inspector, so values typed for R(B)/R(0) are not used for a derivative. Stacked figures colour their traces by field instead.</dd>
+  <dt>Colour bar</dt>
+  <dd>On or off, <b>Right</b> or <b>Top</b>, with an optional label (e.g. ΔT/T). On top it is a horizontal bar above the plot with its ticks and label above it; the figure keeps its size and the plot makes room. On a stacked figure it is offered when the traces are coloured by field.</dd>
+  <dt>Ticks</dt>
+  <dd><b>In</b> or <b>Out</b>; on <b>all four sides</b> (top and right without numbers) or only bottom and left; their length and width in pt; and <b>minor ticks</b>, which split each step between numbers into 2 to 10 parts, with their length. Empty sizes follow the text size and the line width, as the presets draw them. The colour bar's ticks point the same way; it has no minor ticks.</dd>
   <dt>Axis labels</dt>
   <dd>Empty fields use the automatic labels, such as <i>Energy (meV)</i>; type your own, or a single space for no label.</dd>
 </dl>
-<p><b>Save…</b> asks where to save, with a name made from the sweep, the plot and the preset, such as <code>…_Ratio_nature-single.pdf</code>. The window remembers the journal, the sizes, the format, the resolution, the colour bar and the panel label for the next time.</p>
+<p><b>Save…</b> asks where to save, with a name made from the sweep, the plot and the preset, such as <code>…_Ratio_nature-single.pdf</code>. The window remembers the journal, the sizes, the format, the resolution, the colour range with the fixed values, the colour bar, the ticks and the panel label for the next time.</p>
+
+<h2 id="my-presets">Your presets</h2>
+<p><b>My presets</b>, next to the journals, keeps your own styles. <b>Save as preset…</b> asks for a name in the window and keeps:</p>
+<ul>
+  <li>the journal it is based on, whose rules and warnings still apply;</li>
+  <li>the width and height, the text size and the line width;</li>
+  <li>the format and the resolution;</li>
+  <li>the colour bar (on or off, right or top), the ticks and the colour range (Window, Auto or Fixed).</li>
+</ul>
+<p>It does not keep what one figure shows: the view, the model curves and points, the panel letter, the axis and colour bar labels and the fixed colour range values. Saving under a name in use replaces that preset.</p>
+<p>Choose a preset in the menu to use it; the button shows its name until you change one of its settings. <b>Rename…</b> and <b>Delete</b> act on the preset shown. <b>Export presets…</b> writes all of them to a JSON file, and <b>Import presets…</b> adds those of a file, replacing presets with the same name. A file that is not a preset file, or one from a newer version of the app, is refused with a message and changes nothing. <b>View › Reset settings</b> also deletes your presets: export them first to keep them.</p>
 
 <h2 id="presets">The presets</h2>
 <div class="table-wrap"><table>
