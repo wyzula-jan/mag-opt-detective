@@ -102,6 +102,12 @@ class ColorScale(QObject):
         raise NotImplementedError
 
 
+def _alpha(color: QColor, alpha: float) -> QColor:
+    color = QColor(color)
+    color.setAlphaF(alpha)
+    return color
+
+
 class HistogramScale(ColorScale):
     """pyqtgraph's HistogramLUTItem (histogram, level region and gradient)."""
 
@@ -169,10 +175,22 @@ class HistogramScale(ColorScale):
         hist.imageItem = lambda: None  # same dead weakref as a fresh item
 
     def apply_theme(self, colors: PlotColors) -> None:
+        """Background and axis, a grey histogram and accent level handles (as the inspector's
+        histogram) instead of pyqtgraph's blue fill and olive lines."""
         self._view.setBackground(colors.q("background"))
         fg = colors.q("foreground")
         self.hist.axis.setPen(fg)
         self.hist.axis.setTextPen(fg)
+        self.hist.plot.setPen(pg.mkPen(_alpha(fg, 0.55), width=1))
+        self.hist.plot.setBrush(pg.mkBrush(_alpha(fg, 0.3)))
+        accent = colors.q("accent")
+        region = self.hist.region
+        region.setBrush(pg.mkBrush(_alpha(accent, 0.12)))
+        region.setHoverBrush(pg.mkBrush(_alpha(accent, 0.2)))
+        for line in region.lines:
+            line.setPen(pg.mkPen(accent, width=1.5))
+            line.setHoverPen(pg.mkPen(accent, width=3))
+        self.hist.update()  # the lines to the gradient take the handles' pen
 
     def render(self, painter: QPainter, rect: QRectF, resolution: float = 1.0) -> None:
         paint_item(painter, self._view.ci, rect, resolution)

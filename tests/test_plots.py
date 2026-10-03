@@ -599,3 +599,15 @@ def test_export_svg_contains_the_scale(make_plot, tmp_path, style):
 def test_export_rejects_unknown_suffix(make_plot, tmp_path):
     with pytest.raises(ValueError, match="unsupported"):
         make_plot().export_image(tmp_path / "map.pdf")
+
+
+def test_the_classic_histogram_follows_the_theme(qtbot):
+    """No pyqtgraph blue fill or olive handles: grey bars and accent level lines."""
+    scale = HistogramScale()
+    qtbot.addWidget(scale.widget)
+    scale.apply_theme(LIGHT)
+    hist = scale.hist
+    assert hist.plot.opts["brush"].color().rgb() == qcolor(LIGHT.foreground).rgb()
+    for line in hist.region.lines:
+        assert line.pen.color().rgb() == qcolor(LIGHT.accent).rgb()
+    assert hist.region.brush.color().rgb() == qcolor(LIGHT.accent).rgb()
