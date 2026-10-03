@@ -266,6 +266,11 @@ def test_empty_states_replace_plots_with_nothing_to_show(shown, sweep, monkeypat
     )
     empty.action_button.click()
     assert opened == [1]
+    c.set_processing(reference_mode=ReferenceMode.SELF)
+    area.set_current_view("reference")  # Process would only fail without a sweep: open one
+    assert empty.title() == "No sweep loaded" and empty.action_button.text() == "Open sweep…"
+    c.set_processing(reference_mode=ReferenceMode.NONE)
+    area.set_current_view("map")
     load_sweep(shown, sweep)
     assert empty.title() == "Not processed yet" and empty.action_button.text() == "Process"
     assert not shown.panels["library"].save_button.isEnabled()

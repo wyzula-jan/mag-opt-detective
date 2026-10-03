@@ -588,6 +588,8 @@ def empty_message(window, view: str) -> tuple[str, str, str, str | None, Callabl
         files = c.processing.reference_files.field
         if mode is ReferenceMode.NONE or (mode is ReferenceMode.SEPARATE and not files):
             return ("layers", *NO_REFERENCE[mode], *open_reference)
+        if not c.processing.sample_files.field:  # Process needs the sample sweep first
+            return _no_sweep(window)
         what = "the reference sweep" if mode is ReferenceMode.SEPARATE else "the smoothed sweep"
         text = f"Press Process ({key}) to show {what} the sample is divided by."
         return "layers", "Reference not processed yet", text, "Process", process
@@ -596,9 +598,13 @@ def empty_message(window, view: str) -> tuple[str, str, str, str | None, Callabl
     if c.processing.sample_files.field:
         text = f"Press Process ({key}) to draw the map and the spectra of the loaded sweep."
         return "activity", "Not processed yet", text, "Process", process
+    return _no_sweep(window)
+
+
+def _no_sweep(window) -> tuple[str, str, str, str, Callable]:
     text = (
         "Open the in-field files of a sweep, or drop them on the Sample panel, then press "
-        f"Process ({key})."
+        f"Process ({process_key()})."
     )
     open_sweep = window.toolbar.open_button.click
     return "activity", "No sweep loaded", text, "Open sweep…", open_sweep
