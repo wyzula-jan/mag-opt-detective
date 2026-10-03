@@ -9,13 +9,19 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 SITE = ROOT / "docs" / "site"
+README_IMAGES = ROOT / "docs" / "images"
 RELEASES = "https://github.com/wyzula-jan/mag-opt-detective/releases/latest/download/"
 MAX_IMAGE_BYTES = 200_000  # lossless WebP of a 1400 x 900 window: about 140 kB
 MAX_IMAGES = 24  # 10 scenes, each light and dark, and room for two more
+DARK = "(prefers-color-scheme: dark)"
 
 
 def load_build():
-    spec = importlib.util.spec_from_file_location("site_build", SITE / "build.py")
+    return load_script("site_build", SITE / "build.py")
+
+
+def load_script(name: str, path: Path):
+    spec = importlib.util.spec_from_file_location(name, path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -71,6 +77,63 @@ def outline(path: Path) -> Outline:
     return parser
 
 
+class Pictures(HTMLParser):
+    """Each image of a page with the sources of its <picture> (none outside one)."""
+
+    def __init__(self):
+        super().__init__()
+        self.images: list[tuple[dict, list[dict]]] = []
+        self._sources: list[dict] | None = None
+
+    def handle_starttag(self, tag, attrs):
+        attrs = dict(attrs)
+        if tag == "picture":
+            self._sources = []
+        elif tag == "source" and self._sources is not None:
+            self._sources.append(attrs)
+        elif tag == "img":
+            self.images.append((attrs, self._sources or []))
+
+    def handle_endtag(self, tag):
+        if tag == "picture":
+            self._sources = None
+
+
+def images_in(folder: Path) -> set[str]:
+    """The names of the files in *folder*, without hidden ones such as .DS_Store."""
+    return {path.name for path in folder.iterdir() if not path.name.startswith(".")}
+
+
+def webp_size(path: Path) -> tuple[int, int]:
+    """Width and height of the lossless WebP file at *path* (AssertionError for another)."""
+    head = path.read_bytes()[:25]
+    assert head[:4] == b"RIFF" and head[8:16] == b"WEBPVP8L", f"{path.name}: no lossless WebP"
+    assert head[20] == 0x2F, path.name  # the VP8L signature
+    bits = int.from_bytes(head[21:25], "little")
+    return (bits & 0x3FFF) + 1, (bits >> 14 & 0x3FFF) + 1
+
+
+def themed_images(text: str, root: Path, where: str) -> set[str]:
+    """The file names of the screenshots in the HTML *text*, whose paths are relative to
+    *root*, after checking each: the light image in a <picture> whose only source is its dark
+    twin for a dark appearance, both of the same size (and of the size the <img> gives)."""
+    parser = Pictures()
+    parser.feed(text)
+    names = set()
+    for img, sources in parser.images:
+        light = img.get("src", "")
+        assert light.endswith("-light.webp"), f"{where}: {light} is not a light screenshot"
+        dark = light.removesuffix("-light.webp") + "-dark.webp"
+        found = [(source.get("srcset"), source.get("media")) for source in sources]
+        assert found == [(dark, DARK)], f"{where}: {light} has no dark twin: {found}"
+        size = webp_size(root / light)
+        assert webp_size(root / dark) == size, f"{where}: {light} and {dark} differ in size"
+        if img.get("width"):
+            assert (int(img["width"]), int(img["height"])) == size, f"{where}: {light}"
+        names |= {Path(light).name, Path(dark).name}
+    return names
+
+
 def test_every_page_is_built_with_a_title_and_one_heading(build, site):
     names = {name for name, _label in build.MAIN_NAV} | set(build.DOC_NAMES)
     assert {path.name for path in SITE.joinpath("pages").glob("*.html")} == names
@@ -119,7 +182,7 @@ def test_no_page_mentions_the_measurement_data(site):
 def test_images_are_used_have_alt_text_and_stay_small(site):
     pages = list(site.glob("*.html"))
     text = "\n".join(path.read_text(encoding="utf-8") for path in pages)
-    images = sorted(SITE.joinpath("images").glob("*"))
+    images = [SITE / "images" / name for name in sorted(images_in(SITE / "images"))]
     assert 0 < len(images) <= MAX_IMAGES
     for image in images:
         assert image.suffix == ".webp", image.name
@@ -129,6 +192,58 @@ def test_images_are_used_have_alt_text_and_stay_small(site):
         for img in outline(path).images:
             assert img.get("alt", "").strip(), f"{path.name}: {img.get('src')} has no alt text"
             assert img.get("width") and img.get("height"), f"{path.name}: {img.get('src')}"
+
+
+def test_every_screenshot_follows_the_appearance(site):
+    shown = set()
+    for path in sorted(site.glob("*.html")):
+        shown |= themed_images(path.read_text(encoding="utf-8"), site, path.name)
+    assert shown == images_in(SITE / "images")
+
+
+def test_the_screenshot_check_needs_a_dark_twin_of_the_same_size(tmp_path):
+    def webp(name: str, size: tuple[int, int], chunk: bytes = b"VP8L") -> None:
+        bits = (size[0] - 1) | (size[1] - 1) << 14
+        head = b"RIFF\0\0\0\0WEBP" + chunk + b"\0\0\0\0\x2f" + bits.to_bytes(4, "little")
+        (tmp_path / name).write_bytes(head)
+
+    webp("a-light.webp", (1400, 900))
+    webp("a-dark.webp", (1400, 900))
+    webp("b-light.webp", (1400, 900))
+    webp("b-dark.webp", (1400, 899))
+    webp("c-light.webp", (1400, 900), chunk=b"VP8 ")  # lossy
+    webp("c-dark.webp", (1400, 900), chunk=b"VP8 ")
+    pair = '<picture><source srcset="{}-dark.webp" media="{}"><img src="{}-light.webp"></picture>'
+    found = themed_images(pair.format("a", DARK, "a"), tmp_path, "")
+    assert found == {"a-light.webp", "a-dark.webp"}
+    assert webp_size(tmp_path / "a-light.webp") == (1400, 900)
+    for text in (
+        '<img src="a-light.webp">',
+        '<img src="a-dark.webp">',
+        pair.format("a", "(prefers-color-scheme: light)", "a"),
+        pair.format("b", DARK, "a"),
+        pair.format("b", DARK, "b"),  # not the same size
+        pair.format("c", DARK, "c"),  # not lossless
+    ):
+        with pytest.raises(AssertionError):
+            themed_images(text, tmp_path, "")
+
+
+def test_the_readme_screenshots_follow_the_appearance():
+    text = (ROOT / "README.md").read_text(encoding="utf-8")
+    assert not re.search(r"!\[[^\]]*\]\(docs/", text), "a screenshot without its dark twin"
+    shown = themed_images(text, ROOT, "README.md")
+    assert shown == images_in(README_IMAGES)
+    for name in shown:  # copies of the site's, so git keeps each picture once
+        site = (SITE / "images" / name).read_bytes()
+        assert (README_IMAGES / name).read_bytes() == site, name
+
+
+def test_the_screenshot_script_draws_every_image():
+    shots = load_script("screenshot_list", ROOT / "docs" / "screenshot_list.py")
+    assert set(shots.README) <= set(shots.SITE)
+    assert set(shots.file_names(shots.SITE)) == images_in(SITE / "images")
+    assert set(shots.file_names(shots.README)) == images_in(README_IMAGES)
 
 
 def test_the_downloads_are_the_assets_the_bundles_workflow_publishes(site):
