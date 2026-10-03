@@ -7,6 +7,8 @@ name = "mag-opt-detective"
 version = "5.0.0.dev0"
 description = "Plot, pick, fit and export magneto-optical FTIR field sweeps (OPUS and OPUS-macro text files)."
 readme = "README.md"
+license = "GPL-3.0-only"
+license-files = ["LICENSE"]
 authors = [{ name = "Jan Wyzula", email = "wyzula.jan@gmail.com" }]
 requires-python = ">=3.12"
 dependencies = [

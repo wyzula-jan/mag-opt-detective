@@ -24,6 +24,18 @@ def test_the_version_is_the_same_in_pyproject_and_the_package():
     assert project["version"] == mag_opt_detective.__version__
 
 
+def test_the_licence_and_the_citation_agree_with_the_project():
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]
+    assert project["license"] == "GPL-3.0-only"
+    assert project["license-files"] == ["LICENSE"]
+    licence = " ".join((ROOT / "LICENSE").read_text(encoding="utf-8").split())
+    assert licence.startswith("GNU GENERAL PUBLIC LICENSE Version 3, 29 June 2007")
+    citation = (ROOT / "CITATION.cff").read_text(encoding="utf-8")
+    assert f"version: {mag_opt_detective.__version__}\n" in citation
+    assert "license: GPL-3.0-only\n" in citation
+    assert "please cite it" in citation
+
+
 # ---------------------------------------------------------------------- launcher
 @pytest.mark.parametrize(
     ("platform", "environ", "expected"),

@@ -20,6 +20,7 @@ NAME = "mag-opt-detective"
 # macOS wants one to three integers as the version (5.0.0.dev0 -> 5.0.0)
 BUNDLE_VERSION = re.match(r"\d+(\.\d+){0,2}", __version__).group()
 NOTICES = write_notices(Path(workpath) / "THIRD_PARTY_NOTICES.txt")
+LICENSE = Path(SPECPATH).parent / "LICENSE"  # the app's own licence (GNU GPL v3)
 ICONS = os.path.join(SPECPATH, "icons")
 # Windows embeds the .ico in the .exe; macOS needs .icns (Linux has no file icon)
 ICON = os.path.join(ICONS, NAME + (".icns" if sys.platform == "darwin" else ".ico"))
@@ -61,7 +62,11 @@ MPL_GUI_BACKENDS = [
 a = Analysis(
     ["launcher.py"],
     # package data: Lucide icons, the window icon in mag_opt_detective/resources
-    datas=[*collect_data_files("mag_opt_detective"), (str(NOTICES), "mag_opt_detective")],
+    datas=[
+        *collect_data_files("mag_opt_detective"),
+        (str(NOTICES), "mag_opt_detective"),
+        (str(LICENSE), "mag_opt_detective"),
+    ],
     hiddenimports=["mag_opt_detective.smoke"],
     excludes=[
         "pyqtgraph.opengl",
@@ -101,6 +106,7 @@ exe = EXE(
 coll = COLLECT(exe, a.binaries, a.datas, name=NAME)
 # the notices also next to the program, where people unpacking the archive see them
 shutil.copy(NOTICES, Path(DISTPATH) / NAME / NOTICES.name)
+shutil.copy(LICENSE, Path(DISTPATH) / NAME / "LICENSE")
 
 if sys.platform == "darwin":
     app = BUNDLE(
