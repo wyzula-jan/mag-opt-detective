@@ -1,18 +1,24 @@
 """Library panel: processed maps to plot again, merge or average.
 
 The maps live in ``controller.library`` (cm^-1). Each row has a tick (used by Merge and
-Average), the name, a meta line (kind · fields · E range in the display unit), Plot and
-remove buttons, and opens to the map's cut limits: E in the display unit (kept in cm^-1) and B
-in T; an empty limit keeps everything. Merge and Average need at least two ticked maps.
+Average), the name, a meta line (kind · fields · E range in the display unit) and a Plot
+button. It opens to the map's cut limits (E in the display unit, kept in cm^-1, and B in T; an
+empty limit keeps everything) and a remove button. Merge and Average need at least two ticked
+maps.
 """
 
 from __future__ import annotations
 
+import re
+
 import numpy as np
 from PySide6.QtCore import QSize, Qt, Signal
+from PySide6.QtGui import QPainter
 from PySide6.QtWidgets import (
     QCheckBox,
     QGridLayout,
+    QHBoxLayout,
+    QLabel,
     QScrollArea,
     QSizePolicy,
     QToolButton,
@@ -27,7 +33,6 @@ from mag_opt_detective.gui.panels.common import (
     Card,
     Divider,
     DropZone,
-    ElidedLabel,
     FileDrops,
     SwitchRow,
     UnitField,
@@ -55,17 +60,96 @@ TOOLTIPS = {
 }
 
 
-def meta_text(entry: LibraryEntry, unit: Unit) -> str:
-    """``R(B)/R(0) · 64 fields · 350 – 7800 cm-1`` (energies in *unit*)."""
+def meta_parts(entry: LibraryEntry, unit: Unit) -> list[str]:
+    """``["R(B)/R(0)", "64 fields", "350 – 7800 cm-1"]`` (energies in *unit*)."""
     fmap = entry.fmap
     n = fmap.field.size
     e_lo, e_hi = from_cm1(np.array([fmap.energy.min(), fmap.energy.max()]), unit)
     fields = f"{n} field{'s' if n != 1 else ''}"
-    return f"{entry.kind} · {fields} · {e_lo:.4g} – {e_hi:.4g} {unit}"
+    return [entry.kind, fields, f"{e_lo:.4g} – {e_hi:.4g} {unit}"]
+
+
+def name_parts(name: str) -> list[str]:
+    """*name* cut after each ``_``, ``-`` or space, where a long name may wrap."""
+    return [part for part in re.split(r"(?<=[_\- ])", name) if part]
+
+
+class PartsLabel(QLabel):
+    """Text made of parts that wraps only between parts, so none is cut in two.
+
+    The parts are joined by *separator*, which is dropped where a line breaks; a part wider
+    than the label is elided (*mode*).
+    """
+
+    def __init__(self, separator: str = "", mode=Qt.TextElideMode.ElideRight, parent=None):
+        super().__init__(parent)
+        self.separator = separator
+        self._mode = mode
+        self._parts: list[str] = []
+        policy = QSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        policy.setHeightForWidth(True)
+        self.setSizePolicy(policy)
+
+    def set_parts(self, parts: list[str]) -> None:
+        self._parts = list(parts)
+        self.setText(self.separator.join(self._parts))
+        self.updateGeometry()
+
+    def lines(self, width: int | None = None) -> list[str]:
+        """The lines shown at *width* (the current width by default)."""
+        width = self.contentsRect().width() if width is None else width
+        metrics = self.fontMetrics()
+        lines: list[str] = []
+        for part in self._parts:
+            joined = f"{lines[-1]}{self.separator}{part}" if lines else part
+            if lines and metrics.horizontalAdvance(joined) <= width:
+                lines[-1] = joined
+            else:
+                lines.append(part)
+        return lines
+
+    def _height(self, lines: int) -> int:
+        margins = self.contentsMargins()
+        return max(1, lines) * self.fontMetrics().lineSpacing() + margins.top() + margins.bottom()
+
+    def hasHeightForWidth(self) -> bool:
+        return True
+
+    def heightForWidth(self, width: int) -> int:
+        margins = self.contentsMargins()
+        return self._height(len(self.lines(width - margins.left() - margins.right())))
+
+    def sizeHint(self) -> QSize:
+        margins = self.contentsMargins()
+        width = self.fontMetrics().horizontalAdvance(self.text()) + margins.left() + margins.right()
+        return QSize(width, self._height(1))
+
+    def minimumSizeHint(self) -> QSize:
+        return QSize(20, self._height(1))
+
+    def paintEvent(self, event) -> None:
+        painter = QPainter(self)
+        painter.setPen(self.palette().color(self.foregroundRole()))
+        painter.setFont(self.font())
+        rect = self.contentsRect()
+        metrics = self.fontMetrics()
+        step = metrics.lineSpacing()
+        for i, line in enumerate(self.lines(rect.width())):
+            painter.drawText(
+                rect.adjusted(0, i * step, 0, 0),
+                int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop),
+                metrics.elidedText(line, self._mode, rect.width()),
+            )
+        painter.end()
 
 
 class EntryRow(QWidget):
-    """One library map: tick, name and meta line, Plot, remove and the cut limits."""
+    """One library map: tick, name, meta line and Plot; it opens to the cut limits and the
+    remove button.
+
+    The name has the first line to itself (but for the expand button) and wraps after a ``_``;
+    the meta line wraps between its parts. Both stay whole in a narrow panel.
+    """
 
     plotRequested = Signal(int)
     removeRequested = Signal(int)
@@ -77,16 +161,29 @@ class EntryRow(QWidget):
         self.use = QCheckBox()
         self.use.setAccessibleName(f"Use {entry.name}")
         self.use.setToolTip("Ticked maps are merged or averaged")
-        self.name_label = ElidedLabel(entry.name, mode=Qt.TextElideMode.ElideMiddle)
+        self.name_label = PartsLabel(mode=Qt.TextElideMode.ElideMiddle)
         self.name_label.setFont(scaled_font(self.name_label, 0.98, bold=True))
+        self.name_label.set_parts(name_parts(entry.name))
         self.name_label.setToolTip(entry.source or f"{entry.name} (saved from a processed map)")
-        self.meta_label = ElidedLabel()
+        self.meta_label = PartsLabel(" · ")
         self.meta_label.setProperty("kit", "muted")
         self.meta_label.setFont(scaled_font(self.meta_label, 0.9))
         self.plot_button = small_button("Plot", tooltip=f"Show {entry.name} on the plots")
-        self.remove_button = self._tool("x", f"Remove {entry.name} from the library")
-        self.expand_button = self._tool("chevron-right", f"Limits for {entry.name}")
+        self.plot_button.setAccessibleName(f"Plot {entry.name}")
+        self.expand_button = QToolButton()
+        self.expand_button.setProperty("kit", "tool")
+        self.expand_button.setIconSize(QSize(14, 14))
+        self.expand_button.setToolTip(f"Limits for {entry.name}")
+        self.expand_button.setAccessibleName(f"Limits for {entry.name}")
         self.expand_button.setCheckable(True)
+        icons.set_icon(self.expand_button, "chevron-right", "muted")
+        line = max(self.expand_button.sizeHint().height(), self.use.sizeHint().height())
+        pad = max(0, (line - self.name_label.fontMetrics().lineSpacing()) // 2)
+        self.name_label.setContentsMargins(0, pad, 0, pad)  # line 1 level with the buttons
+        self.remove_button = small_button(
+            "Remove", "trash-2", f"Remove {entry.name} from the library"
+        )
+        self.remove_button.setAccessibleName(f"Remove {entry.name}")
 
         self.e_min = EnergyEdit(name=f"{entry.name}: E min")
         self.e_max = EnergyEdit(name=f"{entry.name}: E max")
@@ -108,18 +205,28 @@ class EntryRow(QWidget):
              ("B max", self.b_max))
         ):  # fmt: skip
             grid.addWidget(labelled(text, self.fields[edit]), i // 2, i % 2)
+        grid.addWidget(self.remove_button, 2, 0, 1, 2, Qt.AlignmentFlag.AlignLeft)
         self.cut_box.setVisible(False)
 
+        meta_line = QHBoxLayout()
+        meta_line.setContentsMargins(0, 0, 0, 0)
+        meta_line.setSpacing(6)
+        meta_line.addWidget(self.meta_label, 1)
+        meta_line.addWidget(self.plot_button, 0, Qt.AlignmentFlag.AlignVCenter)
         head = QGridLayout()
         head.setContentsMargins(8, 6, 4, 7)
         head.setHorizontalSpacing(6)
-        head.setVerticalSpacing(0)
-        head.addWidget(self.use, 0, 0)
+        head.setVerticalSpacing(1)
+        tick = QWidget()  # keeps the tick level with the name's first line
+        tick.setFixedHeight(line)
+        tick_layout = QVBoxLayout(tick)
+        tick_layout.setContentsMargins(0, 0, 0, 0)
+        tick_layout.addWidget(self.use, 0, Qt.AlignmentFlag.AlignVCenter)
+        top = Qt.AlignmentFlag.AlignTop
+        head.addWidget(tick, 0, 0, top)
         head.addWidget(self.name_label, 0, 1)
-        head.addWidget(self.plot_button, 0, 2)
-        head.addWidget(self.remove_button, 0, 3)
-        head.addWidget(self.expand_button, 0, 4)
-        head.addWidget(self.meta_label, 1, 1, 1, 4)
+        head.addWidget(self.expand_button, 0, 2, top)
+        head.addLayout(meta_line, 1, 1, 1, 2)
         head.setColumnStretch(1, 1)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -130,16 +237,6 @@ class EntryRow(QWidget):
         self.plot_button.clicked.connect(lambda: self.plotRequested.emit(self.key))
         self.remove_button.clicked.connect(lambda: self.removeRequested.emit(self.key))
         self.expand_button.toggled.connect(self.set_expanded)
-
-    @staticmethod
-    def _tool(icon: str, tooltip: str) -> QToolButton:
-        button = QToolButton()
-        button.setProperty("kit", "tool")
-        button.setIconSize(QSize(14, 14))
-        button.setToolTip(tooltip)
-        button.setAccessibleName(tooltip)
-        icons.set_icon(button, icon, "muted")
-        return button
 
     def is_expanded(self) -> bool:
         return not self.cut_box.isHidden()
@@ -161,8 +258,7 @@ class EntryRow(QWidget):
         """Show the entry's tick, meta line and limits (fields holding a value keep it)."""
         if self.use.isChecked() != entry.used:
             self.use.setChecked(entry.used)
-        self.meta_label.setText(meta_text(entry, unit))
-        self.meta_label.setToolTip(self.meta_label.text())
+        self.meta_label.set_parts(meta_parts(entry, unit))
         for edit, value in zip((self.e_min, self.e_max), entry.energy_cut, strict=True):
             if edit.cm1() != value:
                 edit.set_cm1(value)

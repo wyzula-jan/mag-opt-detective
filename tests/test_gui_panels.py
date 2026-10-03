@@ -391,7 +391,10 @@ def test_library_list(window, sweep, tmp_path, monkeypatch, errors):
 
     row.plot_button.click()
     assert c.result_source == "library" and "Showing a library map" in window.state_text()
-    panel.rows[c.library[1].key].remove_button.click()
+    other = panel.rows[c.library[1].key]
+    assert not other.remove_button.isVisibleTo(other)  # in the opened row, with the limits
+    other.expand_button.click()
+    other.remove_button.click()
     assert [e.name for e in c.library] == ["Sample_4p2K_Sam1"] and len(panel.rows) == 1
     c.remove_entry(entry)
     assert not panel.empty.isHidden()
@@ -426,6 +429,50 @@ def test_library_cut_limits_are_in_the_display_unit(window, sweep):
     assert entry.field_cut == (1.0, None) and row.fields[row.b_max].is_invalid()
     library.save_current(window)  # a new row: the open one stays open
     assert not window.panels["library"].rows[entry.key].cut_box.isHidden()
+
+
+def test_library_labels_break_between_parts(qtbot):
+    meta = library.PartsLabel(" · ")
+    qtbot.addWidget(meta)
+    parts = ["R(B)/R(0)", "64 fields", "350 – 3200 cm-1"]
+    meta.set_parts(parts)
+    assert meta.text() == "R(B)/R(0) · 64 fields · 350 – 3200 cm-1"
+    metrics = meta.fontMetrics()
+    assert meta.lines(metrics.horizontalAdvance(meta.text())) == [meta.text()]
+    two = metrics.horizontalAdvance("R(B)/R(0) · 64 fields")
+    assert meta.lines(two) == ["R(B)/R(0) · 64 fields", "350 – 3200 cm-1"]
+    assert meta.lines(10) == parts  # never inside a part
+    assert meta.heightForWidth(two) == 2 * meta.heightForWidth(10_000)
+    assert library.name_parts("Sample_4p2K_Sam1-FIR map.csv") == [
+        "Sample_",
+        "4p2K_",
+        "Sam1-",
+        "FIR ",
+        "map.csv",
+    ]
+
+
+def test_library_rows_stay_readable_in_a_narrow_panel(qtbot, window, sweep):
+    load_sweep(window, sweep)
+    process(window)
+    c = window.controller
+    c.add_map(c.result.ratio, "Sample_4p2K_Sam1_FIR_Ratio.csv")
+    panel = library.LibraryPanel()
+    qtbot.addWidget(panel)
+    panel.show_entries(c.library)
+    panel.resize(255, 700)
+    panel.show()
+    qtbot.waitExposed(panel)
+    row = panel.rows[c.library[0].key]
+    name, meta = row.name_label, row.meta_label
+    # the name has the line to itself, but for the tick and the expand button
+    assert name.width() >= row.width() - row.use.width() - row.expand_button.width() - 30
+    for label in (name, meta):
+        lines = label.lines()
+        assert label.separator.join(lines) == label.text()  # nothing cut off
+        assert all(label.fontMetrics().horizontalAdvance(line) <= label.width() for line in lines)
+        assert label.height() >= len(lines) * label.fontMetrics().lineSpacing()
+    assert name.text() == "Sample_4p2K_Sam1_FIR_Ratio.csv" and len(name.lines()) > 1
 
 
 def test_a_failed_library_plot_keeps_the_name_of_the_map_shown(window, sweep, errors):
