@@ -2,24 +2,24 @@
 
 *Track*: a click on a line follows it field by field in both directions
 (:func:`~mag_opt_detective.core.picking.track`). *Detect*: a box dragged on the map finds every
-line inside it (:func:`~mag_opt_detective.core.picking.detect`); the one that continues the
-current curve's points is chosen, else the longest, and a click on another line chooses that
-one. The lines found are a preview in the map's "preview" layer (the chosen one with hollow
-diamonds), not yet in the point table. Accept records the chosen line into the
-current curve as one undo step, replacing the curve's points at the same fields; Discard, Esc or
-another tool drop it. Changing an option searches again from the same click or box, on the map
-as shown (plot kind, derivative and display unit). Energies are kept in cm^-1 and shown in the
-display unit, so a unit switch only converts the preview. Only Detect takes left-drags (for the
-box); the wheel zooms and the middle button pans in both modes.
+line inside it (:func:`~mag_opt_detective.core.picking.detect`); the line that continues the
+current curve's points is chosen, else the longest, and a click on another line chooses that one.
+
+The lines found are a preview in the map's "preview" layer (the chosen one with hollow diamonds),
+not yet in the point table. Accept records the chosen line into the current curve as one undo
+step, replacing the curve's points at the same fields; Discard, Esc or another tool drop it.
+Changing an option searches again from the same click or box, on the map as shown (plot kind,
+derivative and display unit). Energies are kept in cm^-1 and shown in the display unit, so a
+unit switch only converts the preview. Only Detect takes left-drags (for the box); the wheel
+zooms and the middle button pans in both modes.
 """
 
 from __future__ import annotations
 
 import contextlib
-import dataclasses
 import math
 from collections.abc import Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import numpy as np
 import pyqtgraph as pg
@@ -315,7 +315,7 @@ class AutoPick(QObject):
         try:
             with _busy(searched_size(fmap, self.target)):
                 self.prominence_used = prominence_for(fmap, self.target, options)
-                options = dataclasses.replace(options, prominence=self.prominence_used)
+                options = replace(options, prominence=self.prominence_used)
                 tracks = search(fmap, self.target, options)
         except ValueError as exc:
             seed = self.target.seed
