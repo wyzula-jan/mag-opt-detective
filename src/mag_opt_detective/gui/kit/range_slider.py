@@ -21,7 +21,7 @@ _STEPS = {  # in fractions of the extent
     Qt.Key.Key_Home: -math.inf,
     Qt.Key.Key_End: math.inf,
 }
-TIP = "Drag a handle to move one end, or the bar between them to move the range (Shift+arrow keys)"
+TIP = "Drag the bar to move the range (Shift+arrows)"
 
 
 class RangeSlider(QWidget):
