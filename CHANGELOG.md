@@ -4,6 +4,16 @@ All notable changes to Magneto-Optical Detective, newest first. The format is ba
 Changelog, and the versions follow Semantic Versioning. `tools/release.py` writes each section
 from the commit messages when a version is released (see Releases in CONTRIBUTING.md).
 
+## 0.3.0 - 2026-10-03
+
+### Added
+
+- **gui:** an **Auto-scale the histograms** button in the plot toolbar. Off by default: the colour histograms stay still while the levels change (dragging the level region, typed levels, Auto, Fixed or Symmetric), and fit again when the data change, on a double-click or with **Fit to data** (A). On: the histograms follow the levels as before.
+
+### Fixed
+
+- **gui:** the colour histograms no longer jump to a new range after the levels are set with their region.
+
 ## 0.2.0 - 2026-10-03
 
 ### Added
