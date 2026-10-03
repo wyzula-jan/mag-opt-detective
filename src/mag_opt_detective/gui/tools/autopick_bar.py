@@ -1,8 +1,9 @@
 """The options bar of the Auto-pick tool: a strip above the map while the tool is active.
 
 The strip takes its room from the plot (the map moves down, nothing is covered): the mode,
-the feature, the search window, the smoothing and the prominence, then a status line with
-Discard and Accept. The controls wrap onto more rows when the plot is narrow.
+the shape of the region (Detect only), the feature, the search window, the smoothing and the
+prominence, then a status line with Discard and Accept. The controls wrap onto more rows when
+the plot is narrow.
 """
 
 from __future__ import annotations
@@ -24,13 +25,14 @@ from mag_opt_detective.gui import icons
 from mag_opt_detective.gui.kit import SegmentedControl
 from mag_opt_detective.gui.panels.common import Note, UnitField, scaled_font
 from mag_opt_detective.gui.theme import current_tokens
+from mag_opt_detective.gui.tools.autopick_roi import SHAPES
 from mag_opt_detective.gui.widgets import EnergyEdit, FloatEdit, FlowLayout
 
 SPACING = 12  # between the groups of controls
 TRACK, DETECT = "track", "detect"
 MODES = (  # value, label, tooltip
     (TRACK, "Track", "Click a line on the map: it is followed field by field both ways"),
-    (DETECT, "Detect", "Drag a box on the map: every line inside it is found"),
+    (DETECT, "Detect", "Draw a region on the map: every line inside it is found"),
 )
 FEATURES = (
     (Feature.MAX, "Max", "Maxima of the map values (peaks)"),
@@ -115,6 +117,7 @@ class AutoPickBar(QFrame):
         self._avoid = avoid
         self.setAccessibleName("Auto-pick options")
         self.mode = _segmented(MODES, "Auto-pick mode")
+        self.shape = _segmented(SHAPES, "Region shape")
         self.feature = _segmented(FEATURES, "Feature")
         self.window_edit = EnergyEdit(name="search window")
         self.window_edit.setAccessibleName("Search window")
@@ -150,6 +153,10 @@ class AutoPickBar(QFrame):
         self._flow = FlowLayout(self.controls, spacing=SPACING, row_spacing=5)
         self._flow.addWidget(self.title)
         self._flow.addWidget(self.mode)
+        self.shape_label = _label("Shape")
+        self.shape_label.setToolTip("The region a drag on the map draws (Detect)")
+        self.shape_group = _group(self.shape_label, self.shape)
+        self._flow.addWidget(self.shape_group)
         self._flow.addWidget(self.feature)
         self.window_label = _label("Window")
         self.smooth_label = _label("Smooth")
@@ -171,12 +178,19 @@ class AutoPickBar(QFrame):
         layout.addWidget(self.controls)
         layout.addLayout(footer)
 
+        self.mode.valueChanged.connect(self._on_mode)
+        self._on_mode(self.mode.value())
         self.hide()
         box = host.layout()
         if isinstance(box, QBoxLayout):
             box.insertWidget(0, self)
 
     # --- content -----------------------------------------------------------------------
+    def _on_mode(self, mode: str) -> None:
+        """The shape of the region only matters in Detect."""
+        self.shape_group.setVisible(mode == DETECT)
+        self.controls.updateGeometry()
+
     def set_prominence_unit(self, slope: bool, unit_text: str) -> None:
         """Label the prominence: map values (Max/Min) or values per energy unit (slopes)."""
         self.prominence_field.set_unit(f"/{unit_text}" if slope else "")

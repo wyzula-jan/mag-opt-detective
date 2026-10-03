@@ -6,7 +6,9 @@ import numpy as np
 import pyqtgraph as pg
 import pytest
 from PySide6.QtCore import QPoint, QPointF, QSettings, Qt
+from PySide6.QtGui import QWheelEvent
 from PySide6.QtTest import QTest
+from PySide6.QtWidgets import QApplication
 
 import gui_helpers
 from gui_helpers import click_map, process, select, set_unit
@@ -288,16 +290,18 @@ def test_a_box_dragged_on_the_map_detects_without_panning(shown, qtbot):
     start, end = _viewport_pos(w, 1.0, 300.0), _viewport_pos(w, 7.0, 1100.0)
     QTest.mousePress(viewport, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, start)
     QTest.mouseMove(viewport, (start + end) / 2)
-    assert tool.box_items[1].isVisible()  # the rubber band
+    assert tool.region.outline_visible() and tool.region.roi is None  # the rubber band
     QTest.mouseMove(viewport, end)
     QTest.mouseRelease(viewport, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, end)
     assert vb.viewRange() == before
     (b0, b1), (e0, e1) = tool.target.box
     assert b0 == pytest.approx(1.0, abs=0.1) and b1 == pytest.approx(7.0, abs=0.1)
     assert e0 == pytest.approx(300.0, abs=10.0) and e1 == pytest.approx(1100.0, abs=10.0)
+    assert tool.target.region is None  # an upright box: searched without a mask
     assert len(tool.candidates) == 2 and tool.chosen == 0
-    rect = tool.box_items[1].rect()
+    rect = tool.region.outline_path().boundingRect()  # the box stays, as an editable region
     assert rect.left() == pytest.approx(b0) and rect.bottom() == pytest.approx(e1)
+    assert tool.region.shape == "rect" and len(tool.region.roi.getHandles()) == 4
     click = _viewport_pos(w, 5.0, line2(5.0))  # a click without a drag chooses a line
     QTest.mouseClick(viewport, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, click)
     assert tool.chosen == 1 and tool.target.box == ((b0, b1), (e0, e1))
@@ -307,6 +311,214 @@ def test_a_box_dragged_on_the_map_detects_without_panning(shown, qtbot):
     QTest.mouseMove(viewport, end)
     QTest.mouseRelease(viewport, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, end)
     assert tool.target is None and vb.viewRange() != before
+
+
+# ---------------------------------------------------------------------- regions
+LEFT, PLAIN = Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier
+ELLIPSE_BOX = [(0.75, 450.0), (7.75, 950.0)]  # line2 crosses this box but not its ellipse
+
+
+def in_ellipse(field, energy) -> np.ndarray:
+    """The points inside the ellipse in :data:`ELLIPSE_BOX`."""
+    return ((field - 4.25) / 3.5) ** 2 + ((energy - 700.0) / 250.0) ** 2 < 1.0
+
+
+def inside(polygon, field, energy) -> np.ndarray:
+    from matplotlib.path import Path
+
+    return Path(np.asarray(polygon)).contains_points(np.column_stack([field, energy]))
+
+
+def drag(qtbot, viewport, points: list[QPoint]) -> None:
+    """A left-drag through *points* (viewport pixels), slow enough for pyqtgraph."""
+    QTest.mousePress(viewport, LEFT, PLAIN, points[0])
+    for point in points[1:]:
+        qtbot.wait(_move_pause_ms())
+        QTest.mouseMove(viewport, point)
+    QTest.mouseRelease(viewport, LEFT, PLAIN, points[-1])
+
+
+def test_an_ellipse_finds_only_the_lines_inside_it(picked):
+    w, tool, bar = picked, picked.autopick, picked.autopick.bar
+    assert bar.shape_group.isHidden()  # Track: no shapes
+    bar.mode.set_value("detect")
+    assert not bar.shape_group.isHidden()
+    assert bar.shape.options() == ["rect", "rotated", "ellipse", "polygon"]
+    bar.shape.set_value("ellipse")
+    assert status(w).startswith("Drag an ellipse around the lines")
+    assert tool.draw_region(ELLIPSE_BOX)
+    assert tool.region.shape == "ellipse" and tool.target.region is not None
+    (b0, b1), (e0, e1) = tool.target.box
+    assert (b0, b1, e0, e1) == pytest.approx((0.75, 7.75, 450.0, 950.0), rel=1e-6)
+    assert len(tool.candidates) == 1
+    found = tool.candidates[0]
+    np.testing.assert_allclose(found.energy, line1(found.field), atol=STEP)
+    assert in_ellipse(found.field, found.energy).all() and len(found) > 15
+    assert status(w).startswith("21 points found for LL 1.")
+    np.testing.assert_allclose(lines_drawn(w)[-1][1], found.energy)
+    tool.detect_in((0.75, 7.75), (450.0, 950.0))  # its bounds as a box: both lines
+    assert tool.region.shape == "rect" and tool.target.region is None
+    assert len(tool.candidates) == 2
+    bar.shape.set_value("polygon")  # the next drag draws another shape; the box stays
+    assert tool.region.shape == "rect" and len(tool.candidates) == 2
+    assert not tool.draw_region([(2.0, 600.0), (3.0, 600.0)])  # a loop without an area
+    assert status(w).startswith("Draw a loop around the lines")
+    assert tool.region.shape == "rect" and tool.target.box[0] == (0.75, 7.75)
+    tool.discard()
+    assert tool.region.roi is None and not tool.region.outline_visible()
+    assert status(w).startswith("Draw a loop around the lines on the map")
+    tool.draw_region([(1.0, 900.0), (8.0, 1010.0), (8.0, 1100.0), (1.0, 1000.0)])
+    assert tool.region.shape == "polygon" and len(tool.candidates) == 1
+    np.testing.assert_allclose(tool.candidates[0].energy, line2(tool.candidates[0].field), atol=2)
+
+
+def test_a_rotated_box_turns_and_searches_again(picked, monkeypatch):
+    w, tool = picked, picked.autopick
+    tool.bar.mode.set_value("detect")
+    tool.bar.shape.set_value("rotated")
+    tool.draw_region([(1.0, 380.0), (7.5, 760.0)])
+    roi = tool.region.roi
+    kinds = sorted(h["type"] for h in roi.handles)
+    assert kinds == ["r", "s", "s", "s", "s"]  # four corners and the round handle
+    before = tool.target
+    calls = counting(monkeypatch)
+    roi.setAngle(25.0, centerLocal=roi.size() / 2)  # what the round handle does
+    assert len(calls) == 1 and tool.target != before
+    polygon = np.array(tool.target.region)
+    sides = np.diff(np.vstack([polygon, polygon[:1]]), axis=0)
+    assert np.all(np.abs(sides) > 1e-6)  # no side is upright or level any more
+    assert tool.candidates
+    for candidate in tool.candidates:
+        assert inside(polygon, candidate.field, candidate.energy).all()
+    undo_before = w.points_undo.count()
+    n = tool.accept()
+    assert n > 0 and w.points_undo.count() == undo_before + 1
+    assert tool.region.roi is None and not tool.region.outline_visible()
+
+
+def test_the_region_moves_and_reshapes_by_drags_and_searches_while_it_changes(
+    shown, qtbot, monkeypatch
+):
+    w, tool = shown, shown.autopick
+    view, viewport, vb = w.plots.map.view, w.plots.map.view.viewport(), w.plots.map.plot.vb
+    tool.bar.mode.set_value("detect")
+    tool.detect_in((1.0, 4.0), (300.0, 1100.0))
+    assert len(tool.candidates) == 2
+    before, shown_range = tool.target, vb.viewRange()
+    calls = counting(monkeypatch)
+    start, end = _viewport_pos(w, 2.5, 600.0), _viewport_pos(w, 4.5, 600.0)
+    QTest.mousePress(viewport, LEFT, PLAIN, start)
+    qtbot.wait(_move_pause_ms())
+    QTest.mouseMove(viewport, _viewport_pos(w, 3.5, 600.0))
+    assert tool.region.editing
+    qtbot.waitUntil(lambda: bool(calls), timeout=5000)  # searched while it is dragged
+    qtbot.wait(_move_pause_ms())
+    QTest.mouseMove(viewport, end)
+    QTest.mouseRelease(viewport, LEFT, PLAIN, end)
+    assert not tool.region.editing and vb.viewRange() == shown_range  # moved, not panned
+    (b0, b1), energies = tool.target.box
+    assert b0 == pytest.approx(3.0, abs=0.1) and b1 == pytest.approx(6.0, abs=0.1)
+    assert energies == pytest.approx(before.box[1], abs=1e-6)
+    fields = tool.shown_map().field
+    np.testing.assert_allclose(tool.candidates[0].field, fields[(fields >= b0) & (fields <= b1)])
+
+    corner = max(tool.region.roi.getHandles(), key=lambda h: (h.scenePos().x(), -h.scenePos().y()))
+    grab = view.mapFromScene(corner.scenePos())  # the top right corner
+    drag(qtbot, viewport, [grab, grab + QPoint(0, 15), grab + QPoint(0, 40)])
+    (b0_new, b1_new), (e0_new, e1_new) = tool.target.box
+    assert (b0_new, b1_new) == pytest.approx((b0, b1), abs=1e-6)
+    assert e0_new == pytest.approx(energies[0], abs=1e-6) and e1_new < energies[1] - 50.0
+
+    click = _viewport_pos(w, 5.0, line2(5.0))  # a click inside the region chooses a line
+    assert tool.chosen == 0
+    QTest.mouseClick(viewport, LEFT, PLAIN, click)
+    assert tool.chosen == 1 and tool.target.box[0] == (b0_new, b1_new)
+    QTest.mouseClick(viewport, LEFT, PLAIN, _viewport_pos(w, 7.5, 300.0))  # outside: nothing
+    assert tool.chosen == 1
+
+    elsewhere = [_viewport_pos(w, 6.5, 700.0), _viewport_pos(w, 7.0, 900.0)]
+    drag(qtbot, viewport, [elsewhere[0], (elsewhere[0] + elsewhere[1]) / 2, elsewhere[1]])
+    (b0, b1), _energies = tool.target.box  # a drag beside the region draws a new one
+    assert b0 == pytest.approx(6.5, abs=0.1) and b1 == pytest.approx(7.0, abs=0.1)
+    assert vb.viewRange() == shown_range
+
+    wheel_at = view.mapFromScene(tool.region.roi.sceneBoundingRect().center())
+    event = QWheelEvent(
+        QPointF(wheel_at), QPointF(viewport.mapToGlobal(wheel_at)), QPoint(0, 0), QPoint(0, 120),
+        Qt.MouseButton.NoButton, PLAIN, Qt.ScrollPhase.NoScrollPhase, False,
+    )  # fmt: skip
+    target = tool.target
+    QApplication.sendEvent(viewport, event)  # the wheel zooms, also over the region
+    assert vb.viewRange() != shown_range and tool.target == target
+
+
+def test_a_loop_drawn_with_the_mouse_becomes_a_polygon(shown, qtbot):
+    w, tool = shown, shown.autopick
+    viewport = w.plots.map.view.viewport()
+    tool.bar.mode.set_value("detect")
+    tool.bar.shape.set_value("polygon")
+    turns = np.linspace(0.0, 2.0 * np.pi, 80)
+    loop = [_viewport_pos(w, 4.25 + 3.5 * np.cos(a), 700.0 + 250.0 * np.sin(a)) for a in turns]
+    QTest.mousePress(viewport, LEFT, PLAIN, loop[0])
+    for point in loop[1:]:
+        QTest.mouseMove(viewport, point)
+    assert tool.region.outline_visible() and tool.region.roi is None  # the loop so far
+    QTest.mouseRelease(viewport, LEFT, PLAIN, loop[-1])
+    roi = tool.region.roi
+    assert tool.region.shape == "polygon" and 8 <= len(roi.getHandles()) <= 40
+    assert len(tool.candidates) == 1  # line1 only, as in the ellipse
+    found = tool.candidates[0]
+    np.testing.assert_allclose(found.energy, line1(found.field), atol=STEP)
+
+
+def test_a_region_on_a_map_with_uneven_fields(picked):
+    """The mask is made on the map's own fields: a library map with gaps between them."""
+    c, tool = picked.controller, picked.autopick
+    ratio = c.result.ratio
+    keep = [0, 1, 2, 6, 7, 8, 9, 14, 15, 20, 21, 22, 23, 28, 29, 30]
+    uneven = ratio.replace(field=ratio.field[keep], values=ratio.values[:, keep])
+    c.plot_entry(c.add_map(uneven, "uneven"))
+    tool.bar.mode.set_value("detect")
+    tool.bar.shape.set_value("ellipse")
+    tool.draw_region(ELLIPSE_BOX)
+    assert len(tool.candidates) == 1
+    found = tool.candidates[0]
+    fields = FIELDS[keep]
+    surely = fields[((fields - 4.25) / 3.5) ** 2 + ((line1(fields) - 700.0) / 250.0) ** 2 < 0.8]
+    assert set(surely) <= set(found.field) <= set(fields)
+    assert in_ellipse(found.field, found.energy).all()
+    np.testing.assert_allclose(found.energy, line1(found.field), atol=STEP)
+
+
+def test_unit_switch_keeps_the_region_where_it_is(picked, monkeypatch):
+    w, tool = picked, picked.autopick
+    tool.bar.mode.set_value("detect")
+    tool.bar.shape.set_value("ellipse")
+    tool.draw_region(ELLIPSE_BOX)
+    target, outline, found = tool.target, tool.region.polygon(), tool.candidates[0]
+    calls = counting(monkeypatch)
+    set_unit(w, "meV")
+    assert calls == [] and tool.target == target
+    np.testing.assert_allclose(tool.region.polygon(), outline / [1.0, MEV], rtol=1e-9)
+    path = tool.region.outline_path().boundingRect()
+    assert path.bottom() == pytest.approx(950.0 / MEV, rel=1e-6)
+    tool.region_edited()  # searched again from the region: the same place in cm-1
+    np.testing.assert_allclose(np.array(tool.target.region), np.array(target.region), rtol=1e-9)
+    np.testing.assert_allclose(tool.candidates[0].energy, found.energy)
+    tool.bar.mode.set_value("track")  # another mode drops the region
+    assert tool.region.roi is None and tool.target is None
+
+
+def test_region_shape_is_remembered(qtbot, tmp_path):
+    ini = str(tmp_path / "settings.ini")
+    first = MainWindow(settings=QSettings(ini, QSettings.Format.IniFormat))
+    qtbot.addWidget(first)
+    first.autopick.bar.shape.set_value("ellipse")
+    first.save_settings()
+    first.close()
+    second = MainWindow(settings=QSettings(ini, QSettings.Format.IniFormat))
+    qtbot.addWidget(second)
+    assert second.autopick.bar.shape.value() == "ellipse"
 
 
 # ---------------------------------------------------------------------- options
@@ -375,10 +587,10 @@ def test_discard_escape_and_other_tools_clear_the_preview(shown):
     tools.set_active("autopick")
     tool.bar.mode.set_value("detect")
     tool.detect_in((1.0, 7.0), (300.0, 1100.0))
-    assert tool.box_items[1].isVisible()
+    assert tool.region.outline_visible() and tool.region.roi is not None
     w.plot_area.set_current_view("stacked")
     assert tools.active() == "navigate"
-    assert preview(w) == [] and not tool.box_items[1].isVisible()
+    assert preview(w) == [] and not tool.region.outline_visible() and tool.region.roi is None
 
 
 def test_a_new_result_drops_the_preview_and_the_status_follows_the_curve(picked):
