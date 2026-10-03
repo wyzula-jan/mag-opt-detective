@@ -1,6 +1,6 @@
 # PyInstaller spec: one-folder build of the desktop app.
-#   uv sync --group bundle
-#   uv run pyinstaller packaging/mag-opt-detective.spec --noconfirm
+#   uv sync --locked --no-default-groups --group bundle
+#   uv run --no-sync pyinstaller packaging/mag-opt-detective.spec --noconfirm
 # Result: dist/mag-opt-detective/ (and dist/Magneto-Optical Detective.app on macOS), each with
 # THIRD_PARTY_NOTICES.txt (see third_party_notices.py).
 import re
@@ -69,6 +69,8 @@ a = Analysis(
         "PySide2",
         "IPython",
         "pytest",
+        # optional imports of numpy's and scipy's __config__; installed only for development
+        "yaml",
         # The export never uses pyplot. Bundled, it would be imported by pyqtgraph's colour
         # map menu, so every start-up would load matplotlib's font cache; without it pyqtgraph
         # skips its matplotlib maps. The export window loads the cache, which launcher.py
@@ -78,6 +80,9 @@ a = Analysis(
     ],
     noarchive=False,
 )
+# Qt's own translations: the interface is in English only
+QT_TRANSLATIONS = "PySide6/Qt/translations/"
+a.datas = [d for d in a.datas if not d[0].replace("\\", "/").startswith(QT_TRANSLATIONS)]
 pyz = PYZ(a.pure)
 exe = EXE(
     pyz,
