@@ -128,6 +128,19 @@ def test_the_toolbar_button_switches_the_legend_of_each_plot(processed):
     assert legend(w, "stacked").is_shown()
 
 
+def test_the_plot_toolbar_with_the_legend_button_fits_1100_px(window, qtbot):
+    window.resize(1100, 800)
+    window.show()
+    qtbot.waitExposed(window)
+    assert window.side_panel.is_open() and window.inspector_panel.is_open()
+    assert window.minimumSizeHint().width() <= 1100 and window.width() == 1100
+    tabs = window.plot_area.tabs
+    assert all(tabs.tabRect(i).width() < tabs.tabSizeHint(i).width() for i in range(3))
+    window.resize(1400, 900)  # with room the tabs keep their padding
+    qtbot.waitUntil(lambda: window.width() == 1400)
+    assert all(tabs.tabRect(i).width() == tabs.tabSizeHint(i).width() for i in range(3))
+
+
 def test_the_legend_and_its_place_are_remembered_per_plot(qtbot, tmp_path, sweep, errors):
     ini = str(tmp_path / "settings.ini")
     first = MainWindow(settings=QSettings(ini, QSettings.Format.IniFormat))

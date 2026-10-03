@@ -251,7 +251,9 @@ class _Tabs(QTabBar):
         return QSize(width, 38)
 
     def minimumTabSizeHint(self, index: int) -> QSize:
-        return self.tabSizeHint(index)
+        # narrower padding only where the plot head has no room for all its tools (1100 px)
+        width = self.fontMetrics().horizontalAdvance(self.tabText(index)) + 10
+        return QSize(width, 38)
 
     def paintEvent(self, event) -> None:
         tokens = current_tokens()
