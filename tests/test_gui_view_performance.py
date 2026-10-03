@@ -277,11 +277,12 @@ def test_a_lost_release_does_not_keep_a_gesture_open(shown, qtbot):
     plot = w.plots.map
     viewport = plot.view.viewport()
     centre = plot.view.mapFromScene(plot.plot.vb.sceneBoundingRect().center())
-    QTest.mouseDClick(viewport, LEFT, PLAIN, centre)  # Qt's button state stays pressed
-    assert QApplication.mouseButtons() == LEFT
+    QTest.mouseDClick(w.statusBar(), LEFT, PLAIN, QPoint(1, 1))  # Qt's button state stays
+    assert QApplication.mouseButtons() == LEFT  # pressed, though nothing is held on the plot
     wheel(w, "map")
     qtbot.waitUntil(lambda: not w.view_ranges.in_gesture())  # GESTURE_MS after the wheel
     assert c.view.energy_range == pytest.approx(plot_range(w)[1])
+    QTest.mouseRelease(w.statusBar(), LEFT, PLAIN, QPoint(1, 1))
 
     app = QApplication.instance()
     ends = {
@@ -308,6 +309,28 @@ def test_a_lost_release_does_not_keep_a_gesture_open(shown, qtbot):
     QTest.mouseRelease(w.statusBar(), LEFT, PLAIN, QPoint(1, 1))  # released elsewhere
     qtbot.waitUntil(lambda: not w.view_ranges.in_gesture())  # GESTURE_MS after the step
     assert c.view.energy_range == pytest.approx(plot_range(w)[1])
+
+
+def test_a_drag_from_the_second_press_of_a_double_click_is_held(shown, qtbot):
+    w, c = shown, shown.controller
+    plot = w.plots.map
+    viewport = plot.view.viewport()
+    centre = plot.view.mapFromScene(plot.plot.vb.sceneBoundingRect().center())
+    QTest.mousePress(viewport, LEFT, PLAIN, centre)
+    QTest.mouseRelease(viewport, LEFT, PLAIN, centre)
+    QTest.mouseDClick(viewport, LEFT, PLAIN, centre)  # Qt sends the second press as DblClick
+    end = centre
+    for k in range(1, 6):  # a drag from that press, then held still
+        qtbot.wait(move_pause_ms())
+        end = centre + QPoint(0, -6 * k)
+        QTest.mouseMove(viewport, end)
+    qtbot.wait(3 * GESTURE_MS)
+    assert w.view_ranges.in_gesture() and c.view.energy_range is None
+    moved = plot_range(w)[1]
+    assert moved[0] < DATA_E[0]
+    QTest.mouseRelease(viewport, LEFT, PLAIN, end)
+    qtbot.waitUntil(lambda: not w.view_ranges.in_gesture())
+    assert c.view.energy_range == pytest.approx(moved)
 
 
 def test_saving_a_figure_during_a_zoom_saves_the_zoom(shown, qtbot, tmp_path, monkeypatch):

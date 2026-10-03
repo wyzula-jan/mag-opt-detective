@@ -480,8 +480,8 @@ class ViewRanges(QObject):
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:
         kind = event.type()
         if watched in self._plots:
-            if kind == QEvent.Type.MouseButtonPress:
-                self._held = True
+            if kind in (QEvent.Type.MouseButtonPress, QEvent.Type.MouseButtonDblClick):
+                self._held = True  # the second press of a double-click comes as DblClick
             elif kind == QEvent.Type.MouseButtonRelease:
                 self._held = False
                 QTimer.singleShot(0, self, self._on_release)  # after pyqtgraph's last step
