@@ -11,7 +11,7 @@ from PySide6.QtGui import QGuiApplication, QIcon, QPalette
 from PySide6.QtWidgets import QApplication, QMenu
 
 from mag_opt_detective import app, export
-from mag_opt_detective.gui import icons, teardown, theme
+from mag_opt_detective.gui import icons, licences, teardown, theme
 from mag_opt_detective.gui.main_window import MainWindow
 
 
@@ -44,6 +44,14 @@ def test_smoke_test_fails_on_a_broken_figure_export(restore_look, monkeypatch):
 
     monkeypatch.setattr(export, "save", save_nothing)
     assert app.main(["mag-opt-detective", "--smoke-test"]) == 1
+
+
+def test_a_bundle_without_licence_notices_fails_the_smoke_test(restore_look, monkeypatch, tmp_path):
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(licences, "notices_path", lambda: tmp_path / "THIRD_PARTY_NOTICES.txt")
+    assert app.main(["mag-opt-detective", "--smoke-test"]) == 1
+    (tmp_path / "THIRD_PARTY_NOTICES.txt").write_text("notices", encoding="utf-8")
+    assert app.main(["mag-opt-detective", "--smoke-test"]) == 0
 
 
 def test_qt_arguments_are_ignored():

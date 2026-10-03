@@ -2,13 +2,14 @@
 
 It writes a small synthetic field sweep, loads it through the main window, processes
 it, draws every plot type, switches the unit, saves a small journal figure in every format
-(matplotlib's backends, fonts and Pillow's writers) and exits. No user settings are read or
-written.
+(matplotlib's backends, fonts and Pillow's writers) and exits. A bundle must also carry its
+third-party notices. No user settings are read or written.
 """
 
 from __future__ import annotations
 
 import logging
+import sys
 import tempfile
 from pathlib import Path
 
@@ -60,6 +61,11 @@ def run(window) -> None:
         if errors:
             raise RuntimeError("; ".join(errors))
         save_figures(controller, Path(tmp))
+    if getattr(sys, "frozen", False):
+        from mag_opt_detective.gui.licences import notices_path
+
+        if not notices_path().is_file():
+            raise RuntimeError(f"the bundle has no {notices_path().name}")
     logger.info("Smoke test passed: %d field spectra processed.", len(field))
 
 
