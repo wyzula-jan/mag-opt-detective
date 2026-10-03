@@ -6,6 +6,7 @@ axis (or :class:`FieldMap`) passed in, fields in tesla.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Literal
@@ -223,6 +224,7 @@ def detect(
     min_length: int = 3,
     max_misses: int = 0,
     history: int = 1,
+    mask: np.ndarray | None = None,
 ) -> list[Track]:
     """All tracks of *feature* inside the box *b_range* x *e_range*, sorted by mean energy.
 
@@ -240,6 +242,12 @@ def detect(
     across empty columns); 0 ends it at once. *history*: a track's end is predicted by a
     straight line through its last *history* points (as in :func:`track`); 1 compares with
     the last point.
+
+    *mask* (bool, the shape of ``fmap.values``, e.g. from :func:`polygon_mask`) restricts
+    the search to a region inside the box: each column is searched between the lowest and
+    highest energy of its samples in the mask, and a feature counts only if its nearest
+    sample is in the mask. Columns without any finite value in the mask are skipped as
+    above. The box still limits the search, so pass the region's bounds for speed.
     """
     feature = Feature(feature)
     if min_length < 1:
@@ -251,6 +259,8 @@ def detect(
         max_jump = JUMP_SAMPLES * float(np.median(steps)) if steps.size else 0.0
     elif not max_jump > 0:
         raise ValueError("max_jump must be positive")
+    if mask is not None:
+        mask = _check_mask(fmap, mask)
     columns = np.flatnonzero(_inside(fmap.field, b_range))
     columns = columns[np.argsort(fmap.field[columns], kind="stable")]
     rows = _inside(fmap.energy, e_range)
@@ -258,7 +268,8 @@ def detect(
     done: list[_Open] = []
     active: list[_Open] = []
     for n, j in enumerate(columns):
-        if not np.isfinite(fmap.values[rows, j]).any():
+        keep = rows if mask is None else rows & mask[:, j]
+        if not np.isfinite(fmap.values[keep, j]).any():
             continue
         b_j = float(fmap.field[j])
         peaks = find_features(
@@ -267,8 +278,10 @@ def detect(
             feature,
             smooth=smooth,
             prominence=prominence,
-            e_range=e_range,
+            e_range=e_range if mask is None else _span(fmap.energy[keep]),
         )
+        if mask is not None:
+            peaks = [p for p in peaks if keep[p.index]]
         guess = np.array([t.predict(b_j, history) for t in active])
         limit = np.array([max_jump * (n - t.column) for t in active])
         found = np.array([p.energy for p in peaks])
@@ -302,6 +315,7 @@ def auto_prominence(
     b_range: Range | None = None,
     e_range: Range | None = None,
     columns: int = AUTO_COLUMNS,
+    mask: np.ndarray | None = None,
 ) -> float:
     """A prominence threshold for *feature* above the noise of *fmap* in the box.
 
@@ -311,10 +325,15 @@ def auto_prominence(
     mostly noise; its robust spread (1.4826 x the median absolute deviation) times
     :data:`AUTO_NOISE` is the threshold. Smoothing lowers it, lines and slow backgrounds hardly
     change it, and a map without noise gets a threshold near 0.0 (0.0 for an empty box).
+    A *mask* (as in :func:`detect`) limits each column to the energies of its samples in it.
     """
     feature = Feature(feature)
     _check_smoothing(smooth)
-    inside = np.flatnonzero(_inside(fmap.field, b_range))
+    inside = _inside(fmap.field, b_range)
+    if mask is not None:
+        mask = _check_mask(fmap, mask) & _inside(fmap.energy, e_range)[:, None]
+        inside &= mask.any(axis=0)
+    inside = np.flatnonzero(inside)
     if inside.size > columns:
         inside = inside[np.linspace(0, inside.size - 1, columns).round().astype(int)]
     residuals = []
@@ -325,8 +344,9 @@ def auto_prominence(
         if x.size < 3 or np.any(np.diff(x) == 0):
             continue
         y = _smooth(y, smooth)
-        if e_range is not None:
-            cut = _inside(x, e_range)
+        span = e_range if mask is None else _span(fmap.energy[mask[:, j]])
+        if span is not None:
+            cut = _inside(x, span)
             x, y = x[cut], y[cut]
         if x.size < 3:
             continue
@@ -338,6 +358,36 @@ def auto_prominence(
     residual = np.concatenate(residuals)
     spread = 1.4826 * float(np.median(np.abs(residual - np.median(residual))))
     return AUTO_NOISE * spread
+
+
+def polygon_mask(fmap: FieldMap, polygon: np.ndarray) -> np.ndarray:
+    """The samples of *fmap* inside *polygon*, a mask for :func:`detect` (bool, the shape of
+    ``fmap.values``).
+
+    *polygon* is an ``(n, 2)`` array of ``(field, energy)`` vertices in the map's units, closed
+    from the last vertex back to the first; it may be concave or cross itself (even-odd rule).
+    Each field column is cut by the polygon's edges, so any field and energy grid works
+    (uneven, unsorted, with NaN samples left outside). Samples exactly on an edge may fall on
+    either side.
+    """
+    vertices = np.asarray(polygon, dtype=float).reshape(-1, 2)
+    field, energy = fmap.field, fmap.energy
+    mask = np.zeros(fmap.values.shape, dtype=bool)
+    vertices = vertices[np.isfinite(vertices).all(axis=1)]
+    if len(vertices) < 3:
+        return mask
+    x0, y0 = vertices[:, 0], vertices[:, 1]
+    x1, y1 = np.roll(x0, -1), np.roll(y0, -1)
+    b = field[:, None]
+    cuts = (x0 > b) != (x1 > b)  # edges that cross each column (half-open: vertices once)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        at = y0 + (b - x0) / (x1 - x0) * (y1 - y0)
+    crossings = np.sort(np.where(cuts, at, np.inf), axis=1)
+    counts = cuts.sum(axis=1)
+    for j in np.flatnonzero(counts):
+        below = np.searchsorted(crossings[j, : counts[j]], energy, side="right")
+        mask[:, j] = (below % 2 == 1) & np.isfinite(energy)
+    return mask
 
 
 class _Open:
@@ -377,6 +427,23 @@ def _smooth(y: np.ndarray, smooth: Smoothing | None) -> np.ndarray:
     if window <= poly:  # too few samples for this polynomial order
         return y
     return savgol_filter(y, window, poly)
+
+
+def _check_mask(fmap: FieldMap, mask: np.ndarray) -> np.ndarray:
+    mask = np.asarray(mask, dtype=bool)
+    if mask.shape != fmap.values.shape:
+        raise ValueError(
+            f"mask shape {mask.shape} does not match the map values {fmap.values.shape}"
+        )
+    return mask
+
+
+def _span(x: np.ndarray) -> Range:
+    """``(min, max)`` of the finite *x*; a range that holds nothing if there are none."""
+    finite = x[np.isfinite(x)]
+    if finite.size == 0:
+        return math.nan, math.nan
+    return float(finite.min()), float(finite.max())
 
 
 def _inside(x: np.ndarray, bounds: Range | None) -> np.ndarray:

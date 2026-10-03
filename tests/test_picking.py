@@ -417,3 +417,97 @@ def test_auto_prominence_box_and_empty_cases():
     assert pk.auto_prominence(fmap, "min", columns=4) > 0.0
     with pytest.raises(ValueError, match="odd"):
         pk.auto_prominence(fmap, "max", smooth=(8, 2))
+
+
+# ---- detect in a region (mask) ------------------------------------------------------------
+
+
+def ellipse(center, axes, n=180):
+    """Vertices of an axis-aligned ellipse (field, energy) around *center*."""
+    t = np.linspace(0.0, 2.0 * np.pi, n, endpoint=False)
+    return np.column_stack([center[0] + axes[0] * np.cos(t), center[1] + axes[1] * np.sin(t)])
+
+
+def rotated_rectangle(center, length, width, slope, scale=10.0):
+    """Corners of a rectangle along a line of *slope* (meV/T); lengths in meV, with 1 T drawn
+    as long as *scale* meV (as on a plot whose axes have different units)."""
+    u = np.array([1.0, slope / scale]) / np.hypot(1.0, slope / scale)
+    v = np.array([-u[1], u[0]])
+    corners = [
+        s * length / 2 * u + t * width / 2 * v for s, t in ((-1, -1), (1, -1), (1, 1), (-1, 1))
+    ]
+    return np.array(center) + np.array(corners) / [scale, 1.0]
+
+
+def test_polygon_mask_matches_a_point_in_polygon_test():
+    from matplotlib.path import Path
+
+    rng = np.random.default_rng(14)
+    field = np.sort(rng.uniform(0.0, 9.0, 30))[::-1]  # uneven and falling
+    energy = rng.permutation(np.concatenate([np.linspace(100.0, 200.0, 150), [np.nan]]))
+    fmap = FieldMap(energy=energy, field=field, values=np.zeros((energy.size, field.size)))
+    radius = np.tile([4.0, 1.5], 5)
+    angle = np.linspace(0.0, 2 * np.pi, 10, endpoint=False)
+    star = np.column_stack([4.5 + radius * np.cos(angle), 150.0 + 10 * radius * np.sin(angle)])
+    mask = pk.polygon_mask(fmap, star)
+    b, e = np.meshgrid(field, energy)
+    inside = Path(star).contains_points(np.column_stack([b.ravel(), e.ravel()]))
+    np.testing.assert_array_equal(mask, inside.reshape(mask.shape) & np.isfinite(e))
+    assert 0 < mask.sum() < mask.size
+    box = [(2.0, 120.0), (6.0, 120.0), (6.0, 160.0), (2.0, 160.0)]
+    in_b, in_e = (field > 2.0) & (field < 6.0), (energy > 120.0) & (energy < 160.0)
+    np.testing.assert_array_equal(pk.polygon_mask(fmap, box), in_e[:, None] & in_b[None, :])
+    assert not pk.polygon_mask(fmap, box[:2]).any()  # not an area
+
+
+def test_detect_in_an_ellipse_skips_lines_outside_it():
+    centre = lambda b: 150.0  # noqa: E731 - through the middle of the ellipse
+    corner = lambda b: 175.0 if b <= 2.6 else np.nan  # noqa: E731 - in the box, not the ellipse
+    fmap = line_map([centre, corner], noise=0.01, seed=15)
+    region = ellipse((4.5, 150.0), (3.0, 30.0))
+    box = {"b_range": (1.5, 7.5), "e_range": (120.0, 180.0)}
+    in_box = pk.detect(fmap, feature="max", prominence=0.2, **box)
+    assert [round(float(t.energy.mean())) for t in in_box] == [150, 175]
+    mask = pk.polygon_mask(fmap, region)
+    tracks = pk.detect(fmap, feature="max", prominence=0.2, mask=mask, **box)
+    assert len(tracks) == 1
+    assert np.allclose(tracks[0].energy, 150.0, atol=STEP / 4)
+    inner = FIELD[(FIELD > 1.75) & (FIELD < 7.25)]  # the tips are too thin for a peak
+    assert set(inner) <= set(tracks[0].field)
+    assert np.all(((tracks[0].field - 4.5) / 3.0) ** 2 < 1.0)
+    assert len(pk.detect(fmap, feature="max", prominence=0.2, mask=mask)) == 1  # box optional
+
+
+def test_detect_in_a_rotated_rectangle_follows_one_of_two_parallel_lines():
+    low, high = (lambda b: 110.0 + 8.0 * b), (lambda b: 126.0 + 8.0 * b)
+    fmap = line_map([low, high], noise=0.01, seed=16)
+    region = rotated_rectangle((4.5, low(4.5)), length=80.0, width=10.0, slope=8.0)
+    b_range = (region[:, 0].min(), region[:, 0].max())
+    e_range = (region[:, 1].min(), region[:, 1].max())
+    assert e_range[0] < high(b_range[0]) < e_range[1]  # the other line is in the bounds
+    options = {"prominence": 0.2, "max_jump": 3.0, "b_range": b_range, "e_range": e_range}
+    assert len(pk.detect(fmap, feature="max", **options)) == 2
+    mask = pk.polygon_mask(fmap, region)
+    tracks = pk.detect(fmap, feature="max", mask=mask, **options)
+    assert len(tracks) == 1
+    assert np.max(np.abs(tracks[0].energy - low(tracks[0].field))) < STEP / 4
+    assert len(tracks[0]) >= 20
+
+
+def test_detect_in_a_concave_polygon():
+    flat_low, flat_high = (lambda b: 120.0), (lambda b: 180.0)
+    fmap = line_map([flat_low, flat_high], noise=0.01, seed=17)
+    ell = [(1.1, 110.0), (7.9, 110.0), (7.9, 130.0), (3.1, 130.0), (3.1, 190.0), (1.1, 190.0)]
+    mask = pk.polygon_mask(fmap, ell)
+    tracks = pk.detect(fmap, feature="max", prominence=0.2, mask=mask)
+    assert len(tracks) == 2
+    low, high = tracks
+    np.testing.assert_array_equal(low.field, FIELD[(FIELD > 1.1) & (FIELD < 7.9)])
+    np.testing.assert_array_equal(high.field, FIELD[(FIELD > 1.1) & (FIELD < 3.1)])
+    assert np.allclose(high.energy, 180.0, atol=STEP / 4)
+    rect = pk.polygon_mask(fmap, [(1.9, 99.0), (6.1, 99.0), (6.1, 201.0), (1.9, 201.0)])
+    assert pk.auto_prominence(fmap, "max", mask=rect) == pytest.approx(
+        pk.auto_prominence(fmap, "max", b_range=(2.0, 6.0))
+    )
+    with pytest.raises(ValueError, match="mask shape"):
+        pk.detect(fmap, feature="max", mask=mask[:, :3])
