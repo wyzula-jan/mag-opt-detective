@@ -8,6 +8,7 @@ section, see ``models.py``) what changed; energies are typed and shown in the di
 
 from __future__ import annotations
 
+import math
 from typing import Protocol
 
 from PySide6.QtCore import QRectF, QSignalBlocker, Qt
@@ -269,10 +270,7 @@ class BranchRow(QWidget):
         self.m.setFixedWidth(self.m.caption.sizeHint().width() + room + 14)
         self.form = FormButton()
         self.remove = tool_button("x", "Remove branch", "faint")
-        # E₀ may be typed below 0 (a linear branch), but the slider stops at 0
-        self.e0 = ParamRow(
-            "E₀", name="E₀, the energy at zero field", digits=5, mode=mode, nonnegative=True
-        )
+        self.e0 = ParamRow("E₀", name="E₀, the energy at zero field", digits=5, mode=mode)
         self.g = ParamRow(
             "g", name="g factor", mode=mode, range_for=symmetric_range(G_SPAN), floor=1.0
         )
@@ -355,6 +353,9 @@ class ZeemanEditor(QWidget):
             row.e0.set_range_for(e0_range)
             row.e0.set_floor(in_unit(ENERGY_FLOOR, unit))
             row.e0.set_value(ms.shown(self.entry, e0, e0.value, unit))
+            # the slider keeps core's limit: 0 for a hyperbolic branch, none for a linear one
+            low = ms.shown(self.entry, e0, e0.lo, unit) if math.isfinite(e0.lo) else None
+            row.e0.slider.set_bounds(low, None)
             row.g.set_value(p[f"g_{i}"].value)
             row.m.set_value(branch.m)
             row.form.set_form(branch.form)

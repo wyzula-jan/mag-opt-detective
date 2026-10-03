@@ -1134,7 +1134,8 @@ def test_the_fit_area_takes_the_place_of_its_button(window, errors):
 
 def test_signed_parameters_cross_zero_and_others_stop_at_zero(window, sweep, qtbot, errors):
     """g (it can be negative, e.g. InSb) and expression parameters cross 0 in both modes; the
-    velocity, the half-gap, E₀ and the couplings stop at 0 when dragged."""
+    velocity, the half-gap, a hyperbolic branch's E₀ and the couplings stop at 0 when dragged,
+    a linear branch's E₀ (core has no limit there) does not."""
     shown_window(window, qtbot)
     load_sweep(window, sweep)
     process(window)
@@ -1153,6 +1154,8 @@ def test_signed_parameters_cross_zero_and_others_stop_at_zero(window, sweep, qtb
     for _ in range(6):  # halves, then steps of 10 % of its size: through 0
         drag_by(qtbot, amplitude.slider, [-1.0])
     assert ms.params(custom)["amplitude"].value < 0
+    zeditor.rows[1].form.click()  # hyperbolic: E₀ >= 0 in core
+    assert zeeman.model.branches[1].form is Form.HYPERBOLIC
     for row, value in (
         (dcard.velocity, lambda: ms.params(dirac)["velocity"].value),
         (dcard.delta, lambda: ms.params(dirac)["delta"].value),
@@ -1170,16 +1173,21 @@ def test_signed_parameters_cross_zero_and_others_stop_at_zero(window, sweep, qtb
     x = round(g.slider.x_for(-4.0))
     qtbot.mouseClick(g.slider, Qt.MouseButton.LeftButton, pos=QPoint(x, 10))
     assert ms.params(zeeman)["g_0"].value < -3
-    # a linear branch's E₀ may still be typed below 0; a drag does not pull it up to 0
-    e0 = zeditor.rows[1].e0
+    # a linear branch's E₀ has no limit in core: typed below 0, it is dragged both ways
+    e0 = zeditor.rows[2].e0
+    assert zeeman.model.branches[2].form is Form.LINEAR
     e0.field.edit.setText("-40")  # cm⁻¹
-    assert ms.params(zeeman)["e0_1"].value == pytest.approx(-40 / MEV)
+    assert ms.params(zeeman)["e0_2"].value == pytest.approx(-40 / MEV)
     models.slider_mode.set("relative", 10.0)
-    drag_by(qtbot, e0.slider, [0.5])
-    assert -40 < float(e0.field.text()) < -38
-    drag_by(qtbot, e0.slider, [-1.0], release=False)  # further below: held where it was
-    assert float(e0.field.text()) >= -40
-    release(qtbot, e0.slider)
+    drag_by(qtbot, e0.slider, [1.0])
+    assert float(e0.field.text()) == pytest.approx(-36)
+    drag_by(qtbot, e0.slider, [-1.0])
+    drag_by(qtbot, e0.slider, [-1.0])
+    assert float(e0.field.text()) == pytest.approx(-36 * 1.1 * 1.1)
+    models.slider_mode.set("relative", 50.0)
+    for _ in range(6):  # through 0 the other way too (steps of 0.5 meV near 0)
+        drag_by(qtbot, e0.slider, [1.0])
+    assert ms.params(zeeman)["e0_2"].value > 0
     assert not errors
 
 
