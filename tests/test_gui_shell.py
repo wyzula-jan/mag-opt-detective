@@ -483,3 +483,11 @@ def test_keyboard_focus_and_hover_show_on_tabs_and_buttons(shown, qtbot):
     assert all(button.property("kit") == "button" for button in buttons)
     sheet = theme.build_stylesheet(theme.tokens_for(False))
     assert 'QPushButton[kit="button"]:focus' in sheet
+
+
+def test_the_message_bar_is_as_tall_as_its_text(shown, qtbot):
+    """A short message is not padded to the height its text would take in a narrow bar."""
+    bar = shown.infobar
+    shown.report_error("Check for updates", "no connection to GitHub")
+    qtbot.waitUntil(lambda: bar.height() == bar.heightForWidth(bar.width()))
+    assert bar.width() == 560  # the widest bar: one line of title and one of text

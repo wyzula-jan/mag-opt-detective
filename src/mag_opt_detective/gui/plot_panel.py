@@ -352,7 +352,7 @@ class _Overlay(QObject):
             return
         width = max(120, min(560, area.width() - 20))
         height = child.heightForWidth(width) if child.hasHeightForWidth() else -1
-        height = max(height, child.sizeHint().height())
+        height = max(height, child.minimumSizeHint().height())
         child.setGeometry(area.left() + (area.width() - width) // 2, area.top() + 10, width, height)
         child.raise_()
 
