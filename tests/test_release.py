@@ -76,7 +76,7 @@ def commit(repo: Path, message: str) -> None:
     """A commit with *message* that changes a scratch file."""
     path = repo / "work.txt"
     write(path, (path.read_text(encoding="utf-8") if path.exists() else "") + message + "\n")
-    git(repo, "add", "work.txt")
+    git(repo, "add", "--all")
     git(repo, "commit", "--quiet", "--file=-", stdin=message)
 
 
@@ -386,7 +386,7 @@ def test_a_dry_run_of_the_first_release_writes_nothing(repo, capsys):
 
 def test_uncommitted_changes_are_refused(released, capsys):
     commit(released, "fix: a")
-    write(released / "pyproject.toml", PYPROJECT + "\n")
+    write(released / "work.txt", "changed\n")
     assert run(released) == 1
     assert "uncommitted changes" in capsys.readouterr().err
     assert release.release_tags(released) == ["v0.1.0"]
@@ -416,6 +416,29 @@ def test_an_existing_tag_of_the_version_is_refused_before_committing(released, c
     assert head(released) == before
     assert git(released, "status", "--porcelain") == ""
     assert set(release.read_versions(released).values()) == {"0.1.0"}
+
+
+def test_disagreeing_version_files_are_refused(released, capsys):
+    lock = released / "uv.lock"
+    write(lock, release.set_lock_version(lock.read_text(encoding="utf-8"), "0.0.9"))
+    commit(released, "fix: a")
+    before = head(released)
+    for args in ((), ("--dry-run",)):
+        assert run(released, *args) == 1
+        err = capsys.readouterr().err
+        assert "the version files disagree" in err
+        assert "uv.lock 0.0.9" in err and "pyproject.toml 0.1.0" in err
+    assert head(released) == before
+    # the files agree, but not with the newest changelog section
+    write(lock, release.set_lock_version(lock.read_text(encoding="utf-8"), "0.1.0"))
+    citation = released / "CITATION.cff"
+    text = citation.read_text(encoding="utf-8")
+    write(citation, release.set_citation_version(text, "0.1.0", "2026-01-01"))
+    commit(released, "fix: b")
+    assert run(released) == 1
+    err = capsys.readouterr().err
+    assert "released 2026-01-01" in err and f"0.1.0 of {DATE}" in err
+    assert release.release_tags(released) == ["v0.1.0"]
 
 
 def test_notes_need_level_three_headings(released, capsys):
@@ -474,6 +497,7 @@ def test_the_repository_version_files_agree():
         release.parse_version(version)
     else:
         assert release.citation_date(ROOT) is None
+    release.check_versions(ROOT)  # what a release checks first
 
 
 def test_only_the_release_workflow_publishes_releases():

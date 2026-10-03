@@ -390,11 +390,32 @@ def read_notes(path: Path) -> str:
     return notes
 
 
+def check_versions(root: Path) -> None:
+    """ReleaseError unless the version files agree with each other and with the newest
+    section of CHANGELOG.md (its version, and its date as CITATION.cff's date-released)."""
+    versions = read_versions(root)
+    if len(set(versions.values())) > 1:
+        found = ", ".join(f"{name} {version}" for name, version in versions.items())
+        raise ReleaseError(f"the version files disagree ({found}): make them agree first")
+    changelog = root / CHANGELOG
+    sections = changelog_sections(read_text(changelog)) if changelog.is_file() else []
+    if not sections:
+        return
+    newest, date, _body = sections[0]
+    released = citation_date(root)
+    if (versions[PYPROJECT], released) != (newest, date):
+        raise ReleaseError(
+            f"the version files say {versions[PYPROJECT]} (released {released}), but the "
+            f"newest section of {CHANGELOG} is {newest} of {date}: make them agree first"
+        )
+
+
 def plan_release(root: Path, args: argparse.Namespace) -> Plan | str:
     """The release to make, or the reason why there is none (a str)."""
     tagged = release_tags(root, "--points-at", "HEAD")
     if tagged:
         raise ReleaseError(f"HEAD is already released as {tagged[-1]}: nothing to release")
+    check_versions(root)
     previous = last_release(root)
     commits = commits_since(root, previous)
     if previous is None:
