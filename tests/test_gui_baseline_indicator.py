@@ -14,7 +14,7 @@ from gui_helpers import process, set_unit
 from mag_opt_detective.core.units import Unit, from_cm1
 from mag_opt_detective.gui.baseline_chip import BaselineChip, BaselineMark, baseline_mark
 from mag_opt_detective.gui.controller import SweepFiles
-from mag_opt_detective.gui.display import format_range, unit_text
+from mag_opt_detective.gui.display import process_key, unit_text
 from mag_opt_detective.gui.panels import library
 from mag_opt_detective.gui.panels.processing import show_baseline
 
@@ -58,9 +58,9 @@ def mark(window) -> BaselineMark | None:
 
 
 def region_text(lo: float, hi: float, unit: Unit) -> str:
-    """The region *lo* - *hi* (cm^-1) as written in *unit*."""
+    """The region *lo* - *hi* (cm^-1) as the Processing panel's fields write it in *unit*."""
     a, b = (float(from_cm1(v, unit)) for v in (lo, hi))
-    return format_range(a, b, unit_text(unit))
+    return f"{a:.6g} – {b:.6g} {unit_text(unit)}"
 
 
 def type_region(window, lo: float | None, hi: float | None) -> None:
@@ -76,15 +76,53 @@ def test_the_chip_is_in_the_status_bar_and_hidden_before_a_map(window):
     assert mark(window) is None and chip(window).isHidden()  # nothing processed yet
 
 
-def test_hidden_without_a_baseline_on_the_map(window, lines):
-    c = window.controller
+def test_no_baseline_while_the_panel_has_one_to_apply(window, lines):
+    w, c = window, window.controller
+    panel = w.panels["processing"]
     c.set_processing(sample_files=lines)
-    process(window)
-    assert c.result is not None and mark(window) is None
-    window.panels["processing"].baseline_on.setChecked(True)  # set, not applied yet
-    assert c.processing.baseline is not None and mark(window) is None
-    process(window)
-    assert mark(window) is not None
+    process(w)
+    assert c.result is not None and mark(w) is None  # no baseline, none set
+    panel.baseline_on.setChecked(True)  # starts a region (empty fields), not applied yet
+    lo, hi = c.processing.baseline
+    shown = mark(w)
+    assert shown.text() == "No baseline" and shown.region is None and shown.pending
+    assert shown.tooltip().splitlines()[:2] == [
+        "The map shown has no baseline correction.",
+        f"The Processing panel has {region_text(lo, hi, Unit.CM1)}. "
+        f"Process ({process_key()}) to apply it.",
+    ]
+    assert shown.accessible_name() == "No baseline, changed, process again to apply"
+    assert chip(w).form() is not None or not chip(w).isVisible()
+    type_region(w, 600, None)  # incomplete: nothing the next Process would apply
+    assert mark(w) is None
+    type_region(w, 700, 600)  # reversed: the same
+    assert mark(w) is None
+    type_region(w, 1300, 1400)  # outside the data: the same
+    assert mark(w) is None
+    type_region(w, 600, 700)
+    assert mark(w).text() == "No baseline"
+    set_unit(w, Unit.MEV)
+    assert region_text(600, 700, Unit.MEV) in mark(w).tooltip()
+    process(w)
+    assert mark(w).text() == f"Baseline {region_text(600, 700, Unit.MEV)}"
+    assert not mark(w).pending
+
+
+def test_no_baseline_never_shows_with_live_or_a_library_map(window, lines):
+    w, c = window, window.controller
+    panel = w.panels["processing"]
+    c.set_processing(sample_files=lines)
+    process(w)
+    library.save_current(w)
+    panel.baseline_live.setChecked(True)
+    type_region(w, 600, 700)
+    panel.baseline_on.setChecked(True)  # applied at once
+    assert mark(w).text() == "Baseline 600 – 700 cm⁻¹" and mark(w).live
+    panel.baseline_on.setChecked(False)
+    panel.baseline_live.setChecked(False)
+    library.plot_entry(w, c.library[0].key)  # plotted without a baseline
+    panel.baseline_on.setChecked(True)
+    assert c.result_source == "library" and mark(w) is None
 
 
 def test_the_applied_region_in_the_display_unit(processed):
@@ -102,12 +140,40 @@ def test_the_applied_region_in_the_display_unit(processed):
     assert mark(w).text() == f"Baseline {region_text(450, 550, Unit.MEV)}"
 
 
+def test_the_numbers_are_the_fields_numbers(window, lines):
+    w, c = window, window.controller
+    panel = w.panels["processing"]
+    c.set_processing(sample_files=lines, baseline=(450.123456, 550.98765))
+    process(w)
+    for unit in (Unit.CM1, Unit.MEV, Unit.THZ):
+        set_unit(w, unit)
+        fields = f"{panel.baseline_lo.text()} – {panel.baseline_hi.text()} {unit_text(unit)}"
+        assert mark(w).text() == f"Baseline {fields}"
+    wide = BaselineMark((10000.5, 12000.25), Unit.CM1)
+    assert wide.text() == f"Baseline {10000.5:.6g} – {12000.25:.6g} cm⁻¹"
+    assert wide.text().startswith("Baseline 10000.5 – 12000.")
+
+
+def test_a_pending_difference_always_shows(processed):
+    w, c = processed, processed.controller
+    c.set_processing(baseline=(450.0000001, 550.0))
+    shown = mark(w)
+    assert shown.pending
+    wanted = shown.tooltip().split("The Processing panel has ")[1].split(". Process")[0]
+    assert wanted != shown.range_text()
+    assert shown.range_text() == "450 – 550 cm⁻¹" and wanted == "450.0000001 – 550 cm⁻¹"
+    c.set_processing(baseline=(600.0, 700.0))
+    assert mark(w).digits == 6
+
+
 def test_a_changed_region_is_pending_until_processed(processed):
     w, c = processed, processed.controller
     type_region(w, 600, 700)
     shown = mark(w)
     assert shown.pending and shown.text() == "Baseline 450 – 550 cm⁻¹"  # still what is applied
-    assert "says 600 – 700 cm⁻¹ now" in shown.tooltip() and "Process" in shown.tooltip()
+    assert shown.tooltip().splitlines()[1] == (
+        f"The Processing panel has 600 – 700 cm⁻¹. Process ({process_key()}) to apply it."
+    )
     assert "changed" in shown.accessible_name()
     set_unit(w, Unit.MEV)
     assert region_text(600, 700, Unit.MEV) in mark(w).tooltip()
@@ -123,9 +189,10 @@ def test_a_changed_region_is_pending_until_processed(processed):
 @pytest.mark.parametrize(
     ("change", "says"),
     [
-        ("off", "has the baseline off"),
-        ("reversed", "is reversed"),
-        ("incomplete", "is incomplete"),
+        ("off", f"has the baseline off. Process ({process_key()}) to remove it."),
+        ("reversed", "cannot be applied: 700 – 600 cm⁻¹ is reversed"),
+        ("incomplete", "cannot be applied: it is incomplete; enter both limits."),
+        ("outside", "cannot be applied: 1300 – 1400 cm⁻¹ holds no data (the map spans 400 –"),
     ],
 )
 def test_pending_says_what_the_panel_has(processed, change, says):
@@ -135,10 +202,14 @@ def test_pending_says_what_the_panel_has(processed, change, says):
         panel.baseline_on.setChecked(False)
     elif change == "reversed":
         type_region(w, 700, 600)
-    else:
+    elif change == "incomplete":
         type_region(w, 600, None)
+    else:
+        type_region(w, 1300, 1400)
     shown = mark(w)
     assert shown.pending and shown.text() == "Baseline 450 – 550 cm⁻¹" and says in shown.tooltip()
+    assert (change == "off") == ("Process (" in shown.tooltip())  # only what Process can apply
+    assert shown.accessible_name().endswith("process again to apply") == (change == "off")
     if change == "off":
         process(w)
         assert mark(w) is None  # the new map has no baseline

@@ -1,11 +1,13 @@
 """The baseline chip: whether the map on screen is baseline-corrected, and over which region.
 
 The chip shows what the map shown has, not what the Processing panel is set to: the region
-applied (in the display unit), a "Live" tag while Live applies the panel's region at once, and
-the warning dot (as on the Process button) when the panel's region differs from the applied one,
-so the next Process changes it. A library map shows the region it was plotted with. Without a
-baseline on the map shown the chip is hidden. :func:`baseline_mark` derives this from the
-controller; :class:`BaselineChip` draws it and gets narrower (and then empty) when its place is.
+applied (in the display unit, with the digits of the panel's fields), a "Live" tag while Live
+applies the panel's region at once, and the warning dot (as on the Process button) when the
+panel's region differs from the applied one. A processed map without a baseline shows "No
+baseline" with the dot while the panel has a region that the next Process would apply; else it
+shows nothing. A library map shows the region it was plotted with. :func:`baseline_mark`
+derives this from the controller; :class:`BaselineChip` draws it and gets narrower (and then
+empty) when its place is.
 """
 
 from __future__ import annotations
@@ -19,30 +21,46 @@ from PySide6.QtWidgets import QAbstractButton, QSizePolicy
 
 from mag_opt_detective.core.units import Unit, from_cm1
 from mag_opt_detective.gui import icons
-from mag_opt_detective.gui.display import format_range, process_key, unit_text
+from mag_opt_detective.gui.display import process_key, unit_text
 from mag_opt_detective.gui.theme import current_tokens
 
-ICON = "sliders-horizontal"  # the Processing panel's icon: the chip opens it
+PROCESSING_ICON = "sliders-horizontal"  # the Processing panel's icon: the chip opens it
 WHAT = "each spectrum is shifted so that this region averages 1"
+DIGITS = 6  # significant digits, as in the Processing panel's fields
 NUMBER = re.compile(r"[0-9]+(?:\.[0-9]+)?")
+
+Region = tuple[float | None, float | None]
+
+
+def ends_text(region: Region, digits: int = DIGITS) -> tuple[str, str]:
+    """The ends of *region* with *digits* significant digits ("open" for None)."""
+    return tuple("open" if v is None else f"{v:.{digits}g}" for v in region)
+
+
+def range_text(region: Region, unit: Unit, digits: int = DIGITS) -> str:
+    """``500 – 880 cm⁻¹``: a region in *unit* with *digits* significant digits."""
+    lo, hi = ends_text(region, digits)
+    return f"{lo} – {hi} {unit_text(unit)}"
 
 
 @dataclass(frozen=True)
 class BaselineMark:
     """The baseline of the map shown, as the chip says it (energies in *unit*)."""
 
-    region: tuple[float, float]  # applied to the map shown
+    region: tuple[float, float] | None  # applied to the map shown; None: no baseline
     unit: Unit
     live: bool = False  # Live is on and applies the panel's region to this map at once
     pending: bool = False  # the panel's region differs from the applied one
     library: bool = False  # a library map: it keeps the region it was plotted with
-    wanted: tuple[float | None, float | None] | None = None  # the panel's region (None: off)
+    wanted: Region | None = None  # the panel's region (None: off), when pending
+    problem: str = ""  # why Process cannot apply the panel's region ("" when it can)
+    digits: int = DIGITS  # enough to tell the applied region from the panel's
 
     def range_text(self) -> str:
-        return format_range(*self.region, unit_text(self.unit))
+        return range_text(self.region, self.unit, self.digits) if self.region else ""
 
     def text(self) -> str:
-        return f"Baseline {self.range_text()}"
+        return f"Baseline {self.range_text()}" if self.region else "No baseline"
 
     def accessible_name(self) -> str:
         states = [self.text()]
@@ -51,7 +69,7 @@ class BaselineMark:
         if self.live:
             states.append("live")
         if self.pending:
-            states.append("changed, process again to apply")
+            states.append("changed, process again to apply" if not self.problem else "changed")
         return ", ".join(states)
 
     def tooltip(self) -> str:
@@ -63,42 +81,55 @@ class BaselineMark:
                 "again or process.",
             ]
         else:
-            lines = [f"The map shown is baseline-corrected over {self.range_text()}: {WHAT}."]
+            if self.region:
+                lines = [f"The map shown is baseline-corrected over {self.range_text()}: {WHAT}."]
+            else:
+                lines = ["The map shown has no baseline correction."]
             if self.live:
                 lines.append("Live: changes to the region apply at once.")
             if self.pending:
-                lines.append(f"{self._wanted_text()} Process ({process_key()}) to apply it.")
+                lines.append(self._pending_text())
         lines.append("Click to edit the region in the Processing panel.")
         return "\n".join(lines)
 
-    def _wanted_text(self) -> str:
-        wanted = self.wanted
-        if wanted is None:
-            return "The Processing panel has the baseline off now."
-        if None in wanted:
-            return "The Processing panel's region is incomplete."
-        unit = unit_text(self.unit)
-        if wanted[0] >= wanted[1]:
-            return "The Processing panel's region is reversed."
-        return f"The Processing panel says {format_range(*wanted, unit)} now."
+    def _pending_text(self) -> str:
+        key = process_key()
+        if self.problem:
+            return f"The Processing panel's region cannot be applied: {self.problem}."
+        if self.wanted is None:
+            return f"The Processing panel has the baseline off. Process ({key}) to remove it."
+        wanted = range_text(self.wanted, self.unit, self.digits)
+        return f"The Processing panel has {wanted}. Process ({key}) to apply it."
 
 
 def baseline_mark(controller) -> BaselineMark | None:
-    """The baseline of the map *controller* shows, or None when it has none (or no map)."""
+    """The baseline of the map *controller* shows, or None when the chip shows nothing."""
     c = controller
     result = c.result
-    if result is None or result.baseline_region is None:
+    if result is None:
         return None
     unit = c.unit
-    region = shown(result.baseline_region, unit)
+    applied = shown(result.baseline_region, unit) if result.baseline_region else None
     if c.result_source == "library":
-        return BaselineMark(region, unit, library=True)
+        return BaselineMark(applied, unit, library=True) if applied else None
     live = c.live_baseline() and c.can_apply_baseline()
-    wanted = c.processing.baseline
-    pending = wanted != result.baseline_region and not (live and live_applies(c))
-    if not pending or wanted is None:  # (only a pending mark says what the panel has)
-        return BaselineMark(region, unit, live=live, pending=pending)
-    return BaselineMark(region, unit, live=live, pending=True, wanted=shown(wanted, unit))
+    wanted_cm1 = c.processing.baseline
+    pending = wanted_cm1 != result.baseline_region and not c.baseline_is_live()
+    if not pending:
+        return BaselineMark(applied, unit, live=live) if applied else None
+    wanted = None if wanted_cm1 is None else shown(wanted_cm1, unit)
+    problem = region_problem(c, wanted_cm1)
+    if applied is None and (wanted is None or problem):  # nothing the next Process would apply
+        return None
+    return BaselineMark(
+        applied,
+        unit,
+        live=live,
+        pending=True,
+        wanted=wanted,
+        problem=problem,
+        digits=distinct_digits(applied, wanted),
+    )
 
 
 def shown(region, unit: Unit) -> tuple:
@@ -106,20 +137,37 @@ def shown(region, unit: Unit) -> tuple:
     return tuple(None if v is None else float(from_cm1(float(v), unit)) for v in region)
 
 
-def live_applies(controller) -> bool:
-    """Live can apply the panel's region to the map shown: it is off, or complete, in order and
-    holds data. (A region that is not waits for a fix and counts as changed.)"""
+def region_problem(controller, region) -> str:
+    """Why the next Process cannot apply the baseline *region* (cm^-1; None: off) to the
+    data of the map shown, or "" when it can (an approximation: Process checks the data it
+    loads, cut to the energy window)."""
     c = controller
-    region = c.processing.baseline
     if region is None:
-        return True
+        return ""
+    unit = c.unit
     if None in region:
-        return False
+        return "it is incomplete; enter both limits"
+    text = range_text(shown(region, unit), unit)
+    if region[0] >= region[1]:
+        return f"{text} is reversed; the first value must be below the second"
+    energy = c.result.ratio.energy
     try:
-        c.check_energy_range("baseline region", region, c.result.ratio.energy, "processing")
+        c.check_energy_range("baseline region", region, energy, "processing")
     except ValueError:
-        return False
-    return True
+        span = range_text(shown((energy.min(), energy.max()), unit), unit)
+        return f"{text} holds no data (the map spans {span})"
+    return ""
+
+
+def distinct_digits(applied, wanted) -> int:
+    """The fewest significant digits (at least :data:`DIGITS`) that write the regions *applied*
+    and *wanted* apart when they differ."""
+    if applied is None or wanted is None or None in wanted or applied == wanted:
+        return DIGITS
+    for digits in range(DIGITS, 17):
+        if ends_text(applied, digits) != ends_text(wanted, digits):
+            return digits
+    return 17  # (enough for any two floats)
 
 
 def widest(text: str) -> str:
@@ -128,8 +176,9 @@ def widest(text: str) -> str:
 
 
 class BaselineChip(QAbstractButton):
-    """A chip with the Processing icon, "Baseline 500 – 880 cm⁻¹", a "Live" tag and the
-    warning dot (see :class:`BaselineMark`); a click is for opening the Processing panel.
+    """A chip with the Processing icon, "Baseline 500 – 880 cm⁻¹" (or "No baseline"), a "Live"
+    tag and the warning dot (see :class:`BaselineMark`); a click is for opening the Processing
+    panel.
 
     Its width may be anything down to zero: given less than it asks for it drops the word
     "Baseline", then shows the icon (and the dot) alone, then nothing. While held
@@ -141,7 +190,7 @@ class BaselineChip(QAbstractButton):
     HEIGHT = 22  # the chip; the widget adds MARGIN above and below for the dot
     MARGIN = 3
     PAD = 7  # inside the chip, left and right
-    ICON = 14
+    ICON_SIZE = 14
     GAP = 5
     DOT = 9.0
 
@@ -226,11 +275,14 @@ class BaselineChip(QAbstractButton):
     def _texts(mark: BaselineMark, form: int) -> list[tuple[str, str]]:
         """The texts of *form* (0 all, 1 without "Baseline", 2 the icon alone) and their
         colour tokens."""
-        texts = [("Baseline ", "muted"), (mark.range_text(), "fg")]
-        return texts[form:] if form < 2 else []
+        if form == 2:
+            return []
+        if not mark.region:
+            return [("No baseline", "muted")]
+        return [("Baseline ", "muted"), (mark.range_text(), "fg")][form:]
 
     def _width(self, texts: list[tuple[str, str]], live: bool) -> int:
-        width = self.PAD + self.ICON + self.PAD
+        width = self.PAD + self.ICON_SIZE + self.PAD
         if texts:
             label = QFontMetrics(self._fonts()[0])
             width += self.GAP + sum(label.horizontalAdvance(text) for text, _ in texts)
@@ -274,9 +326,9 @@ class BaselineChip(QAbstractButton):
         painter.drawRoundedRect(frame, 6, 6)
         middle = frame.center().y()
         x = self.PAD
-        icon = icons.icon(ICON, "muted")
-        icon.paint(painter, x, round(middle - self.ICON / 2), self.ICON, self.ICON)
-        x += self.ICON + self.GAP
+        size = self.ICON_SIZE
+        icons.icon(PROCESSING_ICON, "muted").paint(painter, x, round(middle - size / 2), size, size)
+        x += size + self.GAP
         painter.setFont(label_font)
         metrics = QFontMetrics(label_font)
         flags = Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft
