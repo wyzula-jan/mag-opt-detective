@@ -782,9 +782,7 @@ class ExportDialog(QDialog):
 
     def figure_state(self):
         """What the figure shows now (export FigureState), as it would be saved."""
-        snapshot = self.controller.figure_state()
-        self._keep_fixed(snapshot)
-        return figure_state(self.controller, self.content(), snapshot=snapshot)
+        return figure_state(self.controller, self.content())
 
     def job(self, dpi: float, state=None) -> FigureJob:
         problems = self.problems()
@@ -820,15 +818,18 @@ class ExportDialog(QDialog):
         except ValueError:
             return None
 
-    def _keep_fixed(self, snapshot) -> None:
-        """Fixed levels start from the window's levels the first time a plot gets them."""
-        if self.levels_mode.value() != RANGE_FIXED:
-            return
+    def _start_fixed(self) -> None:
+        """In Fixed, a plot without fixed levels gets the window's levels (and keeps them, as
+        typed ones). Called where the mode, the settings or the window's plot change."""
         key = self.level_key()
-        if key not in self._fixed:
-            unit = Unit(self.controller.unit)
-            self._fixed[key] = canonical_levels(key, tuple(snapshot.levels), unit)
-            self.settings.update(fixed_levels=self._stored_fixed())
+        if self.levels_mode.value() != RANGE_FIXED or key in self._fixed:
+            return
+        snapshot = self._snapshot()
+        if snapshot is None:
+            return
+        unit = Unit(self.controller.unit)
+        self._fixed[key] = canonical_levels(key, tuple(snapshot.levels), unit)
+        self.settings.update(fixed_levels=self._stored_fixed())
 
     def _stored_fixed(self) -> dict[str, list[float]]:
         return {key: [lo, hi] for key, (lo, hi) in self._fixed.items()}
@@ -839,10 +840,6 @@ class ExportDialog(QDialog):
         mode = self.levels_mode.value()
         key, unit = self.level_key(), Unit(self.controller.unit)
         if mode == RANGE_FIXED:
-            if key not in self._fixed:
-                snapshot = snapshot if snapshot is not None else self._snapshot()
-                if snapshot is not None:
-                    self._keep_fixed(snapshot)
             if self._shown_levels == (key, unit):
                 return
             levels = self.fixed_levels()
@@ -1039,6 +1036,7 @@ class ExportDialog(QDialog):
     def _follow_window(self, *_args) -> None:
         """The main window changed what it shows: show it here too (no reprocessing)."""
         if self.isVisible():
+            self._start_fixed()
             self._update_form()
             self._schedule()
 
@@ -1046,6 +1044,7 @@ class ExportDialog(QDialog):
         if self._quiet:
             return
         self._note = None
+        self._start_fixed()
         self._update_form()
         self._store()
         self._schedule()
@@ -1237,7 +1236,6 @@ class ExportDialog(QDialog):
             len(sets),
             sum(s.x.size for s in sets),
         )
-        self._keep_fixed(snapshot)
         self._sync_level_fields(snapshot)
         return figure_state(self.controller, self.content(), snapshot=snapshot)
 

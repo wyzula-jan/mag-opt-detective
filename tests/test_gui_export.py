@@ -678,12 +678,15 @@ def test_colour_range_window_auto_and_fixed(processed, qtbot, no_dialogs):
     assert dialog.figure_state().levels == pytest.approx(auto)
     assert float(dialog.level_lo.edit.text()) == pytest.approx(auto[0], rel=1e-3)
 
-    dialog.levels_mode.set_value("fixed")  # starts from the window's levels
+    dialog.levels_mode.set_value("fixed")  # starts from the window's levels, kept at once
+    assert dialog.settings.values["fixed_levels"] == {"Ratio": [0.95, 1.05]}
     assert dialog.level_lo.isEnabled()
     assert [dialog.level_lo.edit.text(), dialog.level_hi.edit.text()] == ["0.95", "1.05"]
     dialog.level_lo.edit.setText("0.97")
     dialog.level_hi.edit.setText("1.01")
+    stored = dialog.settings.settings_value()
     assert dialog.figure_state().levels == (0.97, 1.01)
+    assert dialog.settings.settings_value() == stored  # drawing it changes nothing
     assert c.current_levels() == pytest.approx((0.95, 1.05))  # the window keeps its own
     assert "Remembered for R(B)/R(0)" in dialog.levels_note.text()
     redraw(dialog, qtbot)
