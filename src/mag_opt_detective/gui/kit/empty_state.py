@@ -44,6 +44,7 @@ class EmptyState(QWidget):
         self.text_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.text_label.setWordWrap(True)
         self.action_button = QPushButton()
+        self.action_button.setProperty("kit", "button")
         self.action_button.setVisible(False)
         self.action_button.clicked.connect(self._on_action)
 

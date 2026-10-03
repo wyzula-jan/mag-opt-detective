@@ -76,6 +76,7 @@ class InfoBar(QFrame):
         self.text_label.setTextFormat(Qt.TextFormat.PlainText)
         self.text_label.setWordWrap(True)
         self.action_button = QPushButton()
+        self.action_button.setProperty("kit", "button")
         self.action_button.setVisible(False)
         self.action_button.clicked.connect(self._on_action)
         self.close_button = QToolButton()

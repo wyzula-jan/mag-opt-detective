@@ -134,6 +134,7 @@ class AutoPickBar(QFrame):
         self.status = Note("", "info")
         self.status.setAccessibleName("Auto-pick status")
         self.discard_button = QPushButton("Discard")
+        self.discard_button.setProperty("kit", "button")
         self.discard_button.setToolTip("Drop the points found (Esc leaves the tool)")
         icons.set_icon(self.discard_button, "x")
         self.accept_button = QPushButton("Accept")

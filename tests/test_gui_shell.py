@@ -12,9 +12,11 @@ from PySide6.QtWidgets import QComboBox
 
 import gui_helpers
 from gui_helpers import energy_label, load_sweep, process, shown_image
+from mag_opt_detective import __version__
 from mag_opt_detective.core.pipeline import PlotKind, ReferenceMode
 from mag_opt_detective.core.processing import Axis
 from mag_opt_detective.core.units import Unit
+from mag_opt_detective.gui import display
 from mag_opt_detective.gui.kit import SlidePanel
 from mag_opt_detective.gui.main_window import MainWindow
 from mag_opt_detective.gui.plots import BarScale, HistogramScale
@@ -255,3 +257,20 @@ def test_empty_states_replace_plots_with_nothing_to_show(shown, sweep, monkeypat
     assert empty.isHidden() and not area.ref_kind.isHidden()
     area.set_current_view("map")
     assert empty.isHidden() and area.ref_kind.isHidden()
+
+
+def test_toolbar_and_status_bar_details(window, sweep):
+    tb, status = window.toolbar, window.statusBar()
+    assert tb.per_unit.property("kit") == "chip"  # drawn as a toggle, not as plain text
+    assert not tb.per_unit.isEnabled()  # no derivative: dimmed
+    assert tb.process_button.key_text() == display.process_key()
+    assert tb.export_button.menu() is tb.export_menu and tb.export_button.toolTip()
+    for button in (tb.open_button, tb.export_button):  # icon, gap, text (and chevron) fit
+        assert button.sizeHint().width() > button.fontMetrics().horizontalAdvance(button.text())
+    assert status.contentsMargins().left() == 12
+    assert window.windowTitle() == f"Magneto-Optical Detective {__version__}"
+    load_sweep(window, sweep)
+    process(window)
+    assert window.windowTitle() == f"Magneto-Optical Detective {__version__} · Sample_4p2K_Sam1"
+    window.controller.set_processing(smooth=True, reference_mode=ReferenceMode.SELF)
+    assert f"Settings changed · process again ({display.process_key()})" in window.state_text()

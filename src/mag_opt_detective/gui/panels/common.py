@@ -538,6 +538,7 @@ class SpinBox(QSpinBox):
 def small_button(text: str, icon: str | None = None, tooltip: str = "") -> QToolButton:
     """A compact text button (Plot, Save current map, ...) with an optional icon."""
     button = QToolButton()
+    button.setProperty("kit", "button")
     button.setText(text)
     button.setToolTip(tooltip)
     button.setFont(scaled_font(button, 0.94))

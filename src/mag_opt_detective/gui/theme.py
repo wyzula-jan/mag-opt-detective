@@ -162,6 +162,7 @@ def build_stylesheet(t: dict[str, QColor]) -> str:
     err_border = mix(t["err"], t["line"], 0.45).name()
     warn_border = mix(t["warn"], t["line"], 0.45).name()
     info_border = mix(t["accent"], t["line"], 0.45).name()
+    chip_border = mix(t["accent"], t["surface"], 0.4).name()
     return f"""
 *[kit="segmented"] {{
     background: {c["sunken"]}; border: 1px solid {c["line"]}; border-radius: 7px;
@@ -187,6 +188,38 @@ QToolButton[kit="tool"]:checked {{
     background: {c["accent-soft"]}; color: {c["accent"]}; border-color: {accent_ring};
 }}
 QToolButton[kit="tool"]:focus {{ border-color: {c["accent"]}; }}
+QToolButton[kit="chip"] {{
+    background: {c["surface"]}; border: 1px solid {c["line-strong"]}; border-radius: 6px;
+    padding: 0px 9px; min-height: 24px; color: {c["muted"]}; font-weight: 500;
+}}
+QToolButton[kit="chip"]:hover {{ color: {c["fg"]}; }}
+QToolButton[kit="chip"]:checked {{
+    background: {c["accent-soft"]}; color: {c["accent"]}; border-color: {chip_border};
+}}
+QToolButton[kit="chip"]:focus {{ border-color: {c["accent"]}; }}
+QToolButton[kit="chip"]:disabled {{
+    background: {c["win"]}; color: {c["line-strong"]}; border-color: {c["line"]};
+}}
+QPushButton[kit="button"], QToolButton[kit="button"] {{
+    background: {c["surface"]}; border: 1px solid {c["line-strong"]}; border-radius: 6px;
+    padding: 4px 10px; color: {c["fg"]};
+}}
+QToolButton[kit="button"] {{ padding: 3px 8px; }}
+QPushButton[kit="button"]:hover, QToolButton[kit="button"]:hover {{
+    background: {c["hover"]};
+}}
+QPushButton[kit="button"]:pressed, QToolButton[kit="button"]:pressed {{
+    background: {c["sunken"]};
+}}
+QToolButton[kit="button"]:checked {{
+    background: {c["accent-soft"]}; color: {c["accent"]}; border-color: {chip_border};
+}}
+QPushButton[kit="button"]:focus, QToolButton[kit="button"]:focus {{
+    border-color: {c["accent"]};
+}}
+QPushButton[kit="button"]:disabled, QToolButton[kit="button"]:disabled {{
+    background: {c["win"]}; color: {c["faint"]}; border-color: {c["line"]};
+}}
 QToolButton[kit="rail"] {{
     background: transparent; border: none; border-radius: 7px; padding: 7px 2px 6px;
     color: {c["muted"]}; font-weight: 500;
@@ -198,6 +231,7 @@ QPushButton[kit="primary"] {{
     background: {c["accent"]}; border: 1px solid {c["accent"]}; border-radius: 6px;
     color: {c["accent-fg"]}; font-weight: 600; padding: 4px 10px;
 }}
+QPushButton[kit="primary"]:focus {{ border-color: {c["fg"]}; }}
 QPushButton[kit="primary"]:disabled {{ background: {c["line-strong"]}; border-color: {c["line"]}; }}
 QToolButton[kit="section-header"] {{
     background: transparent; border: none; padding: 2px 0px; color: {c["fg"]}; font-weight: 600;

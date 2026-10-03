@@ -448,9 +448,11 @@ class PointsPanel(QWidget):
         )
         self.new_table = self.new_table_row.switch
         self.import_button = QPushButton("Import…")
+        self.import_button.setProperty("kit", "button")
         self.import_button.setToolTip("Read a point table (replaces the curves; undo restores)")
         icons.set_icon(self.import_button, "upload")
         self.export_button = QPushButton("Export…")
+        self.export_button.setProperty("kit", "button")
         self.export_button.setToolTip("Save the table: one column per curve, one row per field")
         icons.set_icon(self.export_button, "download")
 

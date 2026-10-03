@@ -15,8 +15,19 @@ import numpy as np
 import pyqtgraph as pg
 import scipy
 from PySide6 import __version__ as pyside_version
-from PySide6.QtCore import QEvent, QRectF, QSettings, QSize, Qt, Signal, qVersion
-from PySide6.QtGui import QAction, QActionGroup, QKeySequence, QPainter
+from PySide6.QtCore import QEvent, QRect, QRectF, QSettings, QSize, Qt, Signal, qVersion
+from PySide6.QtGui import (
+    QAction,
+    QActionGroup,
+    QColor,
+    QFont,
+    QFontMetrics,
+    QIcon,
+    QKeySequence,
+    QPainter,
+    QPalette,
+    QPen,
+)
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -32,6 +43,9 @@ from PySide6.QtWidgets import (
     QSplitter,
     QSplitterHandle,
     QStackedWidget,
+    QStyle,
+    QStyleOptionButton,
+    QStylePainter,
     QToolButton,
     QVBoxLayout,
     QWidget,
@@ -42,7 +56,7 @@ from mag_opt_detective.core.processing import Axis
 from mag_opt_detective.core.units import Unit
 from mag_opt_detective.gui import console, export_menu, icons, plot_panel
 from mag_opt_detective.gui.controller import AppController
-from mag_opt_detective.gui.display import format_range, unit_text
+from mag_opt_detective.gui.display import format_range, process_key, unit_text
 from mag_opt_detective.gui.inspector import colour, models, traces, view
 from mag_opt_detective.gui.kit import CollapsibleSection, InfoBar, SegmentedControl, SlidePanel
 from mag_opt_detective.gui.panels import PanelPage, library, points, processing, reference, sample
@@ -104,13 +118,96 @@ def _paint_dot(widget: QWidget, token: str = "warn", size: float = 9.0) -> None:
     painter.end()
 
 
-class _ProcessButton(QPushButton):
-    """The primary Process button; a dot marks settings changed since the last run."""
+class _Button(QPushButton):
+    """A toolbar button as in the mockup: icon, a 6 px gap and the text, then an optional
+    key hint (``kbd``) or a chevron (a button with a menu)."""
+
+    GAP = 6
+    ICON = 16
+    STYLE_SPACING = 4  # what the style itself puts between icon and text
+
+    def __init__(self, text: str, icon: str, color: str | None = None, key: str = "", parent=None):
+        super().__init__(text, parent)
+        self.setProperty("kit", "button")
+        icons.set_icon(self, icon, color)
+        self.setIconSize(QSize(self.ICON, self.ICON))
+        self._key = key
+
+    def key_text(self) -> str:
+        return self._key
+
+    def _key_font(self) -> QFont:
+        font = QFont(self.font())
+        font.setBold(False)
+        if font.pointSizeF() > 0:
+            font.setPointSizeF(font.pointSizeF() * 0.8)
+        return font
+
+    def _key_size(self) -> QSize:
+        metrics = QFontMetrics(self._key_font())
+        return QSize(metrics.horizontalAdvance(self._key) + 10, metrics.height() + 2)
+
+    def _trailing_width(self) -> int:
+        if self._key:
+            return self.GAP + self._key_size().width()
+        return self.GAP + 12 if self.menu() is not None else 0
+
+    def sizeHint(self) -> QSize:
+        hint = super().sizeHint()
+        extra = self.GAP - self.STYLE_SPACING + self._trailing_width()
+        return QSize(hint.width() + extra, max(hint.height(), 28))
+
+    def minimumSizeHint(self) -> QSize:
+        return self.sizeHint()
+
+    def paintEvent(self, event) -> None:
+        option = QStyleOptionButton()
+        self.initStyleOption(option)
+        option.text = ""
+        option.icon = QIcon()
+        option.features &= ~QStyleOptionButton.ButtonFeature.HasMenu
+        painter = QStylePainter(self)
+        painter.drawControl(QStyle.ControlElement.CE_PushButton, option)
+        color = option.palette.color(QPalette.ColorRole.ButtonText)
+        metrics = self.fontMetrics()
+        text_width = metrics.horizontalAdvance(self.text())
+        width = self.ICON + self.GAP + text_width + self._trailing_width()
+        x = (self.width() - width) // 2
+        middle = self.height() // 2
+        mode = QIcon.Mode.Normal if self.isEnabled() else QIcon.Mode.Disabled
+        self.icon().paint(
+            painter, QRect(x, middle - self.ICON // 2, self.ICON, self.ICON), mode=mode
+        )
+        x += self.ICON + self.GAP
+        painter.setPen(color)
+        painter.drawText(
+            QRect(x, 0, text_width + 1, self.height()), Qt.AlignmentFlag.AlignVCenter, self.text()
+        )
+        x += text_width + self.GAP
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        if self._key:
+            size = self._key_size()
+            box = QRectF(x, middle - size.height() / 2, size.width(), size.height())
+            faded = QColor(color)
+            faded.setAlphaF(0.7)
+            painter.setPen(QPen(faded, 1))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawRoundedRect(box.adjusted(0.5, 0.5, -0.5, -0.5), 4, 4)
+            painter.setFont(self._key_font())
+            painter.drawText(box, Qt.AlignmentFlag.AlignCenter, self._key)
+        elif self.menu() is not None:
+            chevron = icons.icon("chevron-down", color)
+            chevron.paint(painter, QRect(x, middle - 6, 12, 12), mode=mode)
+        painter.end()
+
+
+class _ProcessButton(_Button):
+    """The primary Process button with its shortcut; a dot marks settings changed since the
+    last run."""
 
     def __init__(self, parent=None):
-        super().__init__("Process", parent)
+        super().__init__("Process", "play", "accent-fg", key=process_key(), parent=parent)
         self.setProperty("kit", "primary")
-        icons.set_icon(self, "play", "accent-fg")
         self.dot = False
 
     def set_dot(self, dot: bool) -> None:
@@ -190,10 +287,27 @@ class _Splitter(QSplitter):
         return _LineHandle(self.orientation(), self)
 
 
-def _group(*widgets: QWidget, label: str | None = None) -> QWidget:
-    box = QWidget()
+class _Group(QWidget):
+    """Toolbar controls kept on one row; *separated* draws a line before them (the mockup's
+    ``.tb-sep``), except where the group starts a row of the wrapped toolbar."""
+
+    SEPARATION = 7  # space on each side of the line
+
+    def __init__(self, separated: bool = False, parent=None):
+        super().__init__(parent)
+        self.separated = separated
+
+    def paintEvent(self, event) -> None:
+        if self.separated and self.x() > 0:
+            painter = QPainter(self)
+            painter.fillRect(0, 2, 1, self.height() - 4, current_tokens()["line"])
+            painter.end()
+
+
+def _group(*widgets: QWidget, label: str | None = None, separated: bool = False) -> QWidget:
+    box = _Group(separated)
     row = QHBoxLayout(box)
-    row.setContentsMargins(0, 0, 0, 0)
+    row.setContentsMargins(_Group.SEPARATION + 1 if separated else 0, 0, 0, 0)
     row.setSpacing(5)
     if label:
         text = QLabel(label)
@@ -220,9 +334,8 @@ class MainToolbar(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.open_button = QPushButton("Open sweep…")
+        self.open_button = _Button("Open sweep…", "folder-open")
         self.open_button.setToolTip("Open the in-field files of a sweep (Ctrl+L)")
-        icons.set_icon(self.open_button, "folder-open")
         self.process_button = _ProcessButton()
         self.kind = _segmented([(v, t, f"{t} ({k})") for v, t, k in KINDS], "Plot")
         self.order = _segmented([(v, t, k) for v, t, k in ORDERS], "Derivative")
@@ -230,7 +343,7 @@ class MainToolbar(QWidget):
             [("E", "d/dE", "Along energy"), ("B", "d/dB", "Along field")], "Derivative axis"
         )
         self.per_unit = QToolButton()
-        self.per_unit.setProperty("kit", "tool")
+        self.per_unit.setProperty("kit", "chip")
         self.per_unit.setCheckable(True)
         self.per_unit.setText("per unit")
         self.per_unit.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
@@ -241,11 +354,10 @@ class MainToolbar(QWidget):
         self.unit = _segmented([(u.value, t, f"Show energies in {t}") for u, t in UNITS], "Unit")
         self.unit.setToolTip("Energy unit of the plots, ranges, points and exports")
 
-        self.export_button = QToolButton()
-        self.export_button.setText("Export")
-        self.export_button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
-        self.export_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
-        icons.set_icon(self.export_button, "download")
+        self.export_button = _Button("Export", "download")
+        self.export_button.setToolTip(
+            "Export the data as a table, a quick image or a journal figure"
+        )
         self.export_menu = QMenu(self.export_button)
         self.export_button.setMenu(self.export_menu)
         self.appearance = QToolButton()  # cycles System -> Light -> Dark
@@ -253,11 +365,13 @@ class MainToolbar(QWidget):
         self.appearance.setIconSize(QSize(18, 18))
 
         flow_box = QWidget()
-        flow = FlowLayout(flow_box, spacing=8, row_spacing=8)
+        flow = FlowLayout(flow_box, spacing=_Group.SEPARATION, row_spacing=8)
         flow.addWidget(_group(self.open_button, self.process_button))
-        flow.addWidget(_group(self.kind, label="Plot"))
-        flow.addWidget(_group(self.order, self.axis, self.per_unit, label="Derivative"))
-        flow.addWidget(_group(self.unit, label="Unit"))
+        flow.addWidget(_group(self.kind, label="Plot", separated=True))
+        flow.addWidget(
+            _group(self.order, self.axis, self.per_unit, label="Derivative", separated=True)
+        )
+        flow.addWidget(_group(self.unit, label="Unit", separated=True))
         flow_box.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         row = QHBoxLayout(self)
         row.setContentsMargins(10, 8, 10, 8)
@@ -479,6 +593,7 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(central)
 
         status = self.statusBar()
+        status.setContentsMargins(12, 0, 8, 0)  # the state dot clear of the window edge
         self._state_label = QLabel()
         self._summary_label = QLabel()
         self._summary_label.setProperty("kit", "muted")
@@ -662,7 +777,7 @@ class MainWindow(QMainWindow):
         if c.result is None:
             color, text = tokens["faint"], "Not processed yet"
         elif changed:
-            color, text = tokens["warn"], "Settings changed - process again"
+            color, text = tokens["warn"], f"Settings changed · process again ({process_key()})"
         elif c.result_source == "library":
             color, text = tokens["accent"], "Showing a library map"
         else:
@@ -679,6 +794,14 @@ class MainWindow(QMainWindow):
             else "Process the loaded files (Ctrl+Return)"
         )
         self._summary_label.setText(self._summary())
+        self.setWindowTitle(self.window_title())
+
+    def window_title(self) -> str:
+        """The app and version, and the name of the map shown (as in the mockup)."""
+        title = f"Magneto-Optical Detective {__version__}"
+        if self.controller.result is not None:
+            title += f" · {self.controller.result_name()}"
+        return title
 
     def _summary(self) -> str:
         c = self.controller

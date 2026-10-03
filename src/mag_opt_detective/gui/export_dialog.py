@@ -467,6 +467,7 @@ class ExportDialog(QDialog):
         # footer
         self.messages = Messages()
         self.close_button = QPushButton("Close")
+        self.close_button.setProperty("kit", "button")
         self.close_button.setAutoDefault(False)
         self.save_button = QPushButton("Save…")
         self.save_button.setProperty("kit", "primary")
