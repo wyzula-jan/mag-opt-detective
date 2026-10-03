@@ -33,6 +33,7 @@ from mag_opt_detective.core.processing import Axis
 from mag_opt_detective.core.spectra import FieldMap
 from mag_opt_detective.core.units import CM1_PER_UNIT, Unit, derivative_scale, from_cm1, to_cm1
 from mag_opt_detective.gui.controller import PlotSelection
+from mag_opt_detective.gui.display import UNIT_TEXT
 from mag_opt_detective.gui.plot_panel import PlotClick
 from mag_opt_detective.gui.points_view import OUTLINE
 from mag_opt_detective.gui.tools.autopick_bar import DETECT, TRACK, AutoPickBar
@@ -49,7 +50,6 @@ MARKER_SIZE = 9  # px, the diamonds of the chosen line
 SELECT_RADIUS, DRAG_DISTANCE = 12.0, 4.0  # px: a click this close chooses a line; a drag
 BUSY_SIZE = 250_000  # map values from which a search shows the wait cursor (about 0.2 s)
 DEBOUNCE_MS = 300  # typing in a field searches again after this pause
-UNIT_TEXT = {Unit.CM1: "cm⁻¹", Unit.MEV: "meV", Unit.THZ: "THz"}
 SINGULAR = {
     Feature.MAX: "maximum",
     Feature.MIN: "minimum",

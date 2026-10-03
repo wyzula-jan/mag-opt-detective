@@ -26,6 +26,7 @@ from PySide6.QtWidgets import QAbstractSpinBox, QDoubleSpinBox, QLabel, QVBoxLay
 from mag_opt_detective.core.spectra import FieldMap
 from mag_opt_detective.core.units import Unit, convert_range
 from mag_opt_detective.gui.controller import VIEW_RANGES, AppController, ViewState
+from mag_opt_detective.gui.display import format_range, unit_text
 from mag_opt_detective.gui.kit import RangeControl
 from mag_opt_detective.gui.widgets import parse_float
 
@@ -43,7 +44,6 @@ HINT = (
     "fixes the range; Auto fits the data again."
 )
 INTENSITY_NOTE = "Follows the offset while on Auto"
-UNIT_TEXT = {Unit.CM1: "cm⁻¹", Unit.MEV: "meV", Unit.THZ: "THz"}
 _PARTIAL_NUMBER = re.compile(r"[+-]?(\d+\.?\d*|\.\d*)?([eE][+-]?\d*)?")
 
 
@@ -189,7 +189,7 @@ class ViewPage(QWidget):
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
         self.field = RangeControl("Field <i>B</i>", "T", name="Field")
-        self.energy = RangeControl("Energy <i>E</i>", UNIT_TEXT[Unit.CM1], name="Energy")
+        self.energy = RangeControl("Energy <i>E</i>", unit_text(Unit.CM1), name="Energy")
         self.intensity = RangeControl("Intensity", "", name="Intensity")
         self.hint = QLabel(HINT)
         self.hint.setProperty("kit", "muted")
@@ -255,7 +255,7 @@ class ViewRanges:
         c, page = self.c, self.page
         view = self.window.plot_area.current_view()
         v = c.view
-        unit = UNIT_TEXT[c.unit]
+        unit = unit_text(c.unit)
         page.energy.set_unit(unit)
         fmap = self.maps.get(view)
         shared = "Map" if view == "stacked" else "Stacked"
@@ -263,7 +263,7 @@ class ViewRanges:
         e_data = span(fmap.energy) if fmap is not None else None
         e_note = None
         if e_data is not None:
-            e_note = f"Data {e_data[0]:.5g} – {e_data[1]:.5g} {unit} · shared with {shared}"
+            e_note = f"Data {format_range(*e_data, unit)} · shared with {shared}"
         _show(page.field, v.field_range, b_data)
         _show(page.energy, v.energy_range, e_data, e_note)
         i_data = None

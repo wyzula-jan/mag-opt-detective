@@ -54,6 +54,7 @@ from mag_opt_detective.core.units import (
     from_cm1,
     to_cm1,
 )
+from mag_opt_detective.gui.display import unit_text
 from mag_opt_detective.gui.plots.base import robust_levels
 from mag_opt_detective.gui.points_undo import PointsState, PointsUndoStack
 
@@ -258,7 +259,7 @@ class PlotSelection:
             nth = {1: "1st", 2: "2nd"}[self.order]
             d = "d/dE" if self.axis == Axis.ENERGY else "d/dB"
             per = (
-                ("per " + (str(unit) if self.axis == Axis.ENERGY else "T"))
+                ("per " + (unit_text(unit) if self.axis == Axis.ENERGY else "T"))
                 if self.physical
                 else ("per point")
             )

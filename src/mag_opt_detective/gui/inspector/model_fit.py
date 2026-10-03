@@ -26,6 +26,7 @@ from mag_opt_detective.core.fitting import Assignment, FitResult
 from mag_opt_detective.core.units import Unit
 from mag_opt_detective.gui import icons
 from mag_opt_detective.gui.controller import EXPECTED_ERRORS
+from mag_opt_detective.gui.display import UNIT_TEXT
 from mag_opt_detective.gui.inspector import model_state as ms
 from mag_opt_detective.gui.inspector.model_widgets import (
     CurveDot,
@@ -34,7 +35,6 @@ from mag_opt_detective.gui.inspector.model_widgets import (
     muted_label,
     tool_button,
 )
-from mag_opt_detective.gui.inspector.view import UNIT_TEXT
 from mag_opt_detective.gui.kit import SegmentedControl
 from mag_opt_detective.gui.panels.common import (
     LinkButton,

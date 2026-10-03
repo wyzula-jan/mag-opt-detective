@@ -9,7 +9,7 @@ from PySide6.QtGui import QColor
 
 from mag_opt_detective.core.colormaps import lut
 from mag_opt_detective.core.spectra import FieldMap
-from mag_opt_detective.core.units import axis_label
+from mag_opt_detective.gui.display import energy_label
 from mag_opt_detective.gui.plots.base import PlotView, Range, set_range
 
 # part of the colour map used to colour traces by field: skips the ends, which can
@@ -64,7 +64,7 @@ class StackedPlot(PlotView):
         self.clear_map()
         self._fmap = fmap
         self._offset = float(offset)
-        self.plot.setLabel("bottom", axis_label(fmap.unit))
+        self.plot.setLabel("bottom", energy_label(fmap.unit))
         self._draw()
         set_range(self.plot, x_range, y_range)
 

@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
 from mag_opt_detective.core.units import Unit, convert
 from mag_opt_detective.core.zeeman import Form
 from mag_opt_detective.gui import icons
+from mag_opt_detective.gui.display import unit_text
 from mag_opt_detective.gui.inspector import model_state as ms
 from mag_opt_detective.gui.inspector.model_widgets import (
     CodeBox,
@@ -39,7 +40,6 @@ from mag_opt_detective.gui.inspector.model_widgets import (
     muted_label,
     tool_button,
 )
-from mag_opt_detective.gui.inspector.view import UNIT_TEXT
 from mag_opt_detective.gui.kit import SegmentedControl, Switch
 from mag_opt_detective.gui.panels.common import (
     Divider,
@@ -90,10 +90,6 @@ class Owner(Protocol):
     def set_expanded(self, entry: ms.ModelEntry, expanded: bool) -> None: ...
 
     def remove(self, entry: ms.ModelEntry) -> None: ...
-
-
-def unit_text(unit: Unit | str) -> str:
-    return UNIT_TEXT.get(Unit(unit), str(unit))
 
 
 def column_label(text: str) -> QLabel:

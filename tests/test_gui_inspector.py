@@ -285,7 +285,7 @@ def test_unit_switch_converts_ranges_but_not_the_data(processed):
     assert c.view.stacked_range == (0.5, 2.0)  # a ratio does not depend on the unit
     assert page.energy.range() == pytest.approx((200 / THZ, 800 / THZ))
     assert page.energy.unit() == "THz"
-    assert page.energy.note.text() == "Data 2.9979 – 29.979 THz · shared with Stacked"
+    assert page.energy.note.text() == "Data 2.998 – 29.98 THz · shared with Stacked"
     set_unit(w, "cm-1")
     assert c.view.energy_range == pytest.approx((200.0, 800.0))
 

@@ -6,6 +6,7 @@ import numpy as np
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, QPersistentModelIndex, Qt
 
 from mag_opt_detective.core.units import Unit, from_cm1
+from mag_opt_detective.gui.display import unit_text
 
 _ROOT = QModelIndex()
 
@@ -93,7 +94,7 @@ class CurvePointsModel(QAbstractTableModel):
         if orientation != Qt.Orientation.Horizontal:
             return None
         if role == Qt.ItemDataRole.DisplayRole:
-            return ("B (T)", f"E ({self._unit})", "")[section]
+            return ("B (T)", f"E ({unit_text(self._unit)})", "")[section]
         if role == Qt.ItemDataRole.TextAlignmentRole and section != self.REMOVE:
             return int(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         return None

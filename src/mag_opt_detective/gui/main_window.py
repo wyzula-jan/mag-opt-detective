@@ -42,6 +42,7 @@ from mag_opt_detective.core.processing import Axis
 from mag_opt_detective.core.units import Unit
 from mag_opt_detective.gui import console, export_menu, icons, plot_panel
 from mag_opt_detective.gui.controller import AppController
+from mag_opt_detective.gui.display import format_range, unit_text
 from mag_opt_detective.gui.inspector import colour, models, traces, view
 from mag_opt_detective.gui.kit import CollapsibleSection, InfoBar, SegmentedControl, SlidePanel
 from mag_opt_detective.gui.panels import PanelPage, library, points, processing, reference, sample
@@ -74,7 +75,7 @@ KINDS = (
     ("Ratio_Step", "R(B)/R(B-ΔB)", "Ctrl+4"),
 )
 ORDERS = (("0", "Off", "Alt+1"), ("1", "1st", "Alt+2"), ("2", "2nd", "Alt+3"))
-UNITS = ((Unit.CM1, "cm⁻¹"), (Unit.MEV, "meV"), (Unit.THZ, "THz"))
+UNITS = tuple((unit, unit_text(unit)) for unit in (Unit.CM1, Unit.MEV, Unit.THZ))
 SCHEME_ICONS = {"system": "contrast", "light": "sun", "dark": "moon"}
 
 
@@ -673,8 +674,8 @@ class MainWindow(QMainWindow):
         fmap = c.result.ratio.to_unit(c.unit)
         b, e = fmap.field, fmap.energy
         return (
-            f"{b.size} spectra · B {b.min():.4g} – {b.max():.4g} T · "
-            f"E {e.min():.4g} – {e.max():.4g} {c.unit}"
+            f"{b.size} spectra · B {format_range(b.min(), b.max(), 'T')} · "
+            f"E {format_range(e.min(), e.max(), unit_text(c.unit))}"
         )
 
     def summary_text(self) -> str:

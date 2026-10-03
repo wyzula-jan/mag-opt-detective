@@ -9,7 +9,7 @@ from PySide6.QtGui import QPainter, QPalette
 from PySide6.QtWidgets import QVBoxLayout, QWidget
 
 from mag_opt_detective.core.spectra import FieldMap
-from mag_opt_detective.core.units import axis_label
+from mag_opt_detective.gui.display import FIELD_LABEL, energy_label, unit_text
 from mag_opt_detective.gui.plots.base import (
     AxisCells,
     PartPainter,
@@ -43,7 +43,7 @@ class ColorMapPlot(PlotView):
         self._cells: tuple[AxisCells, AxisCells] | None = None  # (field, energy) as drawn
         self._auto_levels = True
         self._margins = (0, 0)
-        self.plot.setLabel("bottom", "Magnetic Field (T)")
+        self.plot.setLabel("bottom", FIELD_LABEL)
         self.plot.setLabel("left", "Energy")
         self.image = pg.ImageItem(axisOrder="row-major")
         self.plot.addItem(self.image)
@@ -213,8 +213,8 @@ class ColorMapPlot(PlotView):
 
     def _show(self, fmap: FieldMap, levels: Range, cmap: str) -> None:
         self._fmap = fmap
-        self._unit = str(fmap.unit)
-        self.plot.setLabel("left", axis_label(fmap.unit))
+        self._unit = unit_text(fmap.unit)
+        self.plot.setLabel("left", energy_label(fmap.unit))
         scale = self._scale
         if cmap != self._cmap:
             scale.set_colormap(cmap)

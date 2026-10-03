@@ -14,6 +14,7 @@ from PySide6.QtWidgets import QHBoxLayout, QLabel, QScrollArea, QStackedWidget, 
 
 from mag_opt_detective.core.units import Range, Unit, from_cm1
 from mag_opt_detective.gui.controller import fmt, user_action
+from mag_opt_detective.gui.display import unit_text
 from mag_opt_detective.gui.panels.common import (
     Note,
     SwitchRow,
@@ -115,7 +116,7 @@ class ProcessingPanel(QWidget):
     def set_unit(self, unit) -> None:
         for edit in self.edits():
             edit.set_unit(unit)
-            self.fields[edit].set_unit(str(unit))
+            self.fields[edit].set_unit(unit_text(unit))
         self.check()
 
     def energy_cut(self) -> Range | None:
@@ -162,7 +163,7 @@ class ProcessingPanel(QWidget):
                 shown = from_cm1(np.array([a, b]), unit)
                 text = (
                     f"{what}: the first value must be below the second; it is "
-                    f"{fmt(shown[0])} – {fmt(shown[1])} {unit}."
+                    f"{fmt(shown[0])} – {fmt(shown[1])} {unit_text(unit)}."
                 )
             elif used and both and (a is None or b is None) and (a, b) != (None, None):
                 bad_lo, bad_hi = a is None, b is None

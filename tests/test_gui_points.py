@@ -23,6 +23,7 @@ from mag_opt_detective.core.points import PointTable
 from mag_opt_detective.core.spectra import FieldMap
 from mag_opt_detective.core.units import from_cm1
 from mag_opt_detective.gui.controller import AppController, SweepFiles
+from mag_opt_detective.gui.display import UNIT_TEXT
 from mag_opt_detective.gui.main_window import MainWindow
 from mag_opt_detective.gui.plots import StackedPlot
 from mag_opt_detective.gui.points_view import CURVE_COLORS, PickHint
@@ -163,7 +164,7 @@ def test_a_unit_switch_changes_the_table_but_not_the_points(processed):
         set_unit(w, unit)
         shown = float(from_cm1(300.0, unit))
         assert rows(w) == [("1", f"{shown:.5g}")]
-        assert panel.model.headerData(1, Qt.Orientation.Horizontal) == f"E ({unit})"
+        assert panel.model.headerData(1, Qt.Orientation.Horizontal) == f"E ({UNIT_TEXT[unit]})"
         np.testing.assert_allclose(current_marker_energies(w), [shown])
         np.testing.assert_array_equal(c.points.column("LL 1"), stored)
 

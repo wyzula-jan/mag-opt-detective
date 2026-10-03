@@ -20,6 +20,7 @@ from mag_opt_detective.core.pipeline import PlotKind, ReferenceMode
 from mag_opt_detective.core.processing import Axis
 from mag_opt_detective.core.spectra import load_tsv
 from mag_opt_detective.core.units import Unit, convert
+from mag_opt_detective.gui import display
 
 window, errors = gui_helpers.window, gui_helpers.errors  # shared fixtures
 
@@ -118,7 +119,7 @@ def test_energy_fields_are_kept_in_cm1(window, sweep):
     assert region == pytest.approx((60 * MEV, 70.5 * MEV))
     set_unit(window, "cm-1")
     assert (panel.baseline_lo.text(), panel.baseline_hi.text()) == ("483.936", "568.625")
-    assert panel.unit_labels[0].text() == "cm-1"
+    assert panel.unit_labels[0].text() == "cm⁻¹"
     for unit in ("THz", "meV"):
         set_unit(window, unit)
     assert (panel.baseline_lo.text(), panel.baseline_hi.text()) == ("60", "70.5")
@@ -155,3 +156,23 @@ def test_figure_state(window, sweep):
     np.testing.assert_allclose(state.points["LL 1"][1], [300 / MEV])
     assert len(state.overlays["dirac"]) == 5
     np.testing.assert_allclose(state.fmap.values, c.result.ratio.values)
+
+
+def test_units_and_numbers_are_written_alike_everywhere(window, sweep):
+    """cm⁻¹ wherever people read the unit (files keep "cm-1"), and four significant digits."""
+    assert [display.unit_text(u) for u in Unit] == ["cm⁻¹", "meV", "THz"]
+    assert display.energy_label("cm-1") == "Energy (cm⁻¹)"
+    numbers = (16.0, 0.25, 396.75, 43.394, 3200.0, 0.0, -0.5, 1.5e-6, 2.5e7, None, float("nan"))
+    assert [display.format_number(v) for v in numbers] == [
+        "16", "0.25", "396.8", "43.39", "3200", "0", "-0.5", "1.5e-6", "2.5e7", "–", "–",
+    ]  # fmt: skip
+    load_sweep(window, sweep)
+    process(window)
+    select(window, order=1, per_unit=True)
+    assert window.plot_area.description.text() == "R(B)/R(0) · 1st derivative d/dE per cm⁻¹"
+    assert window.plots.map.plot.getAxis("bottom").labelText == "Magnetic field B (T)"
+    stacked = window.plots.stacked.plot
+    assert stacked.getAxis("bottom").labelText == "Energy (cm⁻¹)"
+    assert stacked.getAxis("left").labelText == "1st derivative + offset"
+    select(window, order=0)
+    assert stacked.getAxis("left").labelText == "R(B)/R(0) + offset"

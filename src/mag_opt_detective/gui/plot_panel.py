@@ -36,7 +36,15 @@ from mag_opt_detective.core.processing import Axis
 from mag_opt_detective.core.spectra import save_tsv
 from mag_opt_detective.core.units import Unit
 from mag_opt_detective.gui import icons
-from mag_opt_detective.gui.controller import KIND_LABELS, level_key, level_label, user_action
+from mag_opt_detective.gui.controller import (
+    KIND_LABELS,
+    ORDINALS,
+    PlotSelection,
+    level_key,
+    level_label,
+    user_action,
+)
+from mag_opt_detective.gui.display import format_number, unit_text
 from mag_opt_detective.gui.kit import SlidePanel
 from mag_opt_detective.gui.plots import ColorMapPlot, PlotColors, StackedPlot, robust_levels
 from mag_opt_detective.gui.theme import current_tokens
@@ -435,6 +443,21 @@ class PlotArea(QWidget):
 
 
 # ---------------------------------------------------------------------- rendering
+def kind_label(selection: PlotSelection) -> str:
+    """The map shown in a few words: its kind, or the derivative ("1st derivative")."""
+    if selection.order:
+        return f"{ORDINALS[selection.order]} derivative"
+    return KIND_LABELS[selection.kind]
+
+
+def value_label(window, view: str) -> str:
+    """What the values of plot *view* are (read-out and axis titles)."""
+    selection = window.controller.selection
+    if view == "reference":
+        return KIND_LABELS[selection.reference_kind]
+    return kind_label(selection)
+
+
 def render(window) -> None:
     """Draw the selected map and its stacked spectra in the display unit."""
     c, plots = window.controller, window.plots
@@ -454,6 +477,7 @@ def render(window) -> None:
     plots.stacked.set_map(
         fmap, view.stacked_offset, y_range=view.stacked_range, x_range=view.energy_range
     )
+    plots.stacked.plot.setLabel("left", f"{kind_label(c.selection)} + offset")
 
 
 def render_reference(window) -> None:
@@ -577,12 +601,14 @@ def apply_theme(window) -> None:
             splitter.handle(i).update()
 
 
-def _cursor_text(view: str, x: float, y: float, value, unit: Unit) -> str:
+def _cursor_text(view: str, x: float, y: float, value, unit: Unit, label: str = "") -> str:
+    """The status-bar read-out; *label* names the map value (the plot kind)."""
+    u = unit_text(unit)
     if view == "stacked":
-        return f"E = {x:.4g} {unit}    I = {y:.4g}"
-    text = f"B = {x:.3f} T    E = {y:.4g} {unit}"
+        return f"E = {format_number(x, 5)} {u}    I = {format_number(y)}"
+    text = f"B = {format_number(x)} T    E = {format_number(y, 5)} {u}"
     if value is not None and value == value:  # not NaN
-        text += f"    {value:.5g}"
+        text += f"    {label} = {format_number(value, 5)}" if label else f"    {value:.5g}"
     return text
 
 
@@ -736,7 +762,9 @@ def install(window) -> None:
     # cursor read-out
     for view in VIEWS:
         window.plots[view].cursorMoved.connect(
-            lambda x, y, value, v=view: window.set_cursor_text(_cursor_text(v, x, y, value, c.unit))
+            lambda x, y, value, v=view: window.set_cursor_text(
+                _cursor_text(v, x, y, value, c.unit, value_label(window, v))
+            )
         )
 
     # exports

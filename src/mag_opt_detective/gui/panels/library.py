@@ -29,6 +29,7 @@ from PySide6.QtWidgets import (
 from mag_opt_detective.core.units import Unit, from_cm1
 from mag_opt_detective.gui import icons
 from mag_opt_detective.gui.controller import LibraryEntry, in_panel, user_action
+from mag_opt_detective.gui.display import format_range, unit_text
 from mag_opt_detective.gui.panels.common import (
     Card,
     Divider,
@@ -61,12 +62,12 @@ TOOLTIPS = {
 
 
 def meta_parts(entry: LibraryEntry, unit: Unit) -> list[str]:
-    """``["R(B)/R(0)", "64 fields", "350 – 7800 cm-1"]`` (energies in *unit*)."""
+    """``["R(B)/R(0)", "64 fields", "350 – 7800 cm⁻¹"]`` (energies in *unit*)."""
     fmap = entry.fmap
     n = fmap.field.size
     e_lo, e_hi = from_cm1(np.array([fmap.energy.min(), fmap.energy.max()]), unit)
     fields = f"{n} field{'s' if n != 1 else ''}"
-    return [entry.kind, fields, f"{e_lo:.4g} – {e_hi:.4g} {unit}"]
+    return [entry.kind, fields, format_range(e_lo, e_hi, unit_text(unit))]
 
 
 def name_parts(name: str) -> list[str]:
@@ -253,7 +254,7 @@ class EntryRow(QWidget):
     def set_unit(self, unit: Unit) -> None:
         for edit in (self.e_min, self.e_max):
             edit.set_unit(unit)
-            self.fields[edit].set_unit(str(unit))
+            self.fields[edit].set_unit(unit_text(unit))
 
     def show_entry(self, entry: LibraryEntry, unit: Unit) -> None:
         """Show the entry's tick, meta line and limits (fields holding a value keep it)."""

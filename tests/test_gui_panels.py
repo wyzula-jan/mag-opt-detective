@@ -289,7 +289,7 @@ def test_processing_fields_are_shown_in_the_unit_and_kept_in_cm1(window):
     )
     assert panel.fields[panel.cut_lo].is_invalid() and panel.fields[panel.cut_hi].is_invalid()
     set_unit(window, "cm-1")
-    assert "1000.69 – 333.564 cm-1" in panel.cut_note.text()
+    assert "1000.69 – 333.564 cm⁻¹" in panel.cut_note.text()
     panel.cut_on.setChecked(False)
     assert panel.cut_note.isHidden() and not panel.fields[panel.cut_lo].isEnabled()
 
@@ -372,7 +372,7 @@ def test_library_list(window, sweep, tmp_path, monkeypatch, errors):
     (entry,) = c.library
     row = panel.rows[entry.key]
     assert row.name_label.text() == "Sample_4p2K_Sam1"
-    assert row.meta_label.text() == "R(B)/R(0) · 4 fields · 100 – 1000 cm-1"
+    assert row.meta_label.text() == "R(B)/R(0) · 4 fields · 100 – 1000 cm⁻¹"
     assert panel.count_label.text() == "1 of 1 ticked. Tick at least two to merge or average."
     assert not panel.average_button.isEnabled()
     assert panel.average_button.toolTip().startswith("Tick at least two maps")

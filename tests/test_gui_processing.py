@@ -284,10 +284,16 @@ def test_cursor_shows_value(window, sweep):
     assert f"E = {ratio.energy[3]:.3f} meV" in text
     assert f"value = {ratio.values[3, 1]:.5g}" in text
     assert "value" not in plot._cursor_text(100.0, ratio.energy[3])
-    plot.cursorMoved.emit(1.0, 50.0, 1.25)
-    assert window._cursor_label.text() == "B = 1.000 T    E = 50 meV    1.25"
+    plot.cursorMoved.emit(1.0, 50.0, 1.25)  # the value is named by the plot kind
+    assert window._cursor_label.text() == "B = 1 T    E = 50 meV    R(B)/R(0) = 1.25"
     window.plots.stacked.cursorMoved.emit(50.0, 1.5, None)
     assert window._cursor_label.text() == "E = 50 meV    I = 1.5"
+    select(window, order=1)
+    set_unit(window, "cm-1")
+    plot.cursorMoved.emit(1.25, 403.28, -0.0021)
+    assert (
+        window._cursor_label.text() == "B = 1.25 T    E = 403.28 cm⁻¹    1st derivative = -0.0021"
+    )
 
 
 @pytest.mark.parametrize("suffix", [".png", ".svg"])
@@ -321,7 +327,7 @@ def test_changed_since_process(window, sweep):
     process(window)
     assert not tb.process_button.dot
     assert "Processed" in window.state_text()
-    assert window.summary_text() == "4 spectra · B 0.5 – 2 T · E 100 – 1000 cm-1"
+    assert window.summary_text() == "4 spectra · B 0.5 – 2 T · E 100 – 1000 cm⁻¹"
 
     window.panels["processing"].baseline_on.setChecked(True)
     assert c.changed_since_process() and tb.process_button.dot

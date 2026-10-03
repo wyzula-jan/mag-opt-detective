@@ -169,7 +169,7 @@ def test_toolbar_follows_the_controller(window, sweep, errors):
     c.set_unit("meV")
     assert tb.unit.value() == "meV" and energy_label(window) == "Energy (meV)"
     tb.unit.button("cm-1").click()  # a later click in the toolbar still works
-    assert c.unit is Unit.CM1 and energy_label(window) == "Energy (cm-1)"
+    assert c.unit is Unit.CM1 and energy_label(window) == "Energy (cm⁻¹)"
 
     c.set_selection(kind=PlotKind.DATA, order=1)
     assert (tb.kind.value(), tb.order.value()) == ("Data", "1")

@@ -26,13 +26,13 @@ from mag_opt_detective.export import (
     StackedOptions,
 )
 from mag_opt_detective.export.figure import FIELD_LABEL, INTENSITY_LABEL, MM_PER_INCH
+from mag_opt_detective.gui.display import energy_label
 
 KINDS = ("map", "stacked")
 POINTS_ALL, POINTS_CURRENT, POINTS_NONE = "all", "current", "none"
 FORMAT_LABELS = {"pdf": "PDF", "svg": "SVG", "eps": "EPS", "png": "PNG", "tif": "TIFF"}
 SUFFIXES = {"pdf": ".pdf", "svg": ".svg", "eps": ".eps", "png": ".png", "tif": ".tif"}
 RASTER_FORMATS = ("png", "tif")
-UNIT_TEXT = {Unit.CM1: "cm⁻¹", Unit.MEV: "meV", Unit.THZ: "THz"}
 
 # what any figure may be (beyond this the values are refused, not just warned about)
 SIZE_LIMITS_MM = (5.0, 1000.0)
@@ -62,7 +62,7 @@ class FigureContent:
 
 def auto_labels(kind: str, unit: Unit) -> tuple[str, str]:
     """The automatic (x, y) axis labels as shown to people (cm⁻¹ in Unicode)."""
-    energy = f"Energy ({UNIT_TEXT[Unit(unit)]})"
+    energy = energy_label(unit)
     return (FIELD_LABEL, energy) if kind == "map" else (energy, INTENSITY_LABEL)
 
 
