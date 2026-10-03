@@ -19,7 +19,7 @@ class Unit(StrEnum):
     THZ = "THz"
 
 
-# How many cm^-1 one unit corresponds to (values kept from the legacy code).
+# How many cm^-1 one unit corresponds to (fixed rounded values, so exports stay the same).
 CM1_PER_UNIT: dict[Unit, float] = {
     Unit.CM1: 1.0,
     Unit.MEV: 8.0656,
@@ -111,8 +111,8 @@ def axis_label(unit: Unit | str) -> str:
 def parse_axis_label(label: str) -> Unit | None:
     """Inverse of :func:`axis_label`: the unit in the parentheses of a header cell.
 
-    None for a cell without one (legacy tables); ValueError for a unit the app does not know,
-    so that its numbers are never read in another unit.
+    None for a cell without one (a table without a unit); ValueError for a unit the app does
+    not know, so that its numbers are never read in another unit.
     """
     match = _LABEL_RE.match(label)
     if match is None:

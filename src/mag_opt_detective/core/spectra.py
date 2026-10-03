@@ -119,7 +119,7 @@ def parse_field_label(label: str) -> float:
 def save_tsv(fmap: FieldMap, path: str | Path) -> None:
     """Write *fmap* as a tab-separated table (energy rows, field columns).
 
-    Format kept compatible with the legacy exports::
+    The format, which :func:`load_tsv` reads back::
 
         Energy (meV)<TAB>0.25T<TAB>0.50T ...
         12.5<TAB>1.001<TAB>0.998 ...
@@ -147,9 +147,9 @@ def file_errors(path: str | Path) -> Iterator[None]:
 
 
 def load_tsv(path: str | Path, default_unit: Unit | str = Unit.CM1) -> FieldMap:
-    """Read a table written by :func:`save_tsv` or by the legacy pandas exports.
+    """Read a table written by :func:`save_tsv`, or another one in its layout.
 
-    The first header cell may be empty (merged legacy exports); then *default_unit*
+    The first header cell may be empty (a table without a unit); then *default_unit*
     is assumed. Field values are parsed from column labels such as ``0.25T``; the columns
     are sorted by field and the rows by energy.
     """

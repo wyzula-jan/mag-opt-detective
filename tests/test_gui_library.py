@@ -34,7 +34,7 @@ def test_export_load_save_and_merge(window, sweep, tmp_path, monkeypatch, errors
     save_to(monkeypatch, tmp_path / "S1.csv")
     window.commands["export_table"].trigger()
     exported = tmp_path / "S1_Ratio.csv"
-    assert exported.read_text().startswith("Energy (meV)\t0.50T")  # legacy header
+    assert exported.read_text().startswith("Energy (meV)\t0.50T")  # unit, then the fields
     fmap = load_tsv(exported)
     assert fmap.unit is Unit.MEV
     np.testing.assert_allclose(fmap.energy, sweep["x"] / 8.0656)

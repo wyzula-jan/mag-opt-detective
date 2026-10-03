@@ -29,7 +29,7 @@ def dirac_interband(field: np.ndarray, velocity: float, delta: float, n_lines: i
     """Interband transitions L(-n) -> L(n+1) for n = 0 .. n_lines-1, in meV.
 
     Returns an array of shape ``(n_lines, field.size)``:
-    ``E = E_n + E_(n+1)`` (the formula of the legacy draft).
+    ``E = E_n + E_(n+1)``.
     """
     if velocity < 0 or delta < 0:
         raise ValueError("velocity and gap must not be negative")

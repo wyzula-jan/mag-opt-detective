@@ -114,9 +114,9 @@ def baseline_normalize(fmap: FieldMap, region: tuple[float, float]) -> FieldMap:
 def derivative(fmap: FieldMap, axis: Axis = Axis.ENERGY, physical: bool = False) -> FieldMap:
     """Gradient along *axis*.
 
-    By default the spacing is one sample (per data point), as in the legacy tool. With
-    *physical* the real axis values are used, giving d/dE per energy unit or d/dB per
-    tesla; non-uniform grids are handled to second order.
+    By default the spacing is one sample (per data point). With *physical* the real axis
+    values are used, giving d/dE per energy unit or d/dB per tesla; non-uniform grids are
+    handled to second order.
     """
     if fmap.values.shape[axis] < 2:
         return fmap.with_values(np.zeros_like(fmap.values))

@@ -119,8 +119,8 @@ class PointTable:
     def load_tsv(cls, path: str | Path, default_unit: Unit | str = Unit.CM1) -> PointTable:
         """Read a table written by :meth:`save_tsv`, converting the energies to cm^-1.
 
-        Legacy tables have an empty first header cell; their energies are taken to be
-        in *default_unit*. Two curves with one name are an error.
+        A table with an empty first header cell (no unit) has its energies in
+        *default_unit*. Two curves with one name are an error.
         """
         name = Path(path).name
         with file_errors(path):

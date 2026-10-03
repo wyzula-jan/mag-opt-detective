@@ -355,7 +355,7 @@ def test_golden_exports(golden_maps, name):
 
 
 def test_golden_points(golden_maps, tmp_path):
-    """The golden points file is a legacy one (meV, no unit in the header)."""
+    """The golden points file has no unit in its header (it is in meV)."""
     path = golden.GOLDEN_DIR / golden.POINTS
     expected = PointTable.load_tsv(path, default_unit=Unit.MEV)
     table = golden.points(golden_maps["Ratio"])  # cm-1
