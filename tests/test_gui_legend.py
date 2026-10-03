@@ -309,6 +309,17 @@ def test_a_drag_moves_the_legend_and_its_place_survives_zoom_and_resize(shown, q
     assert json.loads(legend(w).settings_value())["x"] == 1.0
 
 
+def test_a_click_on_the_legend_is_no_move(shown, qtbot):
+    w = shown
+    moves = []
+    legend(w).moved.connect(lambda: moves.append(legend(w).position()))
+    QTest.mouseClick(w.plots.map.view.viewport(), LEFT, PLAIN, legend_centre(w))
+    assert moves == [] and legend(w).position() == (0.0, 0.0)
+    start = legend_centre(w)
+    drag(qtbot, w, [start, start + QPoint(40, 30)])
+    assert len(moves) == 1 and moves[0] != (0.0, 0.0)
+
+
 def test_overlay_layers_stay_below_the_legend_in_their_order(shown):
     w = shown
     plot = w.plots.map

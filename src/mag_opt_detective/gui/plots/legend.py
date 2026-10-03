@@ -88,9 +88,9 @@ class PlotLegend(QGraphicsObject):
     """A draggable legend in the data area of *plot* (a ``pg.PlotItem``).
 
     It shows while it is switched on (:meth:`set_shown`) and has entries (:meth:`set_entries`).
-    :attr:`moved` fires when the user has dragged it, :attr:`shownChanged` when it is switched
-    on or off. Bound to the settings, it keeps ``{"shown", "x", "y"}`` (x, y: its place as
-    fractions of the free room, 0 = left / top, 1 = right / bottom).
+    :attr:`moved` fires when the user has dragged it elsewhere, :attr:`shownChanged` when it is
+    switched on or off. Bound to the settings, it keeps ``{"shown", "x", "y"}`` (x, y: its place
+    as fractions of the free room, 0 = left / top, 1 = right / bottom).
     """
 
     moved = Signal()
@@ -310,9 +310,11 @@ class PlotLegend(QGraphicsObject):
     def mouseReleaseEvent(self, event) -> None:
         if self._drag is None or event.button() != Qt.MouseButton.LeftButton:
             return
+        _press, top_left = self._drag
         self._drag = None
         self.setCursor(Qt.CursorShape.OpenHandCursor)
-        self.moved.emit()
+        if self._top_left() != top_left:  # a click that moved nothing is no move
+            self.moved.emit()
 
     def _under_region(self, scene_pos: QPointF) -> bool:
         """An ROI lies above the legend at *scene_pos*."""
