@@ -19,7 +19,7 @@ class Unit(StrEnum):
     THZ = "THz"
 
 
-# How many cm^-1 one unit corresponds to (fixed rounded values, so exports stay the same).
+# How many cm^-1 one unit corresponds to (kept fixed so exported numbers do not change).
 CM1_PER_UNIT: dict[Unit, float] = {
     Unit.CM1: 1.0,
     Unit.MEV: 8.0656,
