@@ -18,7 +18,7 @@ from typing import ClassVar
 
 import numpy as np
 import pyqtgraph as pg
-from pyqtgraph.graphicsItems.ROI import Handle
+from pyqtgraph.graphicsItems.ROI import Handle, MouseDragHandler
 from PySide6.QtCore import QObject, QPointF, Qt, Signal
 from PySide6.QtGui import QBrush, QColor, QPainter, QPainterPath, QPen, QPolygonF, QTransform
 from PySide6.QtWidgets import QGraphicsItem, QGraphicsPathItem
@@ -207,22 +207,26 @@ class EllipseRegionROI(_Styled, pg.EllipseROI):
 
 
 class PolygonROI(_Styled, pg.PolyLineROI):
-    """A closed polygon with a handle on each corner."""
+    """A closed polygon with a handle on each corner; a drag on an edge moves it all."""
 
     def __init__(self, corners, colors: Colors):
         self.colors = colors
         super().__init__(corners, closed=True, pen=_no_pen(), hoverPen=_no_pen())
+
+    def addSegment(self, h1, h2, index=None):
+        super().addSegment(h1, h2, index=index)
+        segment = self.segments[-1 if index is None else index]
+        segment.mouseDragHandler = MouseDragHandler(self)  # an edge takes drags, not moves
 
 
 # ---------------------------------------------------------------------- the region
 class Region(QObject):
     """The Detect region on a map plot: its ROI (in a :class:`Frame`) and outline.
 
-    :attr:`changed` fires on every step of an edit (to redraw), :attr:`finished` when an edit
-    ends; :attr:`started` when one begins.
+    :attr:`changed` fires on every step of an edit, :attr:`finished` when an edit ends (a
+    drag let go, a corner added or removed); :attr:`editing` is True in between.
     """
 
-    started = Signal()
     changed = Signal()
     finished = Signal()
 
@@ -373,7 +377,7 @@ class Region(QObject):
     # --- edits --------------------------------------------------------------------------
     def _on_started(self, _roi=None) -> None:
         self.editing = True
-        self.started.emit()
+        self.show_outline()
 
     def _on_changed(self, _roi=None) -> None:
         self.show_outline()

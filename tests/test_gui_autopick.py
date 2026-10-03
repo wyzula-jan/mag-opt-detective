@@ -6,7 +6,7 @@ import numpy as np
 import pyqtgraph as pg
 import pytest
 from PySide6.QtCore import QPoint, QPointF, QSettings, Qt
-from PySide6.QtGui import QWheelEvent
+from PySide6.QtGui import QPolygon, QWheelEvent
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
@@ -509,6 +509,19 @@ def test_a_loop_drawn_with_the_mouse_becomes_a_polygon(shown, qtbot):
     assert len(tool.candidates) == 1  # line1 only, as in the ellipse
     found = tool.candidates[0]
     np.testing.assert_allclose(found.energy, line1(found.field), atol=STEP)
+    view, before = w.plots.map.view, tool.target.box
+    corners = QPolygon([view.mapFromScene(h.scenePos()) for h in roi.getHandles()])
+    first, second = corners[0], corners[1]
+    normal = QPoint(second.y() - first.y(), first.x() - second.x())
+    normal *= 3.0 / math.hypot(normal.x(), normal.y())
+    edge = (first + second) / 2 + normal  # just beside an edge, outside the polygon
+    if corners.containsPoint(edge, Qt.FillRule.OddEvenFill):
+        edge -= 2 * normal
+    assert not corners.containsPoint(edge, Qt.FillRule.OddEvenFill)
+    drag(qtbot, viewport, [edge, edge + QPoint(15, 0), edge + QPoint(40, 0)])
+    (b0, b1), energies = tool.target.box  # a drag on an edge moves the polygon
+    assert b0 > before[0][0] + 0.1 and b1 > before[0][1] + 0.1
+    assert energies == pytest.approx(before[1], abs=1e-6)
 
 
 def test_a_region_on_a_map_with_uneven_fields(picked):
