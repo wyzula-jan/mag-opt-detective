@@ -302,7 +302,12 @@ def test_a_lost_release_does_not_keep_a_gesture_open(shown, qtbot):
         wheel(w, "map")  # the next wheel ends after a pause, the button counts as released
         qtbot.waitUntil(lambda: not w.view_ranges.in_gesture())
     app.applicationStateChanged.emit(Qt.ApplicationState.ApplicationActive)
-    QTest.mouseRelease(w.statusBar(), LEFT, PLAIN, QPoint(1, 1))  # Qt's button state
+
+    QTest.mousePress(viewport, LEFT, PLAIN, centre)
+    step(w, "map", dy=10.0)
+    QTest.mouseRelease(w.statusBar(), LEFT, PLAIN, QPoint(1, 1))  # released elsewhere
+    qtbot.waitUntil(lambda: not w.view_ranges.in_gesture())  # GESTURE_MS after the step
+    assert c.view.energy_range == pytest.approx(plot_range(w)[1])
 
 
 def test_saving_a_figure_during_a_zoom_saves_the_zoom(shown, qtbot, tmp_path, monkeypatch):

@@ -440,14 +440,18 @@ class ViewRanges(QObject):
         """True while a pan or zoom is not yet in the view state."""
         return self._pending is not None
 
+    def _holding(self) -> bool:
+        """A drag on a plot goes on: pressed there, and Qt still has a button down."""
+        return self._held and QApplication.mouseButtons() != Qt.MouseButton.NoButton
+
     def _on_idle(self) -> None:
-        if self._held:
+        if self._holding():
             self._idle.start()  # a drag held still: it ends on the release
             return
         self.finish()
 
     def _on_release(self) -> None:
-        if not self._held:
+        if not self._holding():
             self.finish()
 
     def _on_app_state(self, state: Qt.ApplicationState) -> None:
