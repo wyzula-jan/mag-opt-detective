@@ -269,7 +269,9 @@ class ViewRanges(QObject):
         self._idle = self._timer(self._on_idle)  # restarted on every step: the gesture ended
         self._viewports: set[QObject] = set()  # of the plots: their mouse releases end gestures
         self._sliders: dict[QObject, RangeControl] = {}
+        self._fields: set[QObject] = set()  # the number fields of the controls
         self._sliding: set[RangeControl] = set()  # controls whose slider is dragged or keyed
+        self._last: dict[RangeControl, Pair] = {}  # the range each control was given last
 
     def _timer(self, slot) -> QTimer:
         timer = QTimer(self)
@@ -335,6 +337,7 @@ class ViewRanges(QObject):
 
     def _show(self, control: RangeControl, fixed: Pair | None, data: Pair | None, note=None):
         _show(control, fixed, data, note, keep_extent=control in self._sliding)
+        self._last[control] = control.range()
 
     def refresh(self) -> None:
         """Put the ranges on the plots and into the controls; a pan or zoom in progress goes
@@ -372,7 +375,18 @@ class ViewRanges(QObject):
             self.c.set_ranges(stacked_range=None)
 
     def edit(self, **ranges: Pair | None) -> None:
-        """Set ranges from the controls (after a pan or zoom in progress)."""
+        """Set ranges from the controls, after a pan or zoom in progress. An end its control
+        still showed from before the last steps of that gesture (the end not edited) takes
+        the gesture's value."""
+        controls = self.page.controls()
+        for name, pair in ranges.items():
+            fresh = None if self._pending is None else self._pending.get(name)
+            shown = self._last.get(controls.get(name))
+            if pair is None or fresh is None or shown is None:
+                continue
+            merged = tuple(f if p == s else p for p, s, f in zip(pair, shown, fresh, strict=True))
+            if merged[0] < merged[1]:
+                ranges[name] = merged
         self.finish()
         self.c.set_ranges(**ranges)
 
@@ -437,10 +451,16 @@ class ViewRanges(QObject):
         self._viewports.add(viewport)
         viewport.installEventFilter(self)
 
-    def watch_slider(self, control: RangeControl) -> None:
-        """Keep the extent of *control*'s slider while it is dragged or moved with keys."""
+    def watch_control(self, control: RangeControl) -> None:
+        """Keep the extent of *control*'s slider while it is dragged or moved with keys; a
+        press on it or its number fields first puts a pan or zoom in progress into the state,
+        so that they show its ranges."""
         self._sliders[control.slider] = control
         control.slider.installEventFilter(self)
+        for spin in (control.lo_spin, control.hi_spin):
+            for field in (spin, spin.lineEdit()):
+                self._fields.add(field)
+                field.installEventFilter(self)
 
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:
         kind = event.type()
@@ -450,6 +470,7 @@ class ViewRanges(QObject):
         elif watched in self._sliders:
             control = self._sliders[watched]
             if kind in (QEvent.Type.MouseButtonPress, QEvent.Type.KeyPress):
+                self.finish()
                 self._sliding.add(control)
             elif control in self._sliding and (
                 kind in (QEvent.Type.MouseButtonRelease, QEvent.Type.FocusOut)
@@ -457,6 +478,11 @@ class ViewRanges(QObject):
             ):
                 self._sliding.discard(control)
                 QTimer.singleShot(0, self, self.refresh)  # the extent and other plots
+        elif watched in self._fields and kind in (
+            QEvent.Type.MouseButtonPress,
+            QEvent.Type.FocusIn,
+        ):
+            self.finish()
         return False
 
     def on_click(self, view: str, event) -> None:
@@ -596,7 +622,7 @@ def install(window) -> None:
     for name, control in page.controls().items():
         control.rangeEdited.connect(lambda lo, hi, n=name: ranges.edit(**{n: (lo, hi)}))
         control.autoRequested.connect(lambda n=name: ranges.edit(**{n: None}))
-        ranges.watch_slider(control)
+        ranges.watch_control(control)
 
     for view, plot in window.plots.items():
         plot.plot.vb.sigRangeChangedManually.connect(lambda _mask, v=view: ranges.on_manual(v))

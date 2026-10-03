@@ -222,6 +222,32 @@ def test_changes_during_a_gesture(shown, qtbot):
     assert c.view.field_range == (1.0, 2.0)
 
 
+def test_an_edit_during_a_zoom_takes_the_zoom_for_the_other_end(shown, qtbot):
+    w, c = shown, shown.controller
+    page = inspector_page(w, "view")
+    for _ in range(3):
+        wheel(w, "map")
+    field, energy = plot_range(w)
+    assert page.field.range() == (0.5, 2.0)  # the fields have not followed yet
+    page.field.lo_spin.setValue(1.0)  # typed within GESTURE_MS: the high end is the zoom's
+    assert not w.view_ranges.in_gesture()
+    assert c.view.field_range == pytest.approx((1.0, field[1]))
+    assert c.view.energy_range == pytest.approx(energy)  # the zoom went in first
+    assert page.field.range() == pytest.approx((1.0, field[1]))
+
+    for _ in range(2):
+        wheel(w, "map")
+    energy = plot_range(w)[1]
+    slider = page.energy.slider
+    y = slider.height() // 2
+    left = QPoint(round(slider.x_for(DATA_E[0])), y)
+    qtbot.mousePress(slider, LEFT, pos=left)  # the low handle to the start of the groove
+    assert not w.view_ranges.in_gesture()
+    assert c.view.energy_range == pytest.approx((DATA_E[0], energy[1]))
+    qtbot.mouseRelease(slider, LEFT, pos=left)
+    qtbot.waitUntil(lambda: plot_range(w, "stacked")[0] == pytest.approx(c.view.energy_range))
+
+
 def test_a_unit_switch_converts_a_zoom_in_progress(shown):
     w, c = shown, shown.controller
     page = inspector_page(w, "view")
