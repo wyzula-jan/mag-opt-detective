@@ -13,7 +13,7 @@ import logging
 from contextlib import contextmanager
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, QRectF, QSize, Qt, QTimer, Signal
+from PySide6.QtCore import QEvent, QRectF, QSignalBlocker, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QImage, QKeySequence, QPainter, QPen, QShortcut
 from PySide6.QtWidgets import (
     QDialog,
@@ -368,6 +368,8 @@ class ExportDialog(QDialog):
         self.colorbar_label.setAccessibleName("Colour bar label")
         self.models_row = SwitchRow("Model curves", "")
         self.models = self.models_row.switch
+        self._models_wanted = True  # the choice, kept while the switch is off and disabled
+        self.models.toggled.connect(self._on_models)
         self.points_row = SwitchRow("Picked points", "")
         self.points = self.points_row.switch
         self.points_scope = SegmentedControl(size="sm", expand=True)
@@ -565,6 +567,10 @@ class ExportDialog(QDialog):
             self.format.value(),
         )
 
+    def _on_models(self, checked: bool) -> None:
+        if self.models.isEnabled():  # the user's choice (not the switch turned off with it)
+            self._models_wanted = checked
+
     def content(self) -> FigureContent:
         points = self.points_scope.value() if self.points.isChecked() else POINTS_NONE
         return FigureContent(
@@ -623,6 +629,7 @@ class ExportDialog(QDialog):
                 if markers in (POINTS_CURRENT, POINTS_ALL):
                     self.points_scope.set_value(markers)
                 self.models.setChecked(True)
+                self._models_wanted = True
             self._changed()
         self.show()
         self.raise_()
@@ -775,7 +782,10 @@ class ExportDialog(QDialog):
         self.colorbar_row.description_label.setVisible(True)
         self.colorbar_label.setEnabled(can_bar and self.colorbar.isChecked())
 
-        self.models.setEnabled(not stacked and n_models > 0)
+        can_draw = not stacked and n_models > 0
+        self.models.setEnabled(can_draw)
+        with QSignalBlocker(self.models):  # off while nothing can be drawn, as its note says
+            self.models.setChecked(can_draw and self._models_wanted)
         if stacked:
             models_text = "Not drawn on stacked spectra"
         elif n_models:

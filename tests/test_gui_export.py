@@ -459,9 +459,16 @@ def test_stacked_figure_uses_the_trace_options(processed, qtbot):
     assert state.cmap == "plasma" and state.curves == []
     assert not state.colorbar  # traces not coloured by field: no field bar
     assert not dialog.colorbar.isEnabled() and not dialog.models.isEnabled()
+    assert not dialog.models.isChecked()  # shown off, as "Not drawn on stacked spectra" says
     assert dialog.colorbar_label.placeholderText() == "Magnetic field (T)"
     c.set_view(stacked_by_field=True)
     assert dialog.figure_state().colorbar and dialog.colorbar.isEnabled()
+    dialog.view.set_value("map")  # the choice for the map comes back
+    assert dialog.models.isEnabled() and dialog.models.isChecked()
+    dialog.models.setChecked(False)
+    dialog.view.set_value("stacked")
+    dialog.view.set_value("map")
+    assert not dialog.models.isChecked()
 
 
 def test_labels_are_kept_per_view(processed, qtbot):
