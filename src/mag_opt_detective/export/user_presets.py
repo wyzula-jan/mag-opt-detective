@@ -8,8 +8,9 @@ not part of it: the view, axis and colour bar labels, the panel letter, model cu
 and the values of a fixed colour range.
 
 A preset file is a JSON object ``{"content": ..., "version": 1, "presets": [...]}``. Files of a
-newer format version, and anything else that is not a valid preset, raise :class:`PresetError`
-with a message for people.
+newer format version, and anything else that is not a valid preset (including values beyond
+what any figure may be, ``SIZE_LIMITS_MM`` and the like), raise :class:`PresetError` with a
+message for people.
 """
 
 from __future__ import annotations
@@ -19,7 +20,14 @@ import json
 import math
 from dataclasses import dataclass, field
 
-from mag_opt_detective.export.presets import PRESETS
+from mag_opt_detective.export.presets import (
+    DPI_LIMITS,
+    FONT_LIMITS_PT,
+    LINE_LIMITS_PT,
+    MAX_PIXELS,
+    PRESETS,
+    SIZE_LIMITS_MM,
+)
 from mag_opt_detective.export.style import FigureStyle
 
 FORMAT_VERSION = 1
@@ -45,12 +53,17 @@ def clean_name(name) -> str:
     return name
 
 
-def _size(name: str, value) -> float:
+def _size(name: str, value, limits: tuple[float, float], unit: str) -> float:
+    """A number within *limits* (PresetError if it is not one)."""
     if isinstance(value, bool) or not isinstance(value, int | float):
         raise PresetError(f"{name} must be a number")
-    value = float(value)
-    if not (math.isfinite(value) and value > 0):
-        raise PresetError(f"{name} must be more than 0")
+    try:
+        value = float(value)
+    except OverflowError:
+        raise PresetError(f"{name} is too large") from None
+    lo, hi = limits
+    if not (math.isfinite(value) and lo <= value <= hi):
+        raise PresetError(f"{name} must be {lo:g}–{hi:g} {unit}, not {value:g}")
     return value
 
 
@@ -85,19 +98,25 @@ class UserPreset:
         if journal.free_size:
             if self.width:
                 raise PresetError(f"{journal.name} has no column {self.width!r}")
-            set_(self, "width_mm", _size("the width", self.width_mm))
+            set_(self, "width_mm", _size("the width", self.width_mm, SIZE_LIMITS_MM, "mm"))
         else:
             if self.width not in journal.widths_mm:
                 columns = ", ".join(journal.widths_mm)
                 raise PresetError(f"{journal.name} has no column {self.width!r} (use {columns})")
             set_(self, "width_mm", None)
-        for name, label in (
-            ("height_mm", "the height"),
-            ("font_pt", "the text size"),
-            ("line_pt", "the line width"),
-            ("dpi", "the resolution"),
+        for name, label, limits, unit in (
+            ("height_mm", "the height", SIZE_LIMITS_MM, "mm"),
+            ("font_pt", "the text size", FONT_LIMITS_PT, "pt"),
+            ("line_pt", "the line width", LINE_LIMITS_PT, "pt"),
+            ("dpi", "the resolution", DPI_LIMITS, "dpi"),
         ):
-            set_(self, name, _size(label, getattr(self, name)))
+            set_(self, name, _size(label, getattr(self, name), limits, unit))
+        width = self.width_mm if journal.free_size else journal.widths_mm[self.width]
+        pixels = width * self.height_mm * (self.dpi / 25.4) ** 2
+        if pixels > MAX_PIXELS:
+            raise PresetError(
+                f"at {self.dpi:g} dpi the image would have {pixels / 1e6:.0f} million pixels"
+            )
         if self.format not in FIGURE_FORMATS:
             raise PresetError(f"unknown file format {self.format!r}")
         if not isinstance(self.colorbar, bool):
@@ -178,11 +197,11 @@ def presets_to_json(presets: list[UserPreset]) -> str:
 
 def _document(text) -> list:
     """The list of presets of a preset file's JSON text (PresetError if it is not one)."""
-    if isinstance(text, bytes):
-        text = text.decode("utf-8")
     try:
+        if isinstance(text, bytes):
+            text = text.decode("utf-8")
         data = json.loads(text)
-    except ValueError as exc:
+    except (ValueError, TypeError, RecursionError) as exc:  # bad UTF-8 or JSON, deep nesting
         where = f" (line {exc.lineno})" if isinstance(exc, json.JSONDecodeError) else ""
         raise PresetError(f"not a presets file: the JSON cannot be read{where}") from None
     if not isinstance(data, dict) or not isinstance(data.get("presets"), list):

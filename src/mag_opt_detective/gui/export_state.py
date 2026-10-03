@@ -32,7 +32,19 @@ from mag_opt_detective.export import (
     robust_levels,
 )
 from mag_opt_detective.export.figure import FIELD_LABEL, INTENSITY_LABEL, MM_PER_INCH
-from mag_opt_detective.export.style import MAJOR_LENGTH, MINOR_LENGTH
+from mag_opt_detective.export.presets import (
+    DPI_LIMITS,
+    FONT_LIMITS_PT,
+    LINE_LIMITS_PT,
+    MAX_PIXELS,
+    SIZE_LIMITS_MM,
+)
+from mag_opt_detective.export.style import (
+    MAJOR_LENGTH,
+    MINOR_LENGTH,
+    TICK_LENGTH_LIMITS_PT,
+    TICK_WIDTH_LIMITS_PT,
+)
 from mag_opt_detective.export.user_presets import COLOUR_RANGES
 from mag_opt_detective.gui.controller import parse_level_key
 from mag_opt_detective.gui.display import energy_label
@@ -44,15 +56,6 @@ RANGE_WINDOW, RANGE_AUTO, RANGE_FIXED = COLOUR_RANGES
 FORMAT_LABELS = {"pdf": "PDF", "svg": "SVG", "eps": "EPS", "png": "PNG", "tif": "TIFF"}
 SUFFIXES = {"pdf": ".pdf", "svg": ".svg", "eps": ".eps", "png": ".png", "tif": ".tif"}
 RASTER_FORMATS = ("png", "tif")
-
-# what any figure may be (beyond this the values are refused, not just warned about)
-SIZE_LIMITS_MM = (5.0, 1000.0)
-FONT_LIMITS_PT = (1.0, 72.0)
-LINE_LIMITS_PT = (0.05, 10.0)
-DPI_LIMITS = (50.0, 2400.0)
-TICK_LENGTH_LIMITS_PT = (0.0, 20.0)
-TICK_WIDTH_LIMITS_PT = LINE_LIMITS_PT
-MAX_PIXELS = 120e6  # a larger image would need gigabytes of memory to draw
 
 
 # ---------------------------------------------------------------------- content

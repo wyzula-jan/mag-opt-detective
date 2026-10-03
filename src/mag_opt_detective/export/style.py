@@ -11,9 +11,13 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, field
 
+from mag_opt_detective.export.presets import LINE_LIMITS_PT
+
 TICK_DIRECTIONS: tuple[str, ...] = ("in", "out")
 COLORBAR_LOCATIONS: tuple[str, ...] = ("right", "top")
 MINOR_INTERVALS: tuple[int, int] = (2, 10)  # intervals between labelled ticks (AutoMinorLocator)
+TICK_LENGTH_LIMITS_PT = (0.0, 20.0)
+TICK_WIDTH_LIMITS_PT = LINE_LIMITS_PT
 
 # tick sizes that follow the text size and the line width (the presets' own look)
 MAJOR_LENGTH = 0.45  # × text size
@@ -21,15 +25,19 @@ MINOR_LENGTH = 0.25  # × text size
 MINOR_WIDTH = 0.75  # × major tick width
 
 
-def _length(name: str, value) -> float | None:
-    """A length in pt (None: automatic); ValueError if it is not a number of 0 or more."""
+def _size(name: str, value, limits: tuple[float, float]) -> float | None:
+    """A size in pt within *limits* (None: automatic); ValueError if it is not one."""
     if value is None:
         return None
     if isinstance(value, bool) or not isinstance(value, int | float):
         raise ValueError(f"{name} must be a number of pt, not {value!r}")
-    value = float(value)
-    if not (math.isfinite(value) and value >= 0):
-        raise ValueError(f"{name} must be 0 pt or more, not {value:g}")
+    try:
+        value = float(value)
+    except OverflowError:
+        raise ValueError(f"{name} is too large") from None
+    lo, hi = limits
+    if not (math.isfinite(value) and lo <= value <= hi):
+        raise ValueError(f"{name} must be {lo:g}–{hi:g} pt, not {value:g}")
     return value
 
 
@@ -38,10 +46,11 @@ class TickStyle:
     """Ticks of the axes; the colour bar follows their direction and size.
 
     *direction* is "in" or "out"; *mirror* repeats the ticks on the top and right axes
-    (without labels). Lengths and the width are in pt; None follows the text size (major
-    0.45×, minor 0.25×) and the line width. *minor* adds unlabelled ticks that split each
-    step between labelled ticks into *minor_intervals* parts; minor ticks are 0.75× as wide.
-    The colour bar gets no minor ticks and no mirrored ticks (its outline frames it).
+    (without labels). Lengths (0–20 pt) and the width (0.05–10 pt) are in pt; None follows
+    the text size (major 0.45×, minor 0.25×) and the line width. *minor* adds unlabelled ticks
+    that split each step between labelled ticks into *minor_intervals* parts; minor ticks are
+    0.75× as wide. The colour bar gets no minor ticks and no mirrored ticks (its outline frames
+    it).
     """
 
     direction: str = "out"
@@ -54,22 +63,20 @@ class TickStyle:
 
     def __post_init__(self) -> None:
         if self.direction not in TICK_DIRECTIONS:
-            raise ValueError(f"tick direction must be one of {TICK_DIRECTIONS}")
+            raise ValueError(f"the tick direction must be one of {TICK_DIRECTIONS}")
         for name in ("mirror", "minor"):
             if not isinstance(getattr(self, name), bool):
                 raise ValueError(f"{name} must be true or false")
-        object.__setattr__(self, "length_pt", _length("tick length", self.length_pt))
-        object.__setattr__(
-            self, "minor_length_pt", _length("minor tick length", self.minor_length_pt)
-        )
-        width = _length("tick width", self.width_pt)
-        if width == 0:
-            raise ValueError("tick width must be more than 0 pt")
-        object.__setattr__(self, "width_pt", width)
+        for name, label, limits in (
+            ("length_pt", "the tick length", TICK_LENGTH_LIMITS_PT),
+            ("width_pt", "the tick width", TICK_WIDTH_LIMITS_PT),
+            ("minor_length_pt", "the minor tick length", TICK_LENGTH_LIMITS_PT),
+        ):
+            object.__setattr__(self, name, _size(label, getattr(self, name), limits))
         lo, hi = MINOR_INTERVALS
         n = self.minor_intervals
         if isinstance(n, bool) or not isinstance(n, int) or not lo <= n <= hi:
-            raise ValueError(f"minor intervals must be a whole number from {lo} to {hi}")
+            raise ValueError(f"the minor intervals must be a whole number from {lo} to {hi}")
 
     def major_length(self, font_pt: float) -> float:
         return MAJOR_LENGTH * font_pt if self.length_pt is None else self.length_pt

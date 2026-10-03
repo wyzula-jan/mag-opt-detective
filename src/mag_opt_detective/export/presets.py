@@ -8,6 +8,13 @@ from types import MappingProxyType
 
 PANEL_LABEL_STYLES: tuple[str, ...] = ("a", "(a)")
 
+# what any figure may be: values beyond these are refused, not only warned about
+SIZE_LIMITS_MM = (5.0, 1000.0)
+FONT_LIMITS_PT = (1.0, 72.0)
+LINE_LIMITS_PT = (0.05, 10.0)
+DPI_LIMITS = (50.0, 2400.0)
+MAX_PIXELS = 120e6  # a larger image would need gigabytes of memory to draw
+
 
 @dataclass(frozen=True, eq=False)
 class JournalPreset:

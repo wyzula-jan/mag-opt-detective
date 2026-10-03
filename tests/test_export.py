@@ -744,9 +744,13 @@ def test_style_checks_and_round_trip():
         dict(width_pt=0.0),
         dict(minor_length_pt=float("nan")),
         dict(mirror="yes"),
+        dict(length_pt=30.0),  # beyond what any figure may have (0-20 pt)
+        dict(width_pt=20.0),  # 0.05-10 pt
+        dict(length_pt=10**400),  # too large for a float
     ):
         with pytest.raises(ValueError):
             TickStyle(**bad)
+    assert TickStyle(length_pt=20, width_pt=0.05, minor_length_pt=0).length_pt == 20.0
     with pytest.raises(ValueError, match="colour bar"):
         FigureStyle("left")
     style = FigureStyle("top", TickStyle("in", True, 4.0, None, True, 5, 1.5))
@@ -823,6 +827,36 @@ def test_a_preset_without_some_settings_takes_the_journals():
             '{"name": "a", "journal": "nature"}]}',
             "used twice",
         ),
+        ("[" * 100_000, "cannot be read"),  # nested too deeply for the JSON reader
+        (b'{"version": 1, "presets": [{"name": "\xff"}]}', "cannot be read"),  # not UTF-8
+        (
+            '{"version": 1, "presets": [{"name": "A", "journal": "aps", "dpi": 1'
+            + "0" * 400
+            + "}]}",
+            "the resolution is too large",
+        ),
+        (
+            '{"version": 1, "presets": [{"name": "A", "journal": "aps", '
+            '"ticks": {"length_pt": 1' + "0" * 400 + "}}]}",
+            "the tick length is too large",
+        ),
+        (
+            '{"version": 1, "presets": [{"name": "A", "journal": "aps", "height_mm": 2000}]}',
+            "the height must be 5–1000 mm, not 2000",
+        ),
+        ('{"version": 1, "presets": [{"name": "A", "journal": "aps", "font_pt": 100}]}', "1–72 pt"),
+        ('{"version": 1, "presets": [{"name": "A", "journal": "aps", "line_pt": 20}]}', "line"),
+        ('{"version": 1, "presets": [{"name": "A", "journal": "aps", "dpi": 3000}]}', "50–2400"),
+        (
+            '{"version": 1, "presets": [{"name": "A", "journal": "custom", "width_mm": 1000, '
+            '"height_mm": 1000, "dpi": 2400}]}',
+            "million pixels",
+        ),
+        (
+            '{"version": 1, "presets": [{"name": "A", "journal": "aps", '
+            '"ticks": {"width_pt": 0.01}}]}',
+            "the tick width must be 0.05–10 pt",
+        ),
     ],
 )
 def test_bad_preset_files_are_refused_clearly(text, message):
@@ -836,8 +870,12 @@ def test_bad_preset_files_are_refused_clearly(text, message):
 
 def test_stored_presets_skip_the_bad_ones():
     good = _preset().to_dict()
-    text = json.dumps({"version": 1, "presets": [good, {"name": "Bad", "journal": "x"}, 3]})
+    huge = {**good, "name": "Huge", "dpi": 10**400}
+    wide = {**good, "name": "Wide", "journal": "custom", "width": "", "width_mm": 5000}
+    bad = [{"name": "Bad", "journal": "x"}, 3, huge, wide]
+    text = json.dumps({"version": 1, "presets": [good, *bad]})
     presets, problems = stored_presets(text)
-    assert [p.name for p in presets] == ["Thesis"] and len(problems) == 2
-    presets, problems = stored_presets("nonsense")
-    assert presets == [] and "cannot be read" in problems[0]
+    assert [p.name for p in presets] == ["Thesis"] and len(problems) == 4
+    for nonsense in ("nonsense", "[" * 100_000, b"\xff\xfe", '{"version": 9, "presets": []}'):
+        presets, problems = stored_presets(nonsense)
+        assert presets == [] and len(problems) == 1
