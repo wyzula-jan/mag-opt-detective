@@ -497,7 +497,10 @@ class FolderWatcher(QObject):
             self.stop()
 
     def _report_skips(self) -> None:
-        """Report the files left out since the last report, in one message."""
+        """Report the files left out since the last report, in one message; while an update
+        waits for the gap, after it (its new map would close the message at once)."""
+        if self._hold.isActive():
+            return
         skips, self._skips = self._skips, []
         if not skips:
             return
@@ -507,7 +510,8 @@ class FolderWatcher(QObject):
 
     def _unexpected(self, what: str, exc: BaseException) -> None:
         logger.exception("Watched folder: the %s failed", what)
-        self._set_note(f"The {what} failed ({exc!r}); see the log", PROBLEM, f"{what} failed")
+        error = f"{type(exc).__name__}: {exc}" if str(exc) else type(exc).__name__
+        self._set_note(f"The {what} failed: {error}; see the log", PROBLEM, f"{what} failed")
 
     # --- updates ----------------------------------------------------------------------------
     def _has_queued(self) -> bool:
@@ -539,6 +543,7 @@ class FolderWatcher(QObject):
     def _run(self) -> None:
         new, gone, changed = self._queued
         self._queued = ([], [], False)
+        self._hold.stop()
         self._busy = True
         try:
             self._update(new, gone, changed)
@@ -552,6 +557,7 @@ class FolderWatcher(QObject):
 
     def _update(self, new: list[str], gone: list[str], changed: bool) -> None:
         c = self.controller
+        gone = [p for p in gone if path_key(p) not in {path_key(n) for n in new}]  # back again
         files = c.processing.sample_files
         zero, field = split_zero(new)
         if not c.processing.custom_field:

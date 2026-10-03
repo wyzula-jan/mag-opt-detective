@@ -425,7 +425,7 @@ def test_a_failed_update_or_check_does_not_end_watching(
         patch.setattr(c, "process_update", boom)
         spectrum(tmp_path, 1.0)
         arrive(window, clock)
-    assert state_text(window).startswith("The update failed (RuntimeError('boom'))")
+    assert state_text(window).startswith("The update failed: RuntimeError: boom; see the log")
     assert chip(window).level() == watch.PROBLEM
     errors = [r for r in caplog.records if r.levelno >= logging.ERROR]
     assert [r.exc_info is not None for r in errors] == [True]  # in the Log, with its trace
@@ -439,7 +439,7 @@ def test_a_failed_update_or_check_does_not_end_watching(
         patch.setattr(c, "read_spectrum", boom)
         spectrum(tmp_path, 2.0)
         arrive(window, clock)
-    assert state_text(window).startswith("The check failed (RuntimeError('boom'))")
+    assert state_text(window).startswith("The check failed: RuntimeError: boom; see the log")
     assert watcher.interval() > 0
     arrive(window, clock)
     assert fields(window) == [0.5, 1.0, 1.5, 2.0]
@@ -673,6 +673,42 @@ def test_the_file_menu_watches_and_stops(window, tmp_path):
     assert fields(window) == [0.5]  # listed, not processed yet: processed at once
     action.trigger()
     assert not window.folder_watch.watching() and not action.isChecked()
+
+
+def test_a_file_gone_and_back_before_the_update_stays_listed(window, clock, tmp_path):
+    zero(tmp_path, old=True)
+    for b in (0.5, 1.0):
+        spectrum(tmp_path, b, old=True)
+    watcher = window.folder_watch
+    watcher.start(tmp_path)  # an update now: the next one waits for the gap
+    target = tmp_path / sweep_name(1.0)
+    os.remove(target)
+    watcher.check_now()  # gone, but the update waits (the clock stands still)
+    write_text(target, X, 1.3 * BASE)
+    arrive(window, clock)  # back before the update ran: one update with both
+    assert c_files(window) == [sweep_name(0.5), sweep_name(1.0)]
+    np.testing.assert_allclose(window.controller.result.data.values[:, -1], 1.3 * BASE)
+
+
+def test_files_left_out_are_reported_after_a_waiting_update(window, clock, tmp_path, monkeypatch):
+    monkeypatch.setattr(watch, "SETTLE_S", 0.5)
+    zero(tmp_path, old=True)
+    spectrum(tmp_path, 0.5, old=True)
+    watcher = window.folder_watch
+    watcher.start(tmp_path)  # an update now
+    (tmp_path / sweep_name(9.0)).write_text("garbage\n")
+    spectrum(tmp_path, 1.0)
+    watcher.check_now()
+    clock.now += 0.5  # both complete: the junk fails, the update for 1 T waits for the gap
+    watcher.check_now()
+    for _ in range(watch.MAX_FAILURES - 1):
+        clock.now += 0.1
+        watcher.check_now()  # the junk is left out while the update still waits
+    assert fields(window) == [0.5] and gui_helpers.infobar_text(window) == ""
+    clock.now += 0.5
+    watcher.check_now()  # the update runs, then the report (its map would close it)
+    assert fields(window) == [0.5, 1.0]
+    assert gui_helpers.infobar_text(window).startswith(f"Left out {sweep_name(9.0)}")
 
 
 # ---------------------------------------------------------------------- stopping
