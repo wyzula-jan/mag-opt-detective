@@ -8,6 +8,9 @@ frame's energy axis. :meth:`Region.polygon` gives the outline in plot coordinate
 energy in the display unit on y); the search builds its mask from that, on the map's own grid.
 The outline is drawn by the region itself (a dashed accent line on a halo, as the plain box),
 the ROI only draws its handles.
+
+A dropped ROI is deleted at once (see :func:`drop`): its items refer to each other, and left to
+Python's cycle collector their C++ destructors could call back into half-freed wrappers.
 """
 
 from __future__ import annotations
@@ -18,8 +21,9 @@ from typing import ClassVar
 
 import numpy as np
 import pyqtgraph as pg
+import shiboken6
 from pyqtgraph.graphicsItems.ROI import Handle, MouseDragHandler
-from PySide6.QtCore import QObject, QPointF, Qt, Signal
+from PySide6.QtCore import QObject, QPointF, Qt, QTimer, Signal
 from PySide6.QtGui import QBrush, QColor, QPainter, QPainterPath, QPen, QPolygonF, QTransform
 from PySide6.QtWidgets import QGraphicsItem, QGraphicsPathItem
 
@@ -117,6 +121,37 @@ def rubber_band(shape: str, points: Sequence[QPointF]) -> np.ndarray:
     if shape == ELLIPSE:
         return ellipse_points(x1 - x0, y1 - y0) + np.array([x0, y0])
     return np.array([(x0, y0), (x1, y0), (x1, y1), (x0, y1)])
+
+
+# ---------------------------------------------------------------------- dropping items
+def drop(items: Sequence[QGraphicsItem], scene=None) -> None:
+    """Delete graphics items taken off the map (with their children), now or, for a ROI that
+    pyqtgraph is still dragging (Esc or Process pressed mid-drag), when that drag ends.
+
+    *scene* (pyqtgraph's) forgets them as the items it last hovered, so that a click without a
+    mouse move does not go to a deleted item.
+    """
+    hover = getattr(scene, "lastHoverEvent", None)
+    if hover is not None:
+        hovered = [*hover.clickItems().values(), *hover.dragItems().values()]
+        hovered = [h for h in hovered if shiboken6.isValid(h)]
+        if any(item is h or item.isAncestorOf(h) for item in items for h in hovered):
+            scene.lastHoverEvent = None
+    for item in items:
+        if not shiboken6.isValid(item):
+            continue
+        handles = item.getHandles() if isinstance(item, pg.ROI) else []
+        if getattr(item, "isMoving", False) or any(h.isMoving for h in handles):
+            item.sigRegionChangeFinished.connect(
+                lambda *_args, item=item: QTimer.singleShot(0, lambda: _delete(item))
+            )
+        else:
+            _delete(item)
+
+
+def _delete(item: QGraphicsItem) -> None:
+    if shiboken6.isValid(item):
+        shiboken6.delete(item)
 
 
 def _path(polygon: np.ndarray) -> QPainterPath:
@@ -218,6 +253,16 @@ class PolygonROI(_Styled, pg.PolyLineROI):
         segment = self.segments[-1 if index is None else index]
         segment.mouseDragHandler = MouseDragHandler(self)  # an edge takes drags, not moves
 
+    def removeHandle(self, handle, updateSegments=True):
+        """Remove a corner, and delete it and the edge that went with it (once the signal
+        that asked for it has returned)."""
+        scene, segments = self.scene(), list(self.segments)
+        super().removeHandle(handle, updateSegments)
+        gone = [s for s in segments if s not in self.segments]
+        if isinstance(handle, Handle) and not handle.rois:
+            gone.append(handle)
+        QTimer.singleShot(0, lambda: drop(gone, scene))
+
 
 # ---------------------------------------------------------------------- the region
 class Region(QObject):
@@ -286,10 +331,11 @@ class Region(QObject):
                 roi.sigRegionChangeFinished,
             ):
                 signal.disconnect()
-            roi.setParentItem(None)
             scene = roi.scene()
+            roi.setParentItem(None)
             if scene is not None:
                 scene.removeItem(roi)
+            drop([roi], scene)
         self.hide_outline()
 
     def pixel_size(self) -> tuple[float, float]:

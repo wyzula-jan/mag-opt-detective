@@ -1,10 +1,12 @@
 """The Auto-pick tool: Track and Detect on the map, the preview, Accept/Discard, options, units."""
 
+import gc
 import math
 
 import numpy as np
 import pyqtgraph as pg
 import pytest
+import shiboken6
 from PySide6.QtCore import QPoint, QPointF, QSettings, Qt
 from PySide6.QtGui import QPolygon, QWheelEvent
 from PySide6.QtTest import QTest
@@ -522,6 +524,88 @@ def test_a_loop_drawn_with_the_mouse_becomes_a_polygon(shown, qtbot):
     (b0, b1), energies = tool.target.box  # a drag on an edge moves the polygon
     assert b0 > before[0][0] + 0.1 and b1 > before[0][1] + 0.1
     assert energies == pytest.approx(before[1], abs=1e-6)
+
+
+def pg_errors(monkeypatch) -> list[str]:
+    """The errors pyqtgraph reports (and otherwise only prints) while it handles events."""
+    reported: list[str] = []
+    monkeypatch.setattr(pg.debug, "printExc", lambda msg="", *a, **k: reported.append(msg))
+    return reported
+
+
+def test_dropped_regions_are_deleted_at_once(picked):
+    """A dropped region's items are deleted, not left to the garbage collector: collecting
+    several at once could crash (their C++ destructors call back into Python)."""
+    tool = picked.autopick
+    tool.bar.mode.set_value("detect")
+    loop = [(8 + 3 * np.cos(a), 1000 + 300 * np.sin(a)) for a in np.linspace(0, 6.3, 30)]
+    shapes = ["rect", "rotated", "ellipse", "polygon"]
+    for i in range(32):
+        tool.bar.shape.set_value(shapes[i % 4])
+        old = tool.region.roi
+        items = [] if old is None else [old, *old.getHandles(), *getattr(old, "segments", [])]
+        assert tool.draw_region(
+            loop if shapes[i % 4] == "polygon" else [(1.0, 400.0), (7.0, 900.0)]
+        )
+        assert not any(shiboken6.isValid(item) for item in items)  # replaced: deleted
+        if i % 3 == 0:
+            gc.collect()
+    old = tool.region.roi
+    tool.discard()
+    assert not shiboken6.isValid(old)
+    gc.collect()
+
+
+@pytest.mark.parametrize("how", ["escape", "process"])
+def test_dropping_a_region_while_it_is_dragged(shown, qtbot, monkeypatch, how):
+    """Esc or Process mid-drag drops the region; pyqtgraph finishes its drag without errors and
+    the region is deleted after it."""
+    w, tool = shown, shown.autopick
+    view, viewport = w.plots.map.view, w.plots.map.view.viewport()
+    reported = pg_errors(monkeypatch)
+    tool.bar.mode.set_value("detect")
+    tool.bar.shape.set_value("rotated")
+    tool.draw_region([(2.0, 500.0), (6.0, 800.0)])
+    roi = tool.region.roi
+    grab = view.mapFromScene(roi.getHandles()[0].scenePos())
+    QTest.mousePress(viewport, LEFT, PLAIN, grab)
+    for k in range(1, 4):
+        qtbot.wait(_move_pause_ms())
+        QTest.mouseMove(viewport, grab + QPoint(5 * k, -5 * k))
+    assert any(h.isMoving for h in roi.getHandles())
+    if how == "escape":
+        view.setFocus()
+        QTest.keyClick(view, Qt.Key.Key_Escape)
+    else:
+        process(w)
+    assert tool.region.roi is None and tool.target is None
+    assert shiboken6.isValid(roi)  # pyqtgraph still drags it
+    for k in range(4, 7):
+        qtbot.wait(_move_pause_ms())
+        QTest.mouseMove(viewport, grab + QPoint(5 * k, -5 * k))
+    QTest.mouseRelease(viewport, LEFT, PLAIN, grab + QPoint(30, -30))
+    qtbot.waitUntil(lambda: not shiboken6.isValid(roi), timeout=5000)
+    assert reported == [] and tool.target is None
+
+
+def test_a_click_after_esc_over_the_dropped_region(shown, qtbot, monkeypatch):
+    """The region under a still mouse is deleted by Esc; the next click goes elsewhere."""
+    w, tool = shown, shown.autopick
+    view, viewport = w.plots.map.view, w.plots.map.view.viewport()
+    reported = pg_errors(monkeypatch)
+    tool.bar.mode.set_value("detect")
+    tool.detect_in((2.0, 6.0), (500.0, 800.0))
+    roi = tool.region.roi
+    inside = _viewport_pos(w, 4.0, 650.0)
+    QTest.mouseMove(viewport, inside - QPoint(3, 0))
+    qtbot.wait(_move_pause_ms())
+    QTest.mouseMove(viewport, inside)  # hovers the region
+    qtbot.wait(_move_pause_ms())
+    view.setFocus()
+    QTest.keyClick(view, Qt.Key.Key_Escape)
+    assert not shiboken6.isValid(roi)
+    QTest.mouseClick(viewport, LEFT, PLAIN, inside)
+    assert reported == []
 
 
 def test_a_region_on_a_map_with_uneven_fields(picked):
