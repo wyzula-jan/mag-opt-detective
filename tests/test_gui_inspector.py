@@ -297,8 +297,24 @@ def test_unit_switch_converts_ranges_but_not_the_data(processed):
     assert c.view.stacked_offset == pytest.approx(0.002 * MEV)
     assert shown_range(w, "stacked")[1] == pytest.approx((-0.01 * MEV, 0.01 * MEV))
     select(w, axis="B")  # d/dB per T does not
+    c.set_ranges(stacked_range=(-0.03, 0.03))
     set_unit(w, "THz")
-    assert c.view.stacked_range == pytest.approx((-0.01 * MEV, 0.01 * MEV))
+    assert c.view.stacked_range == pytest.approx((-0.03, 0.03))
+
+
+def test_stacked_intensity_fits_again_for_another_kind_of_map(processed):
+    w, c = processed, processed.controller
+    pan(w, "stacked", dy=0.1)
+    fixed = c.view.stacked_range
+    set_unit(w, "meV")  # the same map in another unit keeps it
+    process(w)
+    assert c.view.stacked_range == fixed
+    select(w, order=1)  # a derivative is around 0, the ratio around 1
+    assert c.view.stacked_range is None
+    w.plot_area.set_current_view("stacked")
+    assert view_page(w).intensity.is_auto()
+    lo, hi = shown_range(w, "stacked")[1]
+    assert lo < map_values(w).min() < map_values(w).max() < hi
 
 
 def test_sections_follow_the_plot_on_screen(window):

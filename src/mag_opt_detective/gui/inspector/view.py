@@ -5,10 +5,11 @@ is fixed. Editing a range control, panning or zooming a plot, its menu, a double
 Fit tool change them through :meth:`AppController.set_ranges` /
 :meth:`~AppController.fit_ranges`, which redraw nothing: this module puts the ranges on the
 plots, also after every redraw, so they survive level drags and unit switches. The energy range
-is shared by all three plots, the field range by the map and the reference; a plot without data
-keeps nothing. This module also shows the inspector sections that belong to the plot on screen
-(``window.inspector_views``) and holds the number field and map cache the other inspector
-sections use.
+is shared by all three plots, the field range by the map and the reference. A plot without data
+keeps nothing, and a fixed stacked intensity range fits the data again when another kind of
+map (level key) is shown. This module also shows the inspector sections that belong to the
+plot on screen (``window.inspector_views``) and holds the number field and map cache the other
+inspector sections use.
 """
 
 from __future__ import annotations
@@ -223,6 +224,7 @@ class ViewRanges:
         self.c: AppController = window.controller
         self.maps: ShownMaps = window.shown_maps
         self._applied: dict[str, tuple[Pair, Pair]] = {}  # ranges put on the plots with data
+        self._key = self.c.selection.level_key
 
     # --- what is shown -----------------------------------------------------------------
     def effective(self) -> dict[str, tuple[Pair, Pair]]:
@@ -275,6 +277,13 @@ class ViewRanges:
             return
         self.apply()
         self.sync_controls()
+
+    def on_selection(self) -> None:
+        """Another level key: the stacked spectra have other intensities, so a fixed
+        intensity range fits them again."""
+        old, self._key = self._key, self.c.selection.level_key
+        if self._key != old and not self.c.is_restoring():
+            self.c.set_ranges(stacked_range=None)
 
     # --- user changes on the plots -----------------------------------------------------
     def on_manual(self, view: str) -> None:
@@ -426,6 +435,7 @@ def install(window) -> None:
         connect_menu(plot.plot.vb.menu, view, ranges)
 
     # after the plot area's redraw (connected earlier), which draws the stored ranges
+    c.selectionChanged.connect(ranges.on_selection)
     for signal in (c.resultChanged, c.selectionChanged, c.viewChanged, c.rangesChanged):
         signal.connect(ranges.refresh)
     c.unitChanged.connect(lambda _old, _new: ranges.refresh())
