@@ -263,7 +263,7 @@ def test_reference_mode_labels_shorten_when_narrow(window):
     assert ref.mode.button("separate").text() == "Separate sweep"
     ref.fit_width(200)
     assert ref.mode.button("separate").text() == "Separate"
-    assert ref.mode.button("self").text() == "Sample"
+    assert ref.mode.button("self").text() == "Self"
 
 
 # ---------------------------------------------------------------------- processing

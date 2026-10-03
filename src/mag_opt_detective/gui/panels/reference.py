@@ -32,7 +32,7 @@ MODES = (
     (ReferenceMode.SEPARATE, "Separate sweep", "Divide by a second, separately measured sweep"),
     (ReferenceMode.SELF, "The sample", "Divide the sweep by itself, smoothed"),
 )
-SHORT_LABELS = {ReferenceMode.SEPARATE: "Separate", ReferenceMode.SELF: "Sample"}
+SHORT_LABELS = {ReferenceMode.SEPARATE: "Separate", ReferenceMode.SELF: "Self"}
 HINTS = {
     ReferenceMode.NONE: "The sample ratio is used as measured.",
     ReferenceMode.SEPARATE: (
