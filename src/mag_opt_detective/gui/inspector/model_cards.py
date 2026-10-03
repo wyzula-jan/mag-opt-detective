@@ -361,15 +361,17 @@ class ZeemanEditor(QWidget):
         self.owner.edited(self.entry)
 
     def _on_m(self, index: int, value) -> None:
+        if float(value) == self.entry.model.branches[index].m:  # e.g. "1." typed after "1"
+            return
         ms.set_branch(self.entry, index, m=value)
-        self.owner.edited(self.entry)
+        self.owner.edited(self.entry, structure=True)  # a fit with the old m is void
 
     def _on_form(self, index: int) -> None:
         form = self.entry.model.branches[index].form
         new = Form.HYPERBOLIC if form is Form.LINEAR else Form.LINEAR
         ms.set_branch(self.entry, index, form=new)
         self.rows[index].form.set_form(new)
-        self.owner.edited(self.entry)
+        self.owner.edited(self.entry, structure=True)
 
     def _on_coupled(self, on: bool) -> None:
         self.entry.model.set_coupled(on)
@@ -505,7 +507,7 @@ class ExpressionEditor(QWidget):
 
     def _on_unit(self, value: str) -> None:
         ms.set_output_unit(self.entry, value)
-        self.owner.edited(self.entry)
+        self.owner.edited(self.entry, structure=True)  # the fitted values were in the old unit
 
     def _on_value(self, name: str, value) -> None:
         ms.params(self.entry)[name].value = float(value)

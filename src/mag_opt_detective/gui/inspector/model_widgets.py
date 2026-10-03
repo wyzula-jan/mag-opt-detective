@@ -115,14 +115,22 @@ class NumberField(UnitField):
         return self.edit.text()
 
     def set_value(self, value: float | None) -> None:
-        """Show *value* without emitting (None or an infinite bound shows empty)."""
+        """Show *value* without emitting (None or an infinite bound shows empty).
+
+        Text that already reads as *value* stays as typed (e.g. "1." while typing "1.5").
+        """
         valid = value is not None and math.isfinite(value)
         self._value = float(value) if valid else None
-        text = "" if not valid else self._format(value)
+        ok, shown = self._parse(self.edit.text())
+        if not (ok and shown == self._value):
+            self._show(self._value)
+        self.set_invalid(False)
+
+    def _show(self, value: float | None) -> None:
+        text = "" if value is None else self._format(value)
         if text != self.edit.text():
             with QSignalBlocker(self.edit):
                 self.edit.setText(text)
-        self.set_invalid(False)
 
     def _format(self, value: float) -> str:
         return str(round(value)) if self._integer else f"{value:.{self._digits}g}"
@@ -148,7 +156,7 @@ class NumberField(UnitField):
 
     def _tidy(self) -> None:
         if not self.is_invalid():
-            self.set_value(self._value)
+            self._show(self._value)
 
 
 class _Slider(QSlider):

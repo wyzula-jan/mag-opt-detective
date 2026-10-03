@@ -419,6 +419,42 @@ def test_fit_a_custom_expression(window, sweep, tmp_path, errors):
     assert not errors
 
 
+def test_edits_that_change_a_model_drop_its_fit(window, sweep, tmp_path, errors):
+    load_sweep(window, sweep)
+    process(window)
+    field = np.linspace(0.5, 15.0, 30)
+    load_table(window, tmp_path, field, {"line": 30.0 + 2.0 * MU_B * field})  # meV
+    models = models_of(window)
+    entry = add(window, "custom")
+    card = card_of(window, entry)
+    card.editor.code.edit.setPlainText("E0 + g*muB*B")
+    card.fit_button.click()
+    area = card.fit_area
+    area.fit_button.click()
+    assert models.result(entry).values["E0"] == pytest.approx(30.0)
+    card.editor.unit.set_value("THz")  # the fit was in meV: its values mean nothing in THz
+    assert models.result(entry) is None and models.preview_data(entry) == []
+    assert area.results.isHidden()
+    area.apply_button.click()
+    assert ms.params(entry)["E0"].value == 1.0  # nothing stale was written
+
+    zeeman = add(window, "zeeman")
+    zcard = card_of(window, zeeman)
+    zcard.fit_button.click()
+    zarea = zcard.fit_area
+    zarea.fit_button.click()
+    assert models.result(zeeman) is not None
+    zcard.editor.rows[0].form.click()  # fitted as linear, now hyperbolic
+    assert models.result(zeeman) is None and zarea.results.isHidden()
+    zarea.fit_button.click()
+    zcard.editor.rows[0].m.edit.setText("1.")  # still m = 1: the fit stays
+    assert models.result(zeeman) is not None
+    zcard.editor.rows[0].m.edit.setText("1.5")
+    assert models.result(zeeman) is None and zeeman.model.branches[0].m == 1.5
+    assert zcard.editor.rows[0].m.text() == "1.5"  # the refresh keeps what is typed
+    assert not errors
+
+
 def test_a_long_fit_runs_in_the_background_and_can_be_cancelled(
     window, sweep, tmp_path, qtbot, monkeypatch, errors
 ):
@@ -459,6 +495,16 @@ def test_a_long_fit_runs_in_the_background_and_can_be_cancelled(
     qtbot.wait(20)  # the worker's signal arrives and is ignored
     assert isinstance(job.error, models_module.FitCancelled)
     assert models.result(entry) is None and area.error.isHidden()
+
+    release.clear()
+    area.fit_button.click()
+    job = models.jobs[entry]
+    card.editor.rows[0].form.click()  # a fit of the linear branch is void: it stops
+    assert not models.is_fitting(entry) and area.cancel_button.isHidden()
+    release.set()
+    qtbot.waitUntil(lambda: job.wait(0), timeout=5000)
+    qtbot.wait(20)
+    assert models.result(entry) is None
     assert not errors
 
 
