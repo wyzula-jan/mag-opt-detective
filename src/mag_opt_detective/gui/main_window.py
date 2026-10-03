@@ -16,7 +16,7 @@ import numpy as np
 import pyqtgraph as pg
 import scipy
 from PySide6 import __version__ as pyside_version
-from PySide6.QtCore import QEvent, QRect, QRectF, QSettings, QSize, Qt, Signal, qVersion
+from PySide6.QtCore import QEvent, QPointF, QRect, QRectF, QSettings, QSize, Qt, Signal, qVersion
 from PySide6.QtGui import (
     QAction,
     QActionGroup,
@@ -56,7 +56,7 @@ from mag_opt_detective import __version__
 from mag_opt_detective.core.processing import Axis
 from mag_opt_detective.core.units import Unit
 from mag_opt_detective.gui import console, export_menu, icons, licences, plot_panel
-from mag_opt_detective.gui.controller import AppController
+from mag_opt_detective.gui.controller import DATA_CHANGED, DATA_CURRENT, AppController
 from mag_opt_detective.gui.display import format_range, process_key, unit_text
 from mag_opt_detective.gui.inspector import colour, models, traces, view
 from mag_opt_detective.gui.kit import (
@@ -255,15 +255,21 @@ class _ProcessButton(_Button):
 
 
 class _RailButton(QToolButton):
-    """A rail button: icon above a short label; a dot marks a panel that needs attention."""
+    """A rail button: icon above a short label; a dot marks a panel that needs attention.
 
-    def __init__(self, icon: str, text: str, tooltip: str, parent=None):
+    *name* (default *text*) is the accessible name: the panel's full title under a short
+    label. A panel with data shows their state (:meth:`set_data_state`).
+    """
+
+    ICON_TOP = 9  # top of the icon: the stylesheet's 7 px padding and the style's 2 px margin
+
+    def __init__(self, icon: str, text: str, tooltip: str, name: str = "", parent=None):
         super().__init__(parent)
         self.setProperty("kit", "rail")
         self.setCheckable(True)
         self.setText(text)
         self.setToolTip(tooltip)
-        self.setAccessibleName(text)
+        self.setAccessibleName(name or text)
         self.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
         self.setIconSize(QSize(20, 20))
         self.setFixedWidth(58)
@@ -271,17 +277,51 @@ class _RailButton(QToolButton):
         if font.pointSizeF() > 0:
             font.setPointSizeF(font.pointSizeF() * 0.82)
         self.setFont(font)
+        self._icon_name = icon
+        self._tooltip = tooltip
         icons.set_icon(self, icon, "muted", on_color="accent")
         self.badge = False
+        self.data_state = ""  # none shown
 
     def set_badge(self, badge: bool) -> None:
         self.badge = badge
         self.update()
 
+    def set_data_state(self, state: str, text: str = "") -> None:
+        """Show the state of the panel's data (``AppController.data_state``): the outline
+        icon when ``"empty"``, the filled icon (the glyph on an accent tile) when
+        ``"current"``, the outline icon with the dot when ``"changed"``. *text* says it in
+        the tooltip and the accessible description ("<tooltip> – <text>")."""
+        self.data_state = state
+        if state == DATA_CURRENT:
+            icons.set_icon(self, self._icon_name, "accent-fg", fill="accent")
+        else:
+            icons.set_icon(self, self._icon_name, "muted", on_color="accent")
+        self.set_badge(state == DATA_CHANGED)
+        tooltip = f"{self._tooltip} – {text}" if text else self._tooltip
+        self.setToolTip(tooltip)
+        self.setAccessibleDescription(tooltip)
+
     def paintEvent(self, event) -> None:
         super().paintEvent(event)
         if self.badge:
-            _paint_dot(self, size=8.0)
+            self._paint_badge()
+
+    def _paint_badge(self) -> None:
+        """The dot on the icon's top-right corner, ringed in the button's background so it
+        stands off the glyph (the mockup's ``.rail .badge``)."""
+        tokens = current_tokens()
+        size, ring = 8.0, 2.0  # the dot inside its ring
+        centre = QPointF(self.width() / 2 + self.iconSize().width() / 2, self.ICON_TOP + 2)
+        side = size + ring  # the ring's pen is centred on the outline
+        rect = QRectF(centre.x() - side / 2, centre.y() - side / 2, side, side)
+        background = "accent-soft" if self.isChecked() else "hover" if self.underMouse() else ""
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(QPen(tokens[background or "sunken"], ring))
+        painter.setBrush(tokens["warn"])
+        painter.drawEllipse(rect)
+        painter.end()
 
 
 class _Pane(QWidget):
@@ -808,10 +848,13 @@ class MainWindow(QMainWindow):
         subtitle: str = "",
         rail_text: str | None = None,
     ) -> PanelPage:
-        """Add a rail button and its panel; returns the page (header and scrolling content)."""
+        """Add a rail button and its panel; returns the page (header and scrolling content).
+
+        The button reads *rail_text* (default *title*); its accessible name is *title*.
+        """
         page = PanelPage(title, subtitle, widget)
         self._side_stack.addWidget(page)
-        button = _RailButton(icon, rail_text or title, tooltip)
+        button = _RailButton(icon, rail_text or title, tooltip, title)
         button.clicked.connect(lambda _checked=False, n=name: self._on_rail(n))
         self._rail_layout.insertWidget(self._rail_layout.count() - 1, button)
         self.panels[name] = widget
@@ -823,7 +866,8 @@ class MainWindow(QMainWindow):
         return self._panel
 
     def rail_button(self, name: str) -> QToolButton:
-        """The rail button of panel *name*; its ``badge`` marks a panel that needs attention."""
+        """The rail button of panel *name*; its ``badge`` marks a panel that needs attention,
+        its ``set_data_state(state, text)`` shows the state of the panel's data."""
         return self._rail_buttons[name]
 
     def cursor_text(self) -> str:

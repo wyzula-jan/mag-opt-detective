@@ -1,8 +1,9 @@
 """Reference panel: the reference mode, the reference sweep's files and the smoothing.
 
 The sweep's files show only for a separate sweep; the custom field range only when the
-Sample panel uses one too. Smoothing is disabled without a reference. A Process in Separate
-mode without files says in a note that it showed the sample without a reference.
+Sample panel uses one too. Smoothing is disabled without a reference. The rail button
+("Ref") shows the state of the reference's data, and a Process in Separate mode without
+files says in a note that it showed the sample without a reference.
 """
 
 from __future__ import annotations
@@ -11,6 +12,7 @@ from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import QGridLayout, QWidget
 
 from mag_opt_detective.core.pipeline import ReferenceMode
+from mag_opt_detective.gui.controller import DATA_EMPTY
 from mag_opt_detective.gui.kit import SegmentedControl
 from mag_opt_detective.gui.panels.common import (
     Note,
@@ -26,7 +28,7 @@ from mag_opt_detective.gui.panels.common import (
     section_label,
 )
 from mag_opt_detective.gui.panels.files import FieldRangeInputs, SweepFilesBox
-from mag_opt_detective.gui.panels.sample import connect_files
+from mag_opt_detective.gui.panels.sample import connect_files, show_data_state, state_text
 
 MODES = (
     (ReferenceMode.NONE, "None", "No reference"),
@@ -143,6 +145,7 @@ def install(window) -> None:
         "Reference measurement",
         panel,
         SUBTITLES[c.processing.reference_mode],
+        rail_text="Ref",  # the whole word does not fit the rail
     )
     connect_files(window, panel.measurement, panel.field_range, "reference")
     WidthWatcher(page, lambda _width: panel.fit_width(content_width(page)))
@@ -182,6 +185,18 @@ def install(window) -> None:
     push()
     c.processingChanged.connect(pull)
     pull()
+
+    def describe(state: str) -> str:
+        """The reference's data state in words: a sweep's files, or the sample's (Self)."""
+        mode = c.processing.reference_mode
+        if mode is ReferenceMode.NONE:
+            return "none in use"
+        text = state_text(c, state)
+        if mode is ReferenceMode.SELF:
+            return f"the sample itself, {'no files yet' if state == DATA_EMPTY else text}"
+        return text
+
+    c.processingChanged.connect(show_data_state(window, "reference", describe))  # the mode
 
     def note_missing(note: str) -> None:
         """Process went on without the reference sweep: say so (not an error)."""

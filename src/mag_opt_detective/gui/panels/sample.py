@@ -2,10 +2,12 @@
 
 The panel follows ``controller.processing`` both ways: edits are pushed to the controller,
 and values set elsewhere (e.g. files opened with the toolbar's Open sweep) are shown here.
+The rail button shows the state of the sample's files (:func:`show_data_state`).
 """
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 
 from PySide6.QtGui import QAction, QKeySequence
@@ -13,7 +15,13 @@ from PySide6.QtWidgets import QWidget
 
 from mag_opt_detective.core.opus import is_opus_file
 from mag_opt_detective.core.readers import parse_field
-from mag_opt_detective.gui.controller import SweepFiles
+from mag_opt_detective.gui.controller import (
+    DATA_CHANGED,
+    DATA_CURRENT,
+    DATA_EMPTY,
+    AppController,
+    SweepFiles,
+)
 from mag_opt_detective.gui.kit import SegmentedControl
 from mag_opt_detective.gui.panels.common import (
     WidthWatcher,
@@ -31,6 +39,12 @@ NAMES_HINT = "Read from names like …_a01p250T.txt (1.25 T)."
 
 
 LABELS = {NAMES: ("From file names", "From names"), CUSTOM: ("Custom range", "Custom")}
+# the state of a sweep's files on its rail button (AppController.data_state)
+STATE_TEXTS = {
+    DATA_EMPTY: "no files",
+    DATA_CHANGED: "changed since last Process",
+    DATA_CURRENT: "processed",
+}
 
 
 def field_source_control() -> SegmentedControl:
@@ -112,6 +126,29 @@ def connect_files(window, box: SweepFilesBox, field_range: FieldRangeInputs, whi
     pull()
 
 
+def state_text(controller: AppController, state: str) -> str:
+    """How a rail button's tooltip words a data *state*."""
+    if state == DATA_CHANGED and controller.processed_at is None:
+        return "not processed yet"
+    return STATE_TEXTS[state]
+
+
+def show_data_state(window, part: str, text: Callable[[str], str]) -> Callable[[], None]:
+    """Show the controller's data state of *part* ("sample" or "reference") on its rail
+    button, worded by *text(state)*, whenever it changes; returns the function that shows it
+    (for other changes of the wording)."""
+    c = window.controller
+    button = window.rail_button(part)
+
+    def show(*_args) -> None:
+        state = c.data_state(part)
+        button.set_data_state(state, text(state))
+
+    c.dataStateChanged.connect(show)
+    show()
+    return show
+
+
 _opus_cache: dict[str, bool] = {}
 
 
@@ -155,6 +192,7 @@ def install(window) -> None:
     page = window.add_panel("sample", "Sample", "activity", "Sample files", panel)
     box = panel.measurement
     connect_files(window, box, panel.field_range, "sample")
+    show_data_state(window, "sample", lambda state: state_text(c, state))
     WidthWatcher(page, lambda _w: fit_segments(panel.field_source, LABELS, content_width(page)))
 
     def push_source() -> None:

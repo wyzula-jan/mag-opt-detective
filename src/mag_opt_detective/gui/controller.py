@@ -99,6 +99,10 @@ VIEW_RANGES = {
 CURVE_NAME = re.compile(r"[A-Za-z0-9_ .+-]{1,32}")  # names of picked-point curves
 MAX_FIELD_VALUES = 100_000  # of a custom field range
 
+# the state of the sample's or the reference's data (AppController.data_state): none loaded,
+# loaded but not processed as they are, or processed by the last Process as they are
+DATA_EMPTY, DATA_CHANGED, DATA_CURRENT = "empty", "changed", "current"
+DATA_PARTS = ("sample", "reference")
 NO_REFERENCE_FILES = "Reference sweep has no files – shown without reference."
 
 Curve = tuple[np.ndarray, np.ndarray]
@@ -425,6 +429,18 @@ class ProcessingState:
             changes["sg_window"], changes["sg_poly"] = default.sg_window, default.sg_poly
         return dataclasses.replace(self, **changes)
 
+    def data_options(self, part: str) -> tuple:
+        """The effective options that make the *part* ("sample" or "reference") of a result:
+        the sample's files and fields; the reference's mode, files, fields and smoothing."""
+        e = self.effective()
+        if part == "sample":
+            return e.sample_files, e.custom_field, e.sample_field
+        if part == "reference":
+            custom = e.custom_field and e.reference_mode is ReferenceMode.SEPARATE
+            fields = e.reference_files, custom, e.reference_field
+            return e.reference_mode, *fields, e.smooth, e.sg_window, e.sg_poly
+        raise ValueError(f"no data part {part!r}; use one of {DATA_PARTS}")
+
 
 @dataclass(frozen=True)
 class FigureState:
@@ -473,6 +489,7 @@ class AppController(QObject):
     selectionChanged = Signal()
     processingChanged = Signal()
     changedSinceProcess = Signal(bool)
+    dataStateChanged = Signal(str, str)  # "sample" or "reference", its new data_state
     # Process found no reference files in Separate mode and showed the sample without a
     # reference (a note, not an error; the log has it as a warning): the note
     referenceMissing = Signal(str)
@@ -496,6 +513,7 @@ class AppController(QObject):
         self._processing = ProcessingState()
         self._processed_with: ProcessingState | None = None
         self._changed = False
+        self._data_states = {part: DATA_EMPTY for part in DATA_PARTS}
         self._restoring = 0
         self.curve = "LL 1"
         self.new_table = False  # start a new point table with the next result
@@ -700,6 +718,40 @@ class AppController(QObject):
         if changed != self._changed:
             self._changed = changed
             self.changedSinceProcess.emit(changed)
+        for part in DATA_PARTS:
+            state = self.data_state(part)
+            if state != self._data_states[part]:
+                self._data_states[part] = state
+                self.dataStateChanged.emit(part, state)
+
+    def data_state(self, part: str) -> str:
+        """State of the *part*'s ("sample" or "reference") data: :data:`DATA_EMPTY` without
+        files, :data:`DATA_CURRENT` when the last Process used them and their options as they
+        are, :data:`DATA_CHANGED` when they were not processed yet or changed since.
+
+        The reference follows its sweep in Separate mode, the sample in Self mode (the sample
+        is its own reference) and is empty in None mode. Library maps leave the states as they
+        are (they describe the last Process), and so does the unit.
+        """
+        p = self._processing
+        loaded = p.sample_files
+        if part == "reference":
+            mode = p.reference_mode
+            if mode is ReferenceMode.NONE:
+                return DATA_EMPTY
+            loaded = p.reference_files if mode is ReferenceMode.SEPARATE else loaded
+        elif part != "sample":
+            raise ValueError(f"no data part {part!r}; use one of {DATA_PARTS}")
+        if loaded == SweepFiles():
+            return DATA_EMPTY
+        used = self._processed_with
+        if used is None:
+            return DATA_CHANGED
+        parts = [part]
+        if part == "reference" and p.reference_mode is ReferenceMode.SELF:
+            parts.append("sample")  # the sample is the reference
+        same = all(used.data_options(each) == p.data_options(each) for each in parts)
+        return DATA_CURRENT if same else DATA_CHANGED
 
     def _range_error(self, what: str, rng: Range, panel: str) -> ValueError:
         lo, hi = convert_range(rng, Unit.CM1, self._unit)
