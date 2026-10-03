@@ -4,6 +4,16 @@ All notable changes to Magneto-Optical Detective, newest first. The format is ba
 Changelog, and the versions follow Semantic Versioning. `tools/release.py` writes each section
 from the commit messages when a version is released (see Releases in CONTRIBUTING.md).
 
+## 0.2.0 - 2026-10-03
+
+### Added
+
+- **gui:** a slider for every model parameter, including g, E₀, the couplings and the parameters of custom expressions. Sliders work in Range mode or in Relative mode, where a drag changes the value by up to ±1, 10 or 50 % and the handle springs back to the centre; one mode applies to all sliders and is switched from the Models section or a slider's context menu. Arrow keys nudge the value.
+
+### Changed
+
+- **gui:** the Models section puts every parameter on one aligned line (symbol, slider, value with its unit), gives the names of custom parameters their own column, and lines up the fit results in columns. g may be negative; sizes such as the half-gap, the velocity and the couplings stop at 0.
+
 ## 0.1.1 - 2026-10-03
 
 ### Fixed
