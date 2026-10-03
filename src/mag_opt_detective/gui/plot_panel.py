@@ -824,7 +824,7 @@ def install(window) -> None:
         "palette", "Slim colour bars instead of histograms", checkable=True
     )
     area.auto_scale_button = area.add_tool_button(
-        "zoom-in", "Auto-scale the histograms to the colour levels", checkable=True
+        "contrast", "Auto-scale the histograms to the colour levels", checkable=True
     )
     area.scales_button = area.add_tool_button(
         "eye", "Show or hide all colour scales", checkable=True
