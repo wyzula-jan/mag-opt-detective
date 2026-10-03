@@ -46,7 +46,7 @@ from mag_opt_detective.export import (
     save,
 )
 from mag_opt_detective.export.figure import FIELD_LABEL, INTENSITY_LABEL, figure_rc
-from mag_opt_detective.export.user_presets import FIGURE_FORMATS, stored_presets
+from mag_opt_detective.export.user_presets import FIGURE_FORMATS, read_stored
 
 MM = 25.4
 
@@ -869,17 +869,40 @@ def test_bad_preset_files_are_refused_clearly(text, message):
         presets_from_json(text)
 
 
-def test_stored_presets_skip_the_bad_ones():
+def test_stored_presets_keep_what_they_cannot_read():
     good = _preset().to_dict()
     huge = {**good, "name": "Huge", "dpi": 10**400}
     wide = {**good, "name": "Wide", "journal": "custom", "width": "", "width_mm": 5000}
-    bad = [{"name": "Bad", "journal": "x"}, 3, huge, wide]
+    twice = {**good, "name": "THESIS"}
+    bad = [{"name": "Bad", "journal": "x"}, 3, huge, wide, twice]
     text = json.dumps({"version": 1, "presets": [good, *bad]})
-    presets, problems = stored_presets(text)
-    assert [p.name for p in presets] == ["Thesis"] and len(problems) == 4
-    for nonsense in ("nonsense", "[" * 100_000, b"\xff\xfe", '{"version": 9, "presets": []}'):
-        presets, problems = stored_presets(nonsense)
-        assert presets == [] and len(problems) == 1
+    stored = read_stored(text)
+    assert [p.name for p in stored.presets] == ["Thesis"] and len(stored.problems) == 5
+    assert stored.kept == json.loads(text)["presets"][1:] and stored.newer is None
+    rewritten = json.loads(presets_to_json(stored.presets, stored.kept))
+    assert rewritten["presets"] == json.loads(text)["presets"]  # nothing lost
+    for nonsense in ("nonsense", "[" * 100_000, b"\xff\xfe", '{"presets": []}'):
+        stored = read_stored(nonsense)
+        assert stored.presets == stored.kept == [] and len(stored.problems) == 1
+        assert stored.newer is None
+    for newer in ('{"version": 9, "presets": []}', '{"version": 2, "styles": {}}'):
+        stored = read_stored(newer)
+        assert stored.newer == int(newer[12]) and stored.presets == stored.kept == []
+        assert "newer version" in stored.problems[0]
+
+
+def test_keys_this_version_does_not_know_are_written_back():
+    data = {
+        **_preset().to_dict(),
+        "legend": "upper right",  # e.g. a setting of a newer app
+        "ticks": {"direction": "out", "label_size_pt": 6},
+    }
+    (preset,) = presets_from_json(json.dumps({"version": 1, "presets": [data]}))
+    assert preset.style.ticks.direction == "out" and preset == _preset(style=preset.style)
+    renamed = dataclasses.replace(preset, name="Renamed").to_dict()
+    assert renamed["name"] == "Renamed" and renamed["legend"] == "upper right"
+    assert renamed["ticks"]["label_size_pt"] == 6  # kept beside the known tick settings
+    assert renamed["ticks"]["minor_intervals"] == 2
 
 
 @pytest.mark.filterwarnings("ignore:constrained_layout not applied")

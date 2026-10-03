@@ -5,6 +5,11 @@ renames, deletes, imports and exports them; names are typed in a row under the j
 in a dialog box. A preset is an :class:`~mag_opt_detective.export.UserPreset` (its checks and
 JSON format are Qt-free, in ``export.user_presets``), kept by a
 :class:`~mag_opt_detective.gui.export_menu.PresetStore`, which writes them as soon as they change.
+
+Nothing stored is lost to this version: stored presets it cannot read are written back
+unchanged with the others, and presets stored by a newer version of the app (in a newer format)
+are left alone: this version shows none of them and refuses to save, rename, delete or import
+presets, saying why.
 """
 
 from __future__ import annotations
@@ -29,12 +34,13 @@ from mag_opt_detective.export import PRESETS
 from mag_opt_detective.export.user_presets import (
     MAX_NAME,
     PresetError,
+    StoredPresets,
     UserPreset,
     clean_name,
     presets_from_json,
     presets_to_json,
+    read_stored,
     same_name,
-    stored_presets,
 )
 from mag_opt_detective.gui import icons
 from mag_opt_detective.gui.export_menu import PresetStore
@@ -135,6 +141,8 @@ class MyPresets(QObject):
         self.dialog = dialog
         self.store = store
         self._presets: list[UserPreset] = []
+        self._kept: list = []  # stored entries this version cannot read (written back)
+        self._newer: int | None = None  # format of presets stored by a newer app
         self._active: str | None = None
         self._naming: tuple[str, str] | None = None  # ("save", "") or ("rename", old name)
         self.preset_actions: dict[str, object] = {}
@@ -186,21 +194,38 @@ class MyPresets(QObject):
         """The user's preset whose settings the window shows, if any."""
         return self._active
 
+    def read_only(self) -> str:
+        """Why the stored presets may not be changed here ("" if they may)."""
+        if self._newer is None:
+            return ""
+        return (
+            f"Your presets were saved by a newer version of the app (format {self._newer}): "
+            "this version cannot read them and leaves them unchanged."
+        )
+
     def load(self) -> None:
-        """Read the stored presets; bad ones are skipped (and logged)."""
+        """Read the stored presets; those this version cannot read are kept (and logged)."""
         text = self.store.text
-        presets, problems = stored_presets(text) if text else ([], [])
-        for problem in problems:
-            logger.warning("Skipped a stored figure preset: %s", problem)
-        self._presets = sorted(presets, key=lambda p: p.name.casefold())
+        stored = read_stored(text) if text else StoredPresets()
+        for problem in stored.problems:
+            logger.warning("Kept a stored figure preset this version cannot read: %s", problem)
+        self._presets = sorted(stored.presets, key=lambda p: p.name.casefold())
+        self._kept = stored.kept
+        self._newer = stored.newer
         self.update_button()
+
+    def _writable(self) -> None:
+        if self.read_only():
+            raise ValueError(self.read_only())
 
     def _set(self, presets: list[UserPreset]) -> None:
         self._presets = sorted(presets, key=lambda p: p.name.casefold())
-        self.store.set_text(presets_to_json(self._presets) if self._presets else "")
+        anything = self._presets or self._kept
+        self.store.set_text(presets_to_json(self._presets, self._kept) if anything else "")
 
     def save(self, name: str) -> UserPreset:
         """Keep the window's style settings as the preset *name* (replacing one so called)."""
+        self._writable()
         preset = self.dialog.current_user_preset(name)
         others = [p for p in self._presets if not same_name(p.name, preset.name)]
         replaced = len(others) < len(self._presets)
@@ -221,6 +246,7 @@ class MyPresets(QObject):
 
     def rename(self, old: str, new: str) -> UserPreset:
         """Give the user's preset *old* the name *new*."""
+        self._writable()
         preset = self.preset(old)
         if preset is None:
             raise ValueError(f"there is no preset called {old!r}")
@@ -237,6 +263,7 @@ class MyPresets(QObject):
 
     def delete(self, name: str) -> None:
         """Forget the user's preset *name*."""
+        self._writable()
         preset = self.preset(name)
         if preset is None:
             raise ValueError(f"there is no preset called {name!r}")
@@ -249,6 +276,9 @@ class MyPresets(QObject):
     def import_file(self, path: str | Path | None = None) -> list[UserPreset]:
         """Add the presets of a preset file (those with a name in use replace the old ones);
         a file that cannot be read changes nothing and says why inline."""
+        if self.read_only():
+            self.dialog.show_note("err", self.read_only())
+            return []
         path = path or open_file(self.dialog, "Import figure presets", PRESET_FILTER)
         if not path:
             return []
@@ -326,7 +356,12 @@ class MyPresets(QObject):
         menu = self.menu
         menu.clear()
         self.preset_actions = {}
-        if not self._presets:
+        read_only = self.read_only()
+        if read_only:
+            newer = menu.addAction("Presets of a newer app version, kept unchanged")
+            newer.setEnabled(False)
+            newer.setToolTip(read_only)
+        elif not self._presets:
             empty = menu.addAction("No presets saved yet")
             empty.setEnabled(False)
         for preset in self._presets:
@@ -340,7 +375,8 @@ class MyPresets(QObject):
         active = self._active
         choose_first = "Choose one of your presets first"
         save = menu.addAction("Save as preset…")
-        save.setToolTip("Keep these settings under a name")
+        save.setToolTip(read_only or "Keep these settings under a name")
+        save.setEnabled(not read_only)
         icons.set_icon(save, "save", "muted")
         save.triggered.connect(lambda: self.start_naming("save"))
         rename = menu.addAction(f"Rename “{active}”…" if active else "Rename…")
@@ -354,7 +390,8 @@ class MyPresets(QObject):
         delete.triggered.connect(lambda: active and self.delete(active))
         menu.addSeparator()
         load = menu.addAction("Import presets…")
-        load.setToolTip("Add the presets of a file (.json)")
+        load.setToolTip(read_only or "Add the presets of a file (.json)")
+        load.setEnabled(not read_only)
         icons.set_icon(load, "upload", "muted")
         load.triggered.connect(lambda: self.import_file())
         write = menu.addAction("Export presets…")

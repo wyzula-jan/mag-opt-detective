@@ -11,6 +11,12 @@ A preset file is a JSON object ``{"content": ..., "version": 1, "presets": [...]
 newer format version, and anything else that is not a valid preset (including values beyond
 what any figure may be, ``SIZE_LIMITS_MM`` and the like), raise :class:`PresetError` with a
 message for people.
+
+Stored presets (:func:`read_stored`) lose nothing this version cannot read: a preset it cannot
+read is kept and written back unchanged (:func:`presets_to_json` with *kept*), as are the keys
+it does not know in the presets it reads (:attr:`UserPreset.source`). Presets stored in a newer
+format version are not written over at all (:attr:`StoredPresets.newer`). Only stored text that
+is no presets document at all is replaced.
 """
 
 from __future__ import annotations
@@ -43,6 +49,17 @@ class PresetError(ValueError):
     """A preset (or a preset file) that cannot be read; the message says why."""
 
 
+class NewerPresetsError(PresetError):
+    """Presets saved in a newer format *version* than this app reads and writes."""
+
+    def __init__(self, version: int):
+        self.version = version
+        super().__init__(
+            f"the presets were saved by a newer version of the app (format {version}); "
+            f"this version reads format {FORMAT_VERSION}"
+        )
+
+
 def clean_name(name) -> str:
     """*name* without surrounding spaces; PresetError if it is empty or too long."""
     if not isinstance(name, str) or not name.strip():
@@ -73,7 +90,8 @@ class UserPreset:
 
     *journal* is the key of the journal preset it is based on; *width* one of that journal's
     columns, or "" with *width_mm* for a free width (Custom). *colour_range* is one of
-    ``COLOUR_RANGES``.
+    ``COLOUR_RANGES``. *source* is the JSON object it was read from: :meth:`to_dict` writes the
+    keys this version does not know back unchanged (e.g. a setting a newer app added).
     """
 
     name: str
@@ -88,6 +106,7 @@ class UserPreset:
     colorbar: bool = True
     style: FigureStyle = field(default_factory=FigureStyle)
     colour_range: str = "window"
+    source: dict = field(default_factory=dict, compare=False, repr=False)
 
     def __post_init__(self) -> None:
         set_ = object.__setattr__
@@ -131,6 +150,9 @@ class UserPreset:
         return dataclasses.replace(other, name=self.name) == self
 
     def to_dict(self) -> dict:
+        return _merged(self.source, self._settings())
+
+    def _settings(self) -> dict:
         return {
             "name": self.name,
             "journal": self.journal,
@@ -177,7 +199,19 @@ class UserPreset:
             colorbar=data.get("colorbar", True),
             style=style,
             colour_range=data.get("colour_range", "window"),
+            source=data,
         )
+
+
+def _merged(source: dict, settings: dict) -> dict:
+    """*settings* over *source* (objects in both merged too): unknown keys stay as they are."""
+    merged = dict(source)
+    for key, value in settings.items():
+        old = source.get(key)
+        merged[key] = (
+            _merged(old, value) if isinstance(old, dict) and isinstance(value, dict) else value
+        )
+    return merged
 
 
 def same_name(a: str, b: str) -> bool:
@@ -185,12 +219,13 @@ def same_name(a: str, b: str) -> bool:
     return a.casefold() == b.casefold()
 
 
-def presets_to_json(presets: list[UserPreset]) -> str:
-    """A preset file (or stored settings) holding *presets*."""
+def presets_to_json(presets: list[UserPreset], kept: list | tuple = ()) -> str:
+    """A preset file (or stored settings) holding *presets*, then the *kept* entries (stored
+    ones this version could not read) unchanged."""
     document = {
         "content": CONTENT,
         "version": FORMAT_VERSION,
-        "presets": [preset.to_dict() for preset in presets],
+        "presets": [preset.to_dict() for preset in presets] + list(kept),
     }
     return json.dumps(document, indent=2, ensure_ascii=False) + "\n"
 
@@ -204,16 +239,14 @@ def _document(text) -> list:
     except (ValueError, TypeError, RecursionError) as exc:  # bad UTF-8 or JSON, deep nesting
         where = f" (line {exc.lineno})" if isinstance(exc, json.JSONDecodeError) else ""
         raise PresetError(f"not a presets file: the JSON cannot be read{where}") from None
+    version = data.get("version") if isinstance(data, dict) else None
+    known = isinstance(version, int) and not isinstance(version, bool)
+    if known and version > FORMAT_VERSION:  # checked first: a newer format may differ
+        raise NewerPresetsError(version)
     if not isinstance(data, dict) or not isinstance(data.get("presets"), list):
         raise PresetError("not a presets file: it has no list of presets")
-    version = data.get("version")
-    if isinstance(version, bool) or not isinstance(version, int) or version < 1:
+    if not known or version < 1:
         raise PresetError("not a presets file: it has no format version")
-    if version > FORMAT_VERSION:
-        raise PresetError(
-            f"the presets were saved by a newer version of the app (format {version}); "
-            f"this version reads format {FORMAT_VERSION}"
-        )
     return data["presets"]
 
 
@@ -234,20 +267,37 @@ def presets_from_json(text: str | bytes) -> list[UserPreset]:
     return presets
 
 
-def stored_presets(text: str | bytes) -> tuple[list[UserPreset], list[str]]:
-    """The readable presets of stored settings and the problems of the others (skipped)."""
+@dataclass(frozen=True)
+class StoredPresets:
+    """Stored presets as this version sees them: the *presets* it reads, the entries it cannot
+    read (*kept*, to be written back unchanged), what was wrong (*problems*), and the format
+    version of presets saved by a newer app (*newer*; then nothing may be written over them)."""
+
+    presets: list[UserPreset] = field(default_factory=list)
+    kept: list = field(default_factory=list)
+    problems: list[str] = field(default_factory=list)
+    newer: int | None = None
+
+
+def read_stored(text: str | bytes) -> StoredPresets:
+    """The stored presets of *text* (the settings store's preset file); never raises."""
     try:
         items = _document(text)
+    except NewerPresetsError as exc:
+        return StoredPresets(problems=[str(exc)], newer=exc.version)
     except PresetError as exc:
-        return [], [str(exc)]
-    presets: list[UserPreset] = []
-    problems: list[str] = []
+        return StoredPresets(problems=[str(exc)])
+    stored = StoredPresets()
     for data in items:
         try:
             preset = UserPreset.from_dict(data)
         except PresetError as exc:
-            problems.append(str(exc))
-            continue
-        if not any(same_name(preset.name, other.name) for other in presets):
-            presets.append(preset)
-    return presets, problems
+            problem = str(exc)
+        else:
+            if not any(same_name(preset.name, other.name) for other in stored.presets):
+                stored.presets.append(preset)
+                continue
+            problem = f"the name {preset.name!r} is used twice"
+        stored.problems.append(problem)
+        stored.kept.append(data)
+    return stored

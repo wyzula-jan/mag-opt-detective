@@ -1072,11 +1072,74 @@ def test_stored_presets_that_cannot_be_read_do_not_stop_the_window(qtbot, tmp_pa
     assert [p.name for p in dialog.my_presets.presets()] == ["New"]
 
 
+def stored_document(ini) -> dict:
+    return json.loads(QSettings(ini, QSettings.Format.IniFormat).value(PRESETS_KEY))
+
+
+def test_stored_presets_this_version_cannot_read_are_kept(qtbot, tmp_path, sweep, errors):
+    ini = str(tmp_path / "settings.ini")
+    bad = {"name": "From the future", "journal": "cell", "width": "single"}
+    good = {"name": "Mine", "journal": "nature", "legend": "upper right", "ticks": {"x": 1}}
+    text = json.dumps({"version": 1, "presets": [good, bad]})
+    QSettings(ini, QSettings.Format.IniFormat).setValue(PRESETS_KEY, text)
+    w = make_window(qtbot, ini, sweep)
+    dialog = open_export(w, qtbot)
+    assert [p.name for p in dialog.my_presets.presets()] == ["Mine"]
+    dialog.my_presets.save("New")
+    dialog.my_presets.rename("Mine", "Mine too")
+    entries = stored_document(ini)["presets"]
+    assert [e["name"] for e in entries] == ["Mine too", "New", "From the future"]
+    assert entries[2] == bad  # unchanged
+    assert entries[0]["legend"] == "upper right" and entries[0]["ticks"]["x"] == 1
+    for name in ("Mine too", "New"):
+        dialog.my_presets.delete(name)
+    assert stored_document(ini)["presets"] == [bad]
+    assert not errors
+
+
+@pytest.mark.parametrize(
+    "document",
+    [
+        {"version": 2, "presets": [{"name": "Two", "journal": "nature"}]},
+        {"version": 3, "styles": {"Three": {}}},  # a newer format may look different
+    ],
+)
+def test_presets_of_a_newer_version_are_left_alone(
+    qtbot, tmp_path, sweep, monkeypatch, document, no_dialogs
+):
+    ini = str(tmp_path / "settings.ini")
+    text = json.dumps(document)
+    QSettings(ini, QSettings.Format.IniFormat).setValue(PRESETS_KEY, text)
+    w = make_window(qtbot, ini, sweep)
+    dialog = open_export(w, qtbot)
+    presets = dialog.my_presets
+    assert presets.presets() == [] and "newer version of the app" in presets.read_only()
+    presets.fill_menu()
+    first = presets.menu.actions()[0]
+    assert first.text() == "Presets of a newer app version, kept unchanged"
+    assert not first.isEnabled()
+    assert not presets.menu_actions["save"].isEnabled()
+    assert not presets.menu_actions["import"].isEnabled()
+    with pytest.raises(ValueError, match="newer version"):
+        presets.save("Mine")
+    presets.start_naming("save")  # a name typed anyway is refused inline
+    presets.name_edit.setText("Mine")
+    presets.name_save.click()
+    assert presets.name_note.level() == "err" and "newer version" in presets.name_note.text()
+    path = tmp_path / "presets.json"
+    path.write_text(json.dumps({"version": 1, "presets": [{"name": "A", "journal": "aps"}]}))
+    assert presets.import_file(path) == []
+    assert "newer version" in dialog.messages.texts("err")[0]
+    w.close()
+    assert QSettings(ini, QSettings.Format.IniFormat).value(PRESETS_KEY) == text  # untouched
+
+
 def test_preset_store_reads_and_writes_its_key(tmp_path):
     ini = str(tmp_path / "settings.ini")
     settings = QSettings(ini, QSettings.Format.IniFormat)
     assert presets_text('{"version": 1, "presets": []}') and presets_text("")
-    for bad in ("not json", '{"presets": 3}', "[" * 100_000, 5, None):
+    assert presets_text('{"version": 9, "styles": {}}')  # a newer format: kept
+    for bad in ("not json", "[1, 2]", "[" * 100_000, 5, None):
         assert not presets_text(bad)
     store = PresetStore(settings)
     assert store.text == ""

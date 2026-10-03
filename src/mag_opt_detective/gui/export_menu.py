@@ -109,8 +109,8 @@ class ExportSettings:
 
 
 def presets_text(value) -> bool:
-    """Whether *value* can be the stored text of the presets: "" (none) or the JSON object of
-    a preset file (the presets themselves are checked when the export window reads them)."""
+    """Whether *value* can be the stored text of the presets: "" (none) or a JSON object (the
+    export window reads it: presets of a newer format may look different, and are kept)."""
     if not isinstance(value, str):
         return False
     if not value:
@@ -119,7 +119,7 @@ def presets_text(value) -> bool:
         data = json.loads(value)
     except (ValueError, RecursionError):
         return False
-    return isinstance(data, dict) and isinstance(data.get("presets"), list)
+    return isinstance(data, dict)
 
 
 class PresetStore:
