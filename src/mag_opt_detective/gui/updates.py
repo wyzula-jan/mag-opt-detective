@@ -5,7 +5,9 @@ version and replace the app, or update a source checkout with ``git pull && uv s
 day, a few seconds after the start, one anonymous request asks GitHub for the newest releases
 (:mod:`mag_opt_detective.updates`, on a worker thread); offline or on any error the automatic
 check stays silent. The app's start asks for that check (:meth:`UpdateChecker.check_at_startup`);
-windows in tests and the smoke test never check by themselves.
+windows in tests and the smoke test never check by themselves. The notice stays until the user
+closes it or uses one of its buttons: when the program closes the bar (Process, a new result)
+or shows another message on it, the notice comes back once the bar is free.
 
 Settings (``v2`` prefix): ``updates/check_at_startup`` (Help > Check for updates at startup),
 ``updates/last_check`` (ISO time of the last check), ``updates/skipped`` (the version skipped:
@@ -18,6 +20,7 @@ from __future__ import annotations
 import logging
 import sys
 import threading
+import time
 from collections.abc import Callable
 from concurrent.futures import Future
 from datetime import datetime
@@ -34,6 +37,8 @@ logger = logging.getLogger("mag_opt_detective")
 
 STARTUP_DELAY_MS = 4000  # after the start, so the check never slows it down
 POLL_MS = 100
+DEADLINE_S = 15.0  # a check GitHub has not answered by then fails (a trickling connection)
+AGAIN_MS = 250  # a notice the program closed comes back once the bar has been free this long
 AT_STARTUP_KEY = "updates/check_at_startup"
 LAST_CHECK_KEY = "updates/last_check"
 SKIPPED_KEY = "updates/skipped"
@@ -96,8 +101,14 @@ class UpdateChecker(QObject):
         self.startup_action: QAction = window.commands["check_updates_at_startup"]
         self._future: Future | None = None
         self._manual = False  # the check running was asked for: say how it ended
-        self._waiting: feed.Release | None = None  # a notice waiting for the bar to be free
-        window.infobar.closed.connect(self._show_waiting)
+        self._started = 0.0  # time.monotonic() at the start of the running check
+        self._notice: feed.Release | None = None  # offered until the user is done with it
+        self._again = QTimer(self)
+        self._again.setSingleShot(True)
+        self._again.setInterval(AGAIN_MS)  # a burst of closes (a live baseline) shows it once
+        self._again.timeout.connect(self._show_again)
+        window.infobar.closed.connect(self._closed)
+        window.infobar.closedByUser.connect(self._closed_by_user)
         self._startup = QTimer(self)
         self._startup.setSingleShot(True)
         self._startup.timeout.connect(self._check_automatically)
@@ -192,17 +203,19 @@ class UpdateChecker(QObject):
 
         # a daemon thread: a request still waiting for its timeout never holds up the exit
         threading.Thread(target=run, name="update-check", daemon=True).start()
-        self._future = future
+        self._future, self._started = future, time.monotonic()
         self._poll_timer.start()
 
     def _poll(self) -> None:
         future = self._future
-        if future is None or not future.done():
+        late = time.monotonic() - self._started > DEADLINE_S
+        if future is None or not (future.done() or late):
             return
         self._poll_timer.stop()
         self._future, manual, self._manual = None, self._manual, False
-        exc = future.exception()
-        if exc is None:
+        if not future.done():  # its thread ends by itself; its answer is dropped
+            self._failed(f"GitHub did not answer within {DEADLINE_S:g} s", manual)
+        elif (exc := future.exception()) is None:
             self._show_result(future.result(), manual)
         elif isinstance(exc, feed.UpdateCheckError):
             self._failed(str(exc), manual)
@@ -219,9 +232,9 @@ class UpdateChecker(QObject):
 
     def _show_result(self, releases: list[feed.Release], manual: bool) -> None:
         release = feed.update_for(releases, self.current(), self.channel())
-        self._waiting = None
         bar = self.window.infobar
         if release is None:
+            self._notice = None
             logger.info("Checked for updates: %s is the newest version.", self.version)
             if manual:
                 bar.show_message("info", f"You have the newest version ({self.version})", NEWEST)
@@ -229,15 +242,26 @@ class UpdateChecker(QObject):
         logger.info("Version %s is available (this is %s).", release.version, self.version)
         if not manual and self._is_skipped(release):
             return
+        self._notice = release
         if manual or bar.isHidden():
             self.show_notice(release)
-        else:  # never over another message: after it
-            self._waiting = release
+        # else never over another message: the notice follows when the bar closes
 
-    def _show_waiting(self) -> None:
-        release, self._waiting = self._waiting, None
-        if release is not None:
-            self.show_notice(release)
+    def _closed(self) -> None:
+        if self._notice is not None:
+            self._again.start()
+
+    def _closed_by_user(self) -> None:
+        """The user closed the notice, or used one of its buttons: done with it (another
+        message the user closed leaves it waiting)."""
+        notice = self._notice
+        if notice is not None and self.window.infobar.title_label.text() == self._title(notice):
+            self._notice = None
+            self._again.stop()
+
+    def _show_again(self) -> None:
+        if self._notice is not None and self.window.infobar.isHidden():
+            self.show_notice(self._notice)  # else after the message on the bar
 
     def _is_skipped(self, release: feed.Release) -> bool:
         try:
@@ -245,14 +269,23 @@ class UpdateChecker(QObject):
         except ValueError:  # none skipped
             return False
 
+    def _title(self, release: feed.Release) -> str:
+        return f"Version {release.version} is available (you have {self.version})"
+
+    def notice(self) -> feed.Release | None:
+        """The release offered until the user closes its notice or uses a button on it."""
+        return self._notice
+
     def show_notice(self, release: feed.Release) -> None:
         """The notice of *release* in the info bar: Download (the archive for this system in
-        an app bundle, else the release page), Release notes and Skip this version."""
+        an app bundle, else the release page), Release notes and Skip this version. It stays
+        offered (:meth:`notice`) until the user is done with it."""
+        self._notice = release
         frozen = getattr(sys, "frozen", False)
         download = release.download_url() if frozen else release.page
         self.window.infobar.show_message(
             "info",
-            f"Version {release.version} is available (you have {self.version})",
+            self._title(release),
             FROM_BUNDLE if frozen else FROM_SOURCE,
             actions=[
                 ("Download", lambda: open_release(self.window, download)),

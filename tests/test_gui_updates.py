@@ -2,14 +2,14 @@
 
 GitHub is never asked: each check reads a fake transport (the sample answer in
 ``tests/data/github_releases.json`` unless a test gives another), browsers are never opened
-(``QDesktopServices.openUrl`` is captured), and ``urlopen`` fails the test if anything calls it.
+(``QDesktopServices.openUrl`` is captured), and conftest's guard fails any test that tries to
+reach the network.
 """
 
 import io
 import json
 import sys
 import threading
-import urllib.request
 from datetime import datetime, timedelta
 from functools import partial
 from pathlib import Path
@@ -22,10 +22,10 @@ from PySide6.QtGui import QDesktopServices, QGuiApplication, QPalette
 from PySide6.QtWidgets import QApplication
 
 import gui_helpers
-from gui_helpers import infobar_text
+from gui_helpers import infobar_text, load_sweep, process
 from mag_opt_detective import app
 from mag_opt_detective import updates as feed
-from mag_opt_detective.gui import icons, theme, updates
+from mag_opt_detective.gui import icons, plot_panel, theme, updates
 from mag_opt_detective.gui.main_window import MainWindow
 from mag_opt_detective.gui.settings import PREFIX
 
@@ -35,17 +35,6 @@ SAMPLE = Path(__file__).parent / "data" / "github_releases.json"
 NOW = datetime(2026, 10, 3, 9, 30)
 PAGE = "https://github.com/wyzula-jan/mag-opt-detective/releases/tag/v0.3.0"
 ACTIONS = ["Download", "Release notes", "Skip this version"]
-
-
-@pytest.fixture(autouse=True)
-def no_network(monkeypatch):
-    """Any real request fails the test."""
-
-    def refuse(*_args, **_kwargs):
-        raise AssertionError("a test tried to reach the network")
-
-    monkeypatch.setattr(urllib.request, "urlopen", refuse)
-    monkeypatch.setattr(feed, "urlopen", refuse)
 
 
 @pytest.fixture
@@ -115,6 +104,11 @@ def button(w, text: str):
     return next(b for b in w.infobar.row_buttons() if b.text() == text)
 
 
+def notice_shown(w) -> bool:
+    bar = w.infobar
+    return not bar.isHidden() and bar.title_label.text().startswith("Version 0.3.0 is available")
+
+
 def help_menu(w):
     return next(a.menu() for a in w.menuBar().actions() if a.text() == "&Help")
 
@@ -152,9 +146,10 @@ def test_a_newer_version_shows_a_notice(qtbot, stored, opened):
     with qtbot.waitSignal(bar.closed):
         button(stored, "Release notes").click()
     assert opened == [PAGE] and bar.isHidden()
+    assert stored.updates.notice() is None  # used: done with it
     stored.updates.show_notice(feed.parse_releases(json.loads(SAMPLE.read_text()))[0])
     button(stored, "Download").click()  # run from source: the release page
-    assert opened == [PAGE, PAGE]
+    assert opened == [PAGE, PAGE] and stored.updates.notice() is None
 
 
 def test_a_link_no_browser_opens_is_reported(qtbot, stored, errors, monkeypatch):
@@ -325,12 +320,13 @@ def test_the_notice_waits_for_the_message_on_the_bar(qtbot, stored):
     stored.report_error("Process", "the reference sweep has no files", panel="reference")
     check(qtbot, stored, manual=False)
     assert infobar_text(stored).startswith("Can't process")  # not replaced
-    stored.infobar.close_button.click()
-    assert stored.infobar.title_label.text() == "Version 0.3.0 is available (you have 0.2.0)"
-    stored.infobar.close_button.click()
+    stored.infobar.close_button.click()  # the user closes the error: the notice follows
+    qtbot.waitUntil(lambda: notice_shown(stored))
+    stored.infobar.close_button.click()  # the user closes the notice: done for today
     stored.report_error("Process", "the reference sweep has no files", panel="reference")
     stored.infobar.close_button.click()
-    assert stored.infobar.isHidden()  # shown once
+    qtbot.wait(3 * updates.AGAIN_MS)
+    assert stored.infobar.isHidden() and stored.updates.notice() is None
 
     stored.updates.clock = lambda: NOW + timedelta(days=1)
     stored.report_error("Process", "the reference sweep has no files", panel="reference")
@@ -339,6 +335,49 @@ def test_the_notice_waits_for_the_message_on_the_bar(qtbot, stored):
     assert stored.infobar.title_label.text().startswith("Version 0.3.0 is available")
     stored.infobar.close_button.click()
     assert stored.infobar.isHidden()
+
+
+def test_only_the_user_closes_the_notice(qtbot, stored, sweep):
+    """Process (and any new result) closes the bar: the notice comes back once the bar is
+    free, also when it waited behind an error that Process closed."""
+    process(stored)  # no files yet: an error on the bar
+    assert infobar_text(stored).startswith("Can't process")
+    check(qtbot, stored, manual=False)
+    assert infobar_text(stored).startswith("Can't process")  # the notice waits
+    load_sweep(stored, sweep)
+    process(stored)  # closes the error
+    assert stored.controller.result is not None
+    qtbot.waitUntil(lambda: notice_shown(stored))
+    process(stored)  # closes the notice for a moment
+    assert stored.infobar.isHidden()
+    qtbot.waitUntil(lambda: notice_shown(stored))
+
+    stored.infobar.dismiss()  # the program closes it, then shows another message
+    stored.report_error("Process", "the reference sweep has no files", panel="reference")
+    qtbot.wait(3 * updates.AGAIN_MS)
+    assert infobar_text(stored).startswith("Can't process")  # never over another message
+    plot_panel.on_escape(stored)  # Escape in the window: the user closes the error
+    qtbot.waitUntil(lambda: notice_shown(stored))
+
+    plot_panel.on_escape(stored)  # and the notice: gone for the day
+    process(stored)
+    qtbot.wait(3 * updates.AGAIN_MS)
+    assert stored.infobar.isHidden() and stored.updates.notice() is None
+
+
+def test_a_trickling_answer_ends_the_check(qtbot, stored, monkeypatch):
+    monkeypatch.setattr(updates, "DEADLINE_S", 0.3)
+    gate = threading.Event()
+    answer(stored.updates, gate=gate)
+    try:
+        check(qtbot, stored)
+        assert infobar_text(stored) == "Can't check for updates: GitHub did not answer within 0.3 s"
+        assert not stored.updates.pending()
+        answer(stored.updates)  # the next check starts afresh
+        check(qtbot, stored)
+        assert notice_shown(stored)
+    finally:
+        gate.set()
 
 
 def test_a_check_still_running_when_the_window_closes_is_dropped(qtbot, ini):
