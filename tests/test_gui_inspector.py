@@ -237,6 +237,26 @@ def test_pan_or_zoom_on_an_empty_plot_keeps_the_ranges(shown, sweep, qtbot):
     assert shown_range(w, "map") == [(0.5, 2.0), (100.0, 1000.0)]
 
 
+def test_plot_menu_ranges_go_through_the_view_section(processed):
+    w, c = processed, processed.controller
+    page = view_page(w)
+    field, energy = w.plots.map.plot.vb.menu.ctrl
+    assert energy.autoPercentSpin.isHidden() and energy.visibleOnlyCheck.isHidden()
+    assert energy.autoPanCheck.isHidden() and not energy.invertCheck.isHidden()
+    energy.minText.setText("200")
+    energy.maxText.setText("800")
+    energy.maxText.editingFinished.emit()  # limits typed into the menu fix the axis
+    assert c.view.energy_range == (200.0, 800.0) and c.view.field_range is None
+    assert not page.energy.is_auto() and page.energy.range() == (200.0, 800.0)
+    energy.autoRadio.click()  # Auto fits the data again
+    assert c.view.energy_range is None and page.energy.is_auto()
+    assert shown_range(w, "map")[1] == (100.0, 1000.0)
+    field.autoRadio.click()  # already on Auto: the fitted range stays without padding
+    assert shown_range(w, "map")[0] == (0.5, 2.0)
+    field.manualRadio.click()  # Manual fixes the range shown
+    assert c.view.field_range == (0.5, 2.0) and not page.field.is_auto()
+
+
 def test_manual_ranges_survive_redraws(processed, sweep):
     w, c = processed, processed.controller
     pan(w, "map", dx=0.25, dy=-40.0)

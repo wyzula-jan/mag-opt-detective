@@ -1,13 +1,14 @@
 """View section: the field, energy and intensity ranges of the plots.
 
 The ranges live in ``controller.view`` (:class:`ViewState`); None fits the data (Auto), a pair
-is fixed. Editing a range control, panning or zooming a plot, double-clicking it or the Fit
-tool change them through :meth:`AppController.set_ranges` / :meth:`~AppController.fit_ranges`,
-which redraw nothing: this module puts the ranges on the plots, also after every redraw, so
-they survive level drags and unit switches. The energy range is shared by all three plots, the
-field range by the map and the reference; a plot without data keeps nothing. This module also
-shows the inspector sections that belong to the plot on screen (``window.inspector_views``) and
-holds the number field and map cache the other inspector sections use.
+is fixed. Editing a range control, panning or zooming a plot, its menu, a double-click or the
+Fit tool change them through :meth:`AppController.set_ranges` /
+:meth:`~AppController.fit_ranges`, which redraw nothing: this module puts the ranges on the
+plots, also after every redraw, so they survive level drags and unit switches. The energy range
+is shared by all three plots, the field range by the map and the reference; a plot without data
+keeps nothing. This module also shows the inspector sections that belong to the plot on screen
+(``window.inspector_views``) and holds the number field and map cache the other inspector
+sections use.
 """
 
 from __future__ import annotations
@@ -304,6 +305,18 @@ class ViewRanges:
         if vb.sceneBoundingRect().contains(event.scenePos()):
             self.c.fit_ranges(view)
 
+    def on_menu_auto(self, view: str, axis: int) -> None:
+        """Auto for one axis in the plot menu: that range fits the data again."""
+        if view in self._applied:
+            self.c.set_ranges(**{VIEW_RANGES[view][axis]: None})
+            self.apply()  # also when it was on Auto: the menu left pyqtgraph's auto-range on
+
+    def on_menu_manual(self, view: str, axis: int) -> None:
+        """Manual for one axis in the plot menu: the range shown becomes fixed."""
+        if view in self._applied:
+            lo, hi = self.window.plots[view].plot.vb.viewRange()[axis]
+            self.c.set_ranges(**{VIEW_RANGES[view][axis]: (float(lo), float(hi))})
+
 
 def _show(control: RangeControl, fixed: Pair | None, data: Pair | None, note=None) -> None:
     """Show *fixed* (or, on Auto, the *data* range) in *control*, with *data* as its extent."""
@@ -380,6 +393,19 @@ def _list(pair) -> list[float] | None:
 
 
 # ---------------------------------------------------------------------- install
+def connect_menu(menu, view: str, ranges: ViewRanges) -> None:
+    """Route the range entries of pyqtgraph's plot menu (*menu*: a ViewBoxMenu) through the
+    View section: Auto fits that axis, Manual and typed limits fix it. Its auto-range options
+    (percent, visible data, pan only) are hidden, as the View section's Auto replaces them."""
+    for axis, ui in enumerate(menu.ctrl):
+        for widget in (ui.autoPercentSpin, ui.visibleOnlyCheck, ui.autoPanCheck):
+            widget.hide()
+        ui.autoRadio.clicked.connect(lambda *_args, i=axis: ranges.on_menu_auto(view, i))
+        ui.manualRadio.clicked.connect(lambda *_args, i=axis: ranges.on_menu_manual(view, i))
+        for text in (ui.minText, ui.maxText):
+            text.editingFinished.connect(lambda: ranges.on_manual(view))
+
+
 def install(window) -> None:
     c = window.controller
     page = ViewPage()
@@ -397,6 +423,7 @@ def install(window) -> None:
         plot.plot.scene().sigMouseClicked.connect(lambda event, v=view: ranges.on_click(v, event))
         plot.plot.autoBtn.clicked.connect(lambda *_args, v=view: c.fit_ranges(v))
         plot.plot.vb.menu.viewAll.triggered.connect(lambda *_args, v=view: c.fit_ranges(v))
+        connect_menu(plot.plot.vb.menu, view, ranges)
 
     # after the plot area's redraw (connected earlier), which draws the stored ranges
     for signal in (c.resultChanged, c.selectionChanged, c.viewChanged, c.rangesChanged):
