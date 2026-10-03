@@ -502,6 +502,21 @@ def test_histogram_drag_recolours_the_map_live(processed):
     assert hist.centre.isVisible()
 
 
+def test_reference_levels_follow_the_symmetric_mode(window, sweep):
+    c = window.controller
+    load_sweep(window, sweep)
+    c.set_processing(reference_mode=ReferenceMode.SELF)
+    process(window)
+    window.plot_area.set_current_view("reference")
+    c.set_view(levels={}, level_modes={"Ratio": "sym"})  # symmetric, nothing kept yet
+    lo, hi = window.plots.reference.levels()
+    assert (lo + hi) / 2 == pytest.approx(1.0)
+    assert colour_page(window).fields.levels() == pytest.approx((lo, hi))
+    window.plots.reference.hist.region.setRegion((lo, hi + 0.1))  # one end: still symmetric
+    assert c.view.levels["Ratio"] == pytest.approx((lo - 0.1, hi + 0.1))
+    assert c.view.level_mode("Ratio") == "sym"
+
+
 def test_reference_tab_edits_the_reference_levels(window, sweep, errors):
     c = window.controller
     load_sweep(window, sweep)

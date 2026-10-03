@@ -524,12 +524,18 @@ class AppController(QObject):
         if mode is None:
             mode = FIXED_LEVELS
             if view.level_mode(key) == SYMMETRIC_LEVELS and centre is not None:
-                old = view.levels_for(key)
-                if old is None and key == self._selection.level_key and self.result is not None:
-                    old = self.current_levels()
-                mirrored = _mirrored(lo, hi, old, centre)
-                if mirrored is not None:
-                    mode, (lo, hi) = SYMMETRIC_LEVELS, mirrored
+                olds = [view.levels_for(key)]
+                if olds[0] is None:  # nothing kept: the levels of the map(s) drawn with key
+                    s = self._selection
+                    olds = [
+                        self.current_levels() if key == s.level_key else None,
+                        self.reference_levels() if key == level_key(s.reference_kind) else None,
+                    ]
+                for old in olds:
+                    mirrored = _mirrored(lo, hi, old, centre)
+                    if mirrored is not None:
+                        mode, (lo, hi) = SYMMETRIC_LEVELS, mirrored
+                        break
         if mode not in LEVEL_MODES:
             raise ValueError(f"unknown level mode {mode!r}")
         if not (math.isfinite(lo) and math.isfinite(hi) and lo < hi):
@@ -564,11 +570,22 @@ class AppController(QObject):
 
     def current_levels(self) -> tuple[float, float] | None:
         """Levels of the map shown, or None to autoscale (1st-99th percentile)."""
-        key = self._selection.level_key
+        return self._levels_to_draw(self._selection.level_key, self.current_map)
+
+    def reference_levels(self) -> tuple[float, float] | None:
+        """Levels of the reference map, or None to autoscale (1st-99th percentile)."""
+        key = level_key(self._selection.reference_kind)
+        return self._levels_to_draw(key, self.reference_map)
+
+    def _levels_to_draw(
+        self, key: str, get_map: Callable[[], FieldMap | None]
+    ) -> tuple[float, float] | None:
         levels = self._view.levels_for(key)
         symmetric = self._view.level_mode(key) == SYMMETRIC_LEVELS
         if levels is None and symmetric and self.result is not None:
-            levels = self._view.levels_in_effect(key, self.current_map().values)
+            fmap = get_map()
+            if fmap is not None:
+                levels = self._view.levels_in_effect(key, fmap.values)
         return levels
 
     def current_map(self) -> FieldMap:

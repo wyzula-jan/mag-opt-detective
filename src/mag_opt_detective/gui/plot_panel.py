@@ -465,7 +465,7 @@ def render_reference(window) -> None:
     view = c.view
     plot.set_map(
         fmap,
-        levels=view.levels_for(level_key(c.selection.reference_kind)),
+        levels=c.reference_levels(),
         cmap=view.colormap_for(0),
         x_range=view.field_range,
         y_range=view.energy_range,
