@@ -178,6 +178,24 @@ def test_version_1_values_are_ignored(qtbot, ini):
     assert w.controller.view.colormap == "Auto"
 
 
+@pytest.mark.parametrize(
+    ("ratio", "data", "kind"), [("false", "true", "Data"), ("true", "false", "Ratio")]
+)
+def test_the_reference_map_choice_of_two_buttons_is_kept(qtbot, ini, ratio, data, kind):
+    """Earlier versions stored the reference map choice as two buttons."""
+    raw = QSettings(ini, QSettings.Format.IniFormat)
+    raw.setValue(f"{PREFIX}/plot/reference_ratio", ratio)
+    raw.setValue(f"{PREFIX}/plot/reference_data", data)
+    raw.sync()
+    w = make_window(qtbot, ini)
+    assert w.controller.selection.reference_kind is PlotKind(kind)
+    assert w.plot_area.ref_kind.value() == kind
+    w.close()
+    stored = QSettings(ini, QSettings.Format.IniFormat)
+    assert stored.value(f"{PREFIX}/plot/reference_kind") == kind
+    assert stored.value(f"{PREFIX}/plot/reference_data") is None
+
+
 def test_reset_settings(qtbot, ini):
     w = make_window(qtbot, ini, show=True)
     w.toolbar.unit.set_value("THz")

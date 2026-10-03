@@ -44,7 +44,9 @@ from mag_opt_detective.gui.controller import (
 )
 from mag_opt_detective.gui.display import format_number, process_key, unit_text
 from mag_opt_detective.gui.kit import EmptyState, SegmentedControl, SlidePanel
+from mag_opt_detective.gui.kit._common import to_bool
 from mag_opt_detective.gui.plots import ColorMapPlot, PlotColors, StackedPlot, robust_levels
+from mag_opt_detective.gui.settings import PREFIX
 from mag_opt_detective.gui.theme import current_tokens
 from mag_opt_detective.gui.widgets import IMAGE_FILTER, CheckableSetting, Separator, save_file
 
@@ -758,6 +760,17 @@ def _set_mouse_mode(window, mode) -> None:
 
 
 # ---------------------------------------------------------------------- install
+def migrate_reference_kind(persistence) -> None:
+    """Keep a reference map choice stored as two buttons (R(B)/R(0) and Data) by earlier
+    versions as the one setting of the segmented control."""
+    data = to_bool(persistence.value("plot/reference_data"))
+    if data is not None and persistence.value("plot/reference_kind") is None:
+        kind = PlotKind.DATA if data else PlotKind.RATIO
+        persistence.set_value("plot/reference_kind", kind.value)
+    for key in ("plot/reference_ratio", "plot/reference_data"):
+        persistence.settings.remove(f"{PREFIX}/{key}")
+
+
 def install(window) -> None:
     """Build the plot area into the stage and wire it to the controller and the toolbar."""
     c = window.controller
@@ -878,6 +891,7 @@ def install(window) -> None:
     # settings
     p = window.persistence
     if p is not None:
+        migrate_reference_kind(p)
         p.bind("plot/scale_style_bar", area.scale_style_button)
         p.bind("plot/reference_kind", area.ref_kind)
         p.bind("export/type_suffix", CheckableSetting(window.commands["export_suffix"]))
