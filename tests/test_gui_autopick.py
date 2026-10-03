@@ -185,6 +185,7 @@ def test_track_says_why_a_click_finds_nothing(picked):
     assert status(w).startswith("No minimum within ±20 cm⁻¹ of the click at 4 T.")
     assert tool.bar.status.level() == "warn"
     assert len(preview(w)) == 2  # the click stays marked
+    assert tool.bar.prominence_edit.placeholderText().startswith("auto 0.")  # to lower it
 
 
 def test_track_rising_inflections_of_smoothed_spectra(picked):

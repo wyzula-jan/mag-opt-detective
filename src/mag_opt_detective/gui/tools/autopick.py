@@ -16,6 +16,7 @@ box); the wheel zooms and the middle button pans in both modes.
 from __future__ import annotations
 
 import contextlib
+import dataclasses
 import math
 from collections.abc import Iterator
 from dataclasses import dataclass
@@ -113,45 +114,55 @@ def auto_window(fmap: FieldMap) -> float:
     return float(f"{WINDOW_PART * span:.2g}") if span > 0 else 1.0
 
 
-def search(fmap: FieldMap, target: Target, options: Options) -> tuple[list[Track], float]:
-    """Tracks for *target* on *fmap* (display unit) and the prominence used.
+def _smoothing(options: Options) -> picking.Smoothing | None:
+    return (options.smooth, SG_ORDER) if options.smooth else None
 
-    ValueError when a click finds no line (see :func:`core.picking.track`).
-    """
-    unit = Unit(fmap.unit)
-    smooth = (options.smooth, SG_ORDER) if options.smooth else None
-    feature = options.feature
+
+def _energy_range(fmap: FieldMap, target: Target) -> tuple[float, float]:
+    assert target.box is not None
+    lo, hi = from_cm1(np.array(target.box[1]), fmap.unit)
+    return float(lo), float(hi)
+
+
+def prominence_for(fmap: FieldMap, target: Target, options: Options) -> float:
+    """The prominence a search uses: the typed one, else the automatic one of the map (Track)
+    or of the box (Detect)."""
+    if options.prominence is not None:
+        return options.prominence
+    smooth, feature = _smoothing(options), options.feature
+    if target.box is None:
+        return picking.auto_prominence(fmap, feature, smooth=smooth)
+    e_range = _energy_range(fmap, target)
+    return picking.auto_prominence(
+        fmap, feature, smooth=smooth, b_range=target.box[0], e_range=e_range
+    )
+
+
+def search(fmap: FieldMap, target: Target, options: Options) -> list[Track]:
+    """The lines for *target* on *fmap* (display unit); ValueError when a click finds no line
+    (see :func:`core.picking.track`)."""
+    smooth = _smoothing(options)
+    prominence = prominence_for(fmap, target, options)
     if target.seed is not None:
         b, e_cm1 = target.seed
-        e = float(from_cm1(e_cm1, unit))
-        prominence = options.prominence
-        if prominence is None:
-            prominence = picking.auto_prominence(fmap, feature, smooth=smooth)
+        e = float(from_cm1(e_cm1, fmap.unit))
         seed = (_clip(b, fmap.field), _clip(e, fmap.energy))  # a click on an edge pixel
         found = picking.track(
             fmap,
             seed,
-            feature,
+            options.feature,
             window=options.window,
             smooth=smooth,
             prominence=prominence,
             max_misses=TRACK_MISSES,
             history=HISTORY,
         )
-        return [found], prominence
-    assert target.box is not None
-    b_range = target.box[0]
-    e_range = tuple(float(v) for v in from_cm1(np.array(target.box[1]), unit))
-    prominence = options.prominence
-    if prominence is None:
-        prominence = picking.auto_prominence(
-            fmap, feature, smooth=smooth, b_range=b_range, e_range=e_range
-        )
-    found = picking.detect(
+        return [found]
+    return picking.detect(
         fmap,
-        feature=feature,
-        b_range=b_range,
-        e_range=e_range,
+        feature=options.feature,
+        b_range=target.box[0],
+        e_range=_energy_range(fmap, target),
         smooth=smooth,
         prominence=prominence,
         max_jump=options.window,
@@ -159,7 +170,6 @@ def search(fmap: FieldMap, target: Target, options: Options) -> tuple[list[Track
         max_misses=DETECT_MISSES,
         history=HISTORY,
     )
-    return found, prominence
 
 
 def _clip(value: float, axis: np.ndarray) -> float:
@@ -304,7 +314,9 @@ class AutoPick(QObject):
             return
         try:
             with _busy(searched_size(fmap, self.target)):
-                tracks, used = search(fmap, self.target, options)
+                self.prominence_used = prominence_for(fmap, self.target, options)
+                options = dataclasses.replace(options, prominence=self.prominence_used)
+                tracks = search(fmap, self.target, options)
         except ValueError as exc:
             seed = self.target.seed
             if seed is None or "within" not in str(exc):
@@ -316,7 +328,6 @@ class AutoPick(QObject):
                 "Click on the line, widen the window or lower the prominence."
             )
             return
-        self.prominence_used = used
         unit = Unit(fmap.unit)
         self.candidates = [Candidate.from_track(t, unit) for t in tracks if len(t)]
         reach = float(to_cm1(options.window, unit))
