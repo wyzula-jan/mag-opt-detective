@@ -18,6 +18,7 @@ from mag_opt_detective.gui.panels import library
 from mag_opt_detective.gui.panels.common import FileDrops
 from mag_opt_detective.gui.panels.files import (
     FileTableModel,
+    breakable,
     check_fields,
     is_zero_field,
     split_zero,
@@ -129,7 +130,7 @@ def test_file_table_shows_fields_prefix_and_gaps(window, tmp_path):
     box = window.panels["sample"].measurement
     box.field_list.set_paths(field)
     assert window.controller.processing.sample_files.field == tuple(map(str, field))
-    assert box.prefix_label.text() == "Common prefix <b>Sample_4p2K_Sam1_</b>"
+    assert prefix_text(box) == "Common prefix <b>Sample_4p2K_Sam1_</b>"
     assert box.gap_note.text() == "Missing 1.5 T (0.5 T steps)."
     assert box.gap_note.level() == "warn"
     assert box.field_head.count_label.text() == "4 files"
@@ -147,9 +148,35 @@ def test_file_table_shows_fields_prefix_and_gaps(window, tmp_path):
     )
     table.set_paths(field[:1])  # one file: its name is still split, so the prefix shows
     assert not box.prefix_label.isHidden()
-    assert box.prefix_label.text() == "Prefix <b>Sample_4p2K_Sam1_</b>"
+    assert prefix_text(box) == "Prefix <b>Sample_4p2K_Sam1_</b>"
     box.clear_button.click()
     assert table.count() == 0 and not box.field_drop.isHidden() and box.gap_note.isHidden()
+
+
+def prefix_text(box) -> str:
+    """The prefix label without the zero-width spaces where it may wrap."""
+    return box.prefix_label.text().replace("\u200b", "")
+
+
+def test_a_long_prefix_wraps_instead_of_widening_the_panel(window, qtbot, tmp_path):
+    prefix = "NbAs1p98_RS1_MIR_eGlob_4p2K_R8_5kHz_Sam2_"
+    assert breakable("NbAs1p98_RS1").split("\u200b") == ["NbAs1p98_", "RS1"]
+    assert max(map(len, breakable("x" * 40).split("\u200b"))) == 12
+    x = np.array([1.0, 2.0])
+    field = [write_text(tmp_path / f"{prefix}a0{b}p000T.txt", x, x) for b in (1, 2)]
+    window.resize(1100, 800)
+    window.show()
+    qtbot.waitExposed(window)
+    box = window.panels["sample"].measurement
+    box.field_list.set_paths([str(p) for p in field])
+    page = window.panel_pages["sample"]
+    assert prefix in prefix_text(box)
+    qtbot.wait(50)  # the layout settles
+    viewport = page.scroll.viewport()
+    assert page.content.width() <= viewport.width()
+    for button in (box.add_field_button, box.clear_button):  # nothing pushed out of view
+        right = button.mapTo(viewport, button.rect().topRight()).x()
+        assert right < viewport.width()
 
 
 def test_drops_put_zero_field_files_in_the_zero_list(window, sweep, tmp_path):

@@ -9,6 +9,7 @@ measurement and takes dropped files or folders: names whose first field tag is 0
 
 from __future__ import annotations
 
+import html
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -86,6 +87,19 @@ def merged(old: Sequence[str], new: Iterable[str]) -> list[str]:
 
 def fmt_field(b: float) -> str:
     return f"{round(b, 6):g}"
+
+
+def breakable(text: str, run: int = 12) -> str:
+    """*text* with zero-width spaces where a label may wrap it: after ``_``, ``-`` and ``.``,
+    and inside longer runs, so a long name wraps instead of widening its panel."""
+    out, length = [], 0
+    for char in text:
+        out.append(char)
+        length += 1
+        if char in "_-." or length >= run:
+            out.append("\u200b")
+            length = 0
+    return "".join(out)
 
 
 def _listing(values: Sequence[float]) -> str:
@@ -581,7 +595,10 @@ class SweepFilesBox(QWidget):
         self.clear_button.setEnabled(bool(n_field))
         prefix = self.field_list.file_model.prefix()
         title = "Common prefix" if n_field > 1 else "Prefix"
-        self.prefix_label.setText(f"{title} <b>{prefix}</b>" if prefix else "")
+        shown = html.escape(breakable(prefix))
+        self.prefix_label.setText(f"{title} <b>{shown}</b>" if prefix else "")
+        self.prefix_label.setToolTip(prefix)
+        self.prefix_label.setAccessibleName(f"{title} {prefix}" if prefix else "")
         self.prefix_label.setVisible(bool(prefix))
         self.zero_list.set_prefix(prefix)
         check = check_fields(self.field_list.file_model.fields()) if self._gap_check else None

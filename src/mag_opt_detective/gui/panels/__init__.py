@@ -7,14 +7,30 @@ keys with ``window.persistence``.
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QEvent, QObject, Qt
 from PySide6.QtWidgets import QLabel, QScrollArea, QVBoxLayout, QWidget
 
 from mag_opt_detective.gui.widgets import Separator
 
 
+class _FitWidth(QObject):
+    """Keeps *content* no wider than the scroll area's viewport: the panel never scrolls
+    sideways, so one wide widget (a long file name) cannot push the others out of view."""
+
+    def __init__(self, scroll: QScrollArea, content: QWidget):
+        super().__init__(scroll)
+        self._content = content
+        scroll.viewport().installEventFilter(self)
+
+    def eventFilter(self, watched, event) -> bool:
+        if event.type() == QEvent.Type.Resize:
+            self._content.setMaximumWidth(max(1, event.size().width()))
+        return False
+
+
 class PanelPage(QWidget):
-    """A rail panel: a header (title and subtitle) above its scrolling content."""
+    """A rail panel: a header (title and subtitle) above its scrolling content, which is
+    never wider than the panel."""
 
     def __init__(self, title: str, subtitle: str, content: QWidget, parent=None):
         super().__init__(parent)
@@ -41,6 +57,7 @@ class PanelPage(QWidget):
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         scroll.setWidget(content)
         self.scroll = scroll
+        _FitWidth(scroll, content)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
