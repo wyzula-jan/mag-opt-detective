@@ -456,11 +456,18 @@ def _nearest_peak(peaks: list[Peak], target: float, window: float) -> Peak | Non
 
 
 def _predict(field: list[float], energy: list[float], b: float) -> float:
-    """Energy at *b* from a straight line through the given points (or the last one)."""
-    if len(field) < 2 or np.ptp(field) == 0:
-        return energy[-1]
-    slope, intercept = np.polyfit(field, energy, 1)
-    return float(slope * b + intercept)
+    """Energy at *b* from a straight line through the given points (or the last one).
+
+    The least-squares line of a few points, in plain Python: called for every open track in
+    every column, where ``np.polyfit`` would take most of the time.
+    """
+    n = len(field)
+    mean_b, mean_e = sum(field) / n, sum(energy) / n
+    sxx = sum((x - mean_b) ** 2 for x in field)
+    if n < 2 or sxx == 0:
+        return float(energy[-1])
+    sxy = sum((x - mean_b) * (y - mean_e) for x, y in zip(field, energy, strict=True))
+    return float(mean_e + sxy / sxx * (b - mean_b))
 
 
 def _to_track(points: list[tuple[float, Peak]]) -> Track:
