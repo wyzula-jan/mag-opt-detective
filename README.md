@@ -33,6 +33,8 @@ spectra (measured before and after the sweep) correct the drift.
   (cm⁻¹, meV, THz or T).
 - Reference correction with a separate sweep or with the sample itself, smoothed with
   Savitzky–Golay; an energy window and baseline normalisation.
+- The baseline region is a band to drag on the map or the stacked plot; with **Live** on it
+  applies at once, without processing again.
 - A dot on Process (and on the Processing panel) shows settings changed since the last run.
 
 **View.**
