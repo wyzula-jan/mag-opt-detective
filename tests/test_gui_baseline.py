@@ -1,5 +1,6 @@
 """The baseline region on the plots and the Live baseline (P4-08)."""
 
+import itertools
 import logging
 import math
 import time
@@ -7,13 +8,14 @@ import time
 import numpy as np
 import pyqtgraph as pg
 import pytest
-from PySide6.QtCore import QPoint, QPointF, QSettings, Qt
+from PySide6.QtCore import QCoreApplication, QEvent, QPoint, QPointF, QSettings, Qt
 from PySide6.QtGui import QColor
 from PySide6.QtTest import QTest
 
 import golden
 import gui_helpers
 from gui_helpers import process, select, set_unit, shown_image
+from helpers import sweep_name, write_text
 from mag_opt_detective.core.pipeline import PlotKind, ReferenceMode
 from mag_opt_detective.core.processing import Axis
 from mag_opt_detective.core.units import CM1_PER_UNIT, Unit, from_cm1
@@ -47,6 +49,24 @@ def lines(tmp_path) -> SweepFiles:
     """A sweep whose ratios change along energy (a line moving on a sloped background), so
     every baseline region gives other maps; energies 400 - 1200 cm-1."""
     zero, field = golden.write_sweep(tmp_path)
+    return SweepFiles(tuple(map(str, zero)), tuple(map(str, field)))
+
+
+@pytest.fixture
+def reference(tmp_path) -> SweepFiles:
+    """A reference sweep on the energies of :func:`lines`, with features of its own."""
+    folder = tmp_path / "reference"
+    folder.mkdir()
+    x = np.linspace(400.0, 1200.0, 81)
+    base = 1.0 + 0.2 * np.cos(x / 90.0)
+    zero = [
+        write_text(folder / "Ref_a00p000T_a00p000T.txt", x, base),
+        write_text(folder / "Ref_a00p000T_a02p000T.txt", x, 1.05 * base),
+    ]
+    field = [
+        write_text(folder / sweep_name(b), x, base * (1 + 0.03 * b * x / 1200))
+        for b in golden.FIELDS
+    ]
     return SweepFiles(tuple(map(str, zero)), tuple(map(str, field)))
 
 
@@ -722,3 +742,111 @@ def test_a_library_save_or_plot_applies_a_waiting_region(processed, qtbot, error
     assert c.result_source == "library" and not c.changed_since_process()
     qtbot.wait(2 * LiveApply.SETTLE)  # the waiting change has nothing left to do
     assert not panel.live.is_pending() and not errors
+
+
+def test_live_equals_a_fresh_process_with_a_separate_reference(window, lines, reference):
+    c = window.controller
+    c.set_processing(
+        sample_files=lines,
+        reference_files=reference,
+        reference_mode=ReferenceMode.SEPARATE,
+        baseline=(450.0, 550.0),
+    )
+    process(window)
+    window.show_panel("processing")
+    panel = window.panels["processing"]
+    panel.baseline_live.setChecked(True)
+    drag_like(panel.regions["map"], 800, 950)
+    panel.live.flush()
+    fresh = fresh_result(window)
+    assert c.result.baseline_region == fresh.baseline_region == (800, 950)
+    for kind, order in itertools.product(PlotKind, (0, 1)):
+        np.testing.assert_array_equal(
+            c.result.get(kind, order).values, fresh.get(kind, order).values
+        )
+    np.testing.assert_array_equal(c.result.reference_ratio.values, fresh.reference_ratio.values)
+    np.testing.assert_allclose(shown_image(window), fresh.ratio.values)
+    np.testing.assert_allclose(window.plots.reference.image.image, fresh.reference_ratio.values)
+
+
+def test_live_equals_a_fresh_process_inside_the_energy_window(processed):
+    w, c = processed, processed.controller
+    panel = w.panels["processing"]
+    panel.cut_on.setChecked(True)
+    panel.cut_lo.setText("450")
+    panel.cut_hi.setText("1100")
+    process(w)
+    panel.baseline_live.setChecked(True)
+    drag_like(panel.regions["stacked"], 1000, 1200)  # stops at the window's end
+    panel.live.flush()
+    assert c.processing.baseline == (1000, 1100) == c.result.baseline_region
+    fresh = fresh_result(w)
+    for kind, order in itertools.product(PlotKind, (0, 2)):
+        np.testing.assert_array_equal(
+            c.result.get(kind, order).values, fresh.get(kind, order).values
+        )
+    np.testing.assert_allclose(shown_image(w), fresh.ratio.values)
+
+
+def test_live_per_unit_derivatives_after_a_unit_switch(processed):
+    w, c = processed, processed.controller
+    panel = w.panels["processing"]
+    set_unit(w, "meV")
+    select(w, order=1, per_unit=True)
+    panel.baseline_live.setChecked(True)
+    drag_like(panel.regions["map"], 100.0, 120.0)  # meV
+    panel.live.flush()
+    assert c.result.baseline_region == pytest.approx(
+        (100 * CM1_PER_UNIT[Unit.MEV], 120 * CM1_PER_UNIT[Unit.MEV])
+    )
+    for unit in (Unit.MEV, Unit.THZ, Unit.CM1):
+        set_unit(w, unit)
+        expected = fresh_result(w).get(PlotKind.RATIO, 1, Axis.ENERGY, physical=True, unit=unit)
+        np.testing.assert_allclose(shown_image(w), expected.values)
+
+
+def test_process_during_a_drag(processed, qtbot, errors):
+    w, c = processed, processed.controller
+    panel = w.panels["processing"]
+    w.resize(1400, 900)
+    w.show()
+    qtbot.waitExposed(w)
+    panel.baseline_live.setChecked(True)
+    plot = w.plots.map
+    viewport = plot.view.viewport()
+    pixels = [viewport_pos(plot, 1.2, energy) for energy in (550, 600, 650, 700)]
+    QTest.mouseMove(viewport, pixels[0])
+    QTest.mousePress(viewport, LEFT, PLAIN, pixels[0])
+    for pixel in pixels[1:3]:
+        qtbot.wait(move_pause_ms())
+        QTest.mouseMove(viewport, pixel)
+    process(w)  # Ctrl+Return while the edge is held
+    qtbot.wait(move_pause_ms())
+    QTest.mouseMove(viewport, pixels[3])
+    QTest.mouseRelease(viewport, LEFT, PLAIN, pixels[3])
+    assert c.processing.baseline[1] == pytest.approx(700, abs=5)
+    assert c.result.baseline_region == c.processing.baseline
+    assert not c.changed_since_process() and not errors
+    np.testing.assert_allclose(shown_image(w), fresh_result(w).ratio.values)
+
+
+def test_a_waiting_apply_after_the_window_closes(qtbot, lines, errors):
+    w = MainWindow()
+    c, panel = w.controller, w.panels["processing"]
+    c.set_processing(sample_files=lines, baseline=(450.0, 550.0))
+    process(w)
+    panel.baseline_live.setChecked(True)
+    panel.live.slow = True  # changes wait until the typing pauses
+    panel.baseline_hi.setText("650")
+    assert panel.live.is_pending()
+    w.close()
+    qtbot.wait(2 * LiveApply.SETTLE)  # applied to the closed window
+    assert c.result.baseline_region == (450.0, 650.0)
+    panel.live.slow = True
+    panel.baseline_hi.setText("700")
+    assert panel.live.is_pending()
+    w.deleteLater()
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    del w, c, panel
+    qtbot.wait(2 * LiveApply.SETTLE)  # its timer went with the window: nothing runs
+    assert not errors
