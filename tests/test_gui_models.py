@@ -887,6 +887,8 @@ def test_value_fields_share_one_column(window, sweep, qtbot, size, inspector, er
             assert slider.top() > field.bottom() and slider.width() == row.width()
         edit = row.field.edit
         assert edit.width() >= edit.fontMetrics().horizontalAdvance(edit.text())
+        caption = row.caption
+        assert caption.width() >= caption.fontMetrics().horizontalAdvance(caption.text())
     # captions share their column too (wide: the slider column starts in one place)
     assert len({r.slider.mapTo(section, QPoint(0, 0)).x() for r in rows}) == 1
     scrollbar = window.style().pixelMetric(QStyle.PixelMetric.PM_ScrollBarExtent)

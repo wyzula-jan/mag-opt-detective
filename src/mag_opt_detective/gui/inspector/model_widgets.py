@@ -56,7 +56,7 @@ from mag_opt_detective.gui.widgets import parse_float
 SHADOW = QColor(10, 6, 14, 150)  # data colour: the dark shadow of curves and dots
 UNIT_SCALE = 0.88  # the unit inside a number field (as UnitField draws it)
 FIELD_HEIGHT = 24  # number fields and the controls beside them (the kit's compact height)
-FIELD_PADDING = 22  # a number field's margins, spacing and border around number and unit
+FIELD_PADDING = 18  # a number field's margins, spacing and border around number and unit
 
 
 def muted_label(text: str, factor: float = 0.88) -> QLabel:
