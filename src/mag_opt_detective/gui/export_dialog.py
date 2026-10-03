@@ -1,19 +1,23 @@
 """The export window: a journal figure of the plot on screen, with a live preview.
 
 Left, the figure at its true proportions, drawn by matplotlib at screen resolution again about
-150 ms after any change, with its print size under it; right, the journal preset, the size,
-text and lines, the file format, what the figure includes and its labels. Problems show inline
-under the preview, never as dialogs. While it is open the window follows the main window (unit,
-plot, ranges, colours, models, points), and it remembers its choices (``export/figure``).
+150 ms after any change, with its print size under it; right, the journal preset (or one of the
+user's own presets), the size, text and lines, the file format, what the figure includes, its
+colour range and colour bar, the ticks and the labels. Problems show inline under the preview,
+never as dialogs. While it is open the window follows the main window (unit, plot, ranges,
+colours, models, points), and it remembers its choices (``export/figure``) and the user's
+presets (``export/presets``).
 """
 
 from __future__ import annotations
 
+import dataclasses
 import logging
+import math
 from contextlib import contextmanager
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, QRectF, QSignalBlocker, QSize, Qt, QTimer, Signal
+from PySide6.QtCore import QEvent, QRect, QRectF, QSignalBlocker, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QImage, QKeySequence, QPainter, QPen, QShortcut
 from PySide6.QtWidgets import (
     QDialog,
@@ -21,39 +25,69 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QMenu,
     QPushButton,
     QScrollArea,
     QSizePolicy,
     QStackedWidget,
+    QStyle,
+    QStyleOptionToolButton,
+    QStylePainter,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
 
 from mag_opt_detective.core.units import Unit
-from mag_opt_detective.export import PRESETS, JournalPreset, get_preset
+from mag_opt_detective.export import PRESETS, FigureStyle, JournalPreset, get_preset
+from mag_opt_detective.export.style import COLORBAR_LOCATIONS, MINOR_INTERVALS, TICK_DIRECTIONS
+from mag_opt_detective.export.user_presets import (
+    COLOUR_RANGES,
+    MAX_NAME,
+    PresetError,
+    UserPreset,
+    clean_name,
+    presets_from_json,
+    presets_to_json,
+    same_name,
+    stored_presets,
+)
 from mag_opt_detective.gui import icons
-from mag_opt_detective.gui.export_menu import ExportSettings
-from mag_opt_detective.gui.export_render import FigureJob, FigureRenderer
+from mag_opt_detective.gui.controller import level_label, parse_level_key
+from mag_opt_detective.gui.export_menu import ExportSettings, PresetStore
+from mag_opt_detective.gui.export_render import FigureJob, FigureRenderer, error_text
 from mag_opt_detective.gui.export_state import (
     FORMAT_LABELS,
     KINDS,
     POINTS_ALL,
     POINTS_CURRENT,
     POINTS_NONE,
+    RANGE_AUTO,
+    RANGE_FIXED,
+    RANGE_WINDOW,
     RASTER_FORMATS,
     FigureContent,
     PrintSize,
+    StyleCheck,
     auto_labels,
+    auto_tick_sizes,
+    canonical_levels,
+    display_levels,
     figure_state,
+    figure_style,
     file_name,
+    levels_problem,
+    map_levels,
     model_curves,
     point_sets,
     print_size,
     with_format,
 )
-from mag_opt_detective.gui.kit import SegmentedControl
+from mag_opt_detective.gui.kit import SegmentedControl, SmallButton
+from mag_opt_detective.gui.kit._common import TightToolButton
 from mag_opt_detective.gui.panels.common import (
     Note,
+    SpinBox,
     SwitchRow,
     UnitField,
     block,
@@ -63,7 +97,15 @@ from mag_opt_detective.gui.panels.common import (
     section_label,
 )
 from mag_opt_detective.gui.theme import current_tokens
-from mag_opt_detective.gui.widgets import FloatEdit, Separator, last_dir, parse_float, set_last_dir
+from mag_opt_detective.gui.widgets import (
+    FloatEdit,
+    Separator,
+    last_dir,
+    open_file,
+    parse_float,
+    save_file,
+    set_last_dir,
+)
 
 logger = logging.getLogger("mag_opt_detective")
 
@@ -87,6 +129,23 @@ COLUMN_NAMES = {
     "1.5 wide": "1.5 columns, wide",
 }
 MAX_PREVIEW_DPI = 600.0
+RANGE_OPTIONS = {
+    RANGE_WINDOW: ("Window", "The levels of the main window, as they change"),
+    RANGE_AUTO: ("Auto", "1st–99th percentile of the whole map, as the window's Auto"),
+    RANGE_FIXED: ("Fixed", "Levels typed here, remembered for each plot"),
+}
+RANGE_NOTES = {
+    RANGE_WINDOW: "The levels of the main window, as they change.",
+    RANGE_AUTO: "1–99 % of the whole map, as the window's Auto.",
+}
+TICK_OPTIONS = {"in": ("In", "Ticks point into the plot"), "out": ("Out", "Ticks point outwards")}
+LOCATION_OPTIONS = {
+    "right": ("Right", "A vertical bar right of the plot"),
+    "top": ("Top", "A horizontal bar above the plot, its label on top"),
+}
+MY_PRESETS = "My presets"
+PRESET_FILTER = "Figure presets (*.json);;All files (*)"
+PRESET_KEEPS = "Keeps the journal, size, text, lines, file, colour bar, ticks and colour range."
 
 
 def column_name(preset: JournalPreset, key: str) -> str:
@@ -103,6 +162,42 @@ def number_field(unit: str, name: str) -> UnitField:
 
 def number(field: UnitField) -> float | None:
     return parse_float(field.edit.text())
+
+
+def sentence(text: str) -> str:
+    """*text* as a sentence: a capital first letter and a full stop."""
+    text = text.strip()
+    if not text:
+        return text
+    text = text[0].upper() + text[1:]
+    return text if text.endswith((".", "!", "?")) else text + "."
+
+
+def _number_text(value: float | None, digits: int = 6) -> str:
+    return "" if value is None else f"{value:.{digits}g}"
+
+
+def _row(
+    *items: tuple[QWidget, int], spacing: int = 8, align=Qt.AlignmentFlag.AlignBottom
+) -> QWidget:
+    """Widgets side by side (with their stretch factors), their bottoms in line."""
+    box = QWidget()
+    layout = QHBoxLayout(box)
+    layout.setContentsMargins(0, 0, 0, 0)
+    layout.setSpacing(spacing)
+    for widget, stretch in items:
+        layout.addWidget(widget, stretch, align)
+    return box
+
+
+def _stored_levels(value) -> tuple[float, float] | None:
+    """A stored ``[lo, hi]`` pair, if it can be drawn."""
+    if not isinstance(value, list | tuple) or len(value) != 2:
+        return None
+    if any(isinstance(v, bool) or not isinstance(v, int | float) for v in value):
+        return None
+    lo, hi = float(value[0]), float(value[1])
+    return (lo, hi) if math.isfinite(lo) and math.isfinite(hi) and lo < hi else None
 
 
 # ---------------------------------------------------------------------- preview
@@ -279,6 +374,60 @@ class Messages(QWidget):
         self.setVisible(bool(items))
 
 
+class MenuButton(TightToolButton):
+    """A kit button that opens a menu: its text, shortened to fit, and a chevron."""
+
+    GAP = 6
+    CHEVRON = 12
+    PADDING = 9  # the stylesheet's padding and border, on each side
+    MAX_TEXT = 118
+
+    def __init__(self, text: str, menu: QMenu, tooltip: str = "", parent=None):
+        super().__init__(parent)
+        self.setProperty("kit", "button")
+        self.setText(text)
+        self.setToolTip(tooltip)
+        self.setAccessibleName(text)
+        self.setMenu(menu)
+        self.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+
+    def shown_text(self) -> str:
+        """The text as drawn (shortened with an ellipsis when long)."""
+        metrics = self.fontMetrics()
+        return metrics.elidedText(self.text(), Qt.TextElideMode.ElideRight, self.MAX_TEXT)
+
+    def sizeHint(self) -> QSize:
+        text = self.fontMetrics().horizontalAdvance(self.shown_text())
+        width = 2 * self.PADDING + text + self.GAP + self.CHEVRON
+        return QSize(width, max(super().sizeHint().height(), 26))
+
+    def minimumSizeHint(self) -> QSize:
+        return self.sizeHint()
+
+    def paintEvent(self, event) -> None:
+        option = QStyleOptionToolButton()
+        self.initStyleOption(option)
+        option.text = ""
+        option.features &= ~QStyleOptionToolButton.ToolButtonFeature.HasMenu
+        painter = QStylePainter(self)
+        painter.drawComplexControl(QStyle.ComplexControl.CC_ToolButton, option)
+        tokens = current_tokens()
+        color = tokens["fg"] if self.isEnabled() else tokens["faint"]
+        text = self.shown_text()
+        text_width = self.fontMetrics().horizontalAdvance(text)
+        x = (self.width() - (text_width + self.GAP + self.CHEVRON)) // 2
+        painter.setPen(color)
+        painter.drawText(
+            QRect(x, 0, text_width + 1, self.height()), Qt.AlignmentFlag.AlignVCenter, text
+        )
+        middle = self.height() // 2
+        chevron = QRect(x + text_width + self.GAP, middle - 6, self.CHEVRON, self.CHEVRON)
+        icons.icon("chevron-down", color).paint(painter, chevron)
+        painter.end()
+
+
 # ---------------------------------------------------------------------- the window
 class ExportDialog(QDialog):
     """Journal figure export of the main window's plot (non-modal; follows the window)."""
@@ -286,17 +435,23 @@ class ExportDialog(QDialog):
     previewUpdated = Signal()
     figureSaved = Signal(str)
 
-    def __init__(self, window, settings: ExportSettings):
+    def __init__(self, window, settings: ExportSettings, presets: PresetStore | None = None):
         super().__init__(window)
         self.main_window = window
         self.controller = window.controller
         self.settings = settings
+        self.presets = PresetStore() if presets is None else presets
         self._quiet = 0
         self._labels = {kind: {"x": "", "y": "", "colorbar": ""} for kind in KINDS}
         self._kind = "map"
         self._preview_error = ""
-        self._saved_note: tuple[str, str] | None = None
+        self._note: tuple[str, str] | None = None  # the last save or preset action
         self._snapshot_counts = (0, 0, 0)  # model curves, point curves, points
+        self._fixed: dict[str, tuple[float, float]] = {}  # level key -> levels (cm^-1 based)
+        self._shown_levels: tuple | None = None  # (key, unit) of the fixed levels shown
+        self._user_presets: list[UserPreset] = []
+        self._active_preset: str | None = None
+        self._naming: tuple[str, str] | None = None  # ("save", "") or ("rename", old name)
 
         self.setWindowTitle("Journal figure")
         self.setWindowFlag(Qt.WindowType.WindowContextHelpButtonHint, False)
@@ -313,10 +468,12 @@ class ExportDialog(QDialog):
 
         self._build()
         self._wire()
+        self._load_user_presets()
         self._apply_stored()
-        listener = self._apply_stored
-        settings.listeners.append(listener)
-        self.destroyed.connect(lambda: _forget(settings, listener))
+        listeners = ((settings, self._apply_stored), (self.presets, self._load_user_presets))
+        for holder, listener in listeners:
+            holder.listeners.append(listener)
+        self.destroyed.connect(lambda: [_forget(*pair) for pair in listeners])
 
     # ------------------------------------------------------------------ building
     def _build(self) -> None:
@@ -325,6 +482,33 @@ class ExportDialog(QDialog):
         for key, preset in PRESETS.items():
             self.preset.add_option(key, PRESET_NAMES.get(key, preset.name), preset.name)
         self.preset.setAccessibleName("Journal")
+        self.user_presets_menu = QMenu(self)
+        self.user_presets_menu.setToolTipsVisible(True)
+        self.user_presets_button = MenuButton(
+            MY_PRESETS,
+            self.user_presets_menu,
+            "Your presets: choose one, save these settings, rename, delete, import or export",
+        )
+        self.preset_actions: dict[str, object] = {}
+        self.menu_actions: dict[str, object] = {}
+        self.preset_name = QLineEdit()
+        self.preset_name.setMaxLength(MAX_NAME)
+        self.preset_name.setPlaceholderText("Preset name")
+        self.preset_name.setAccessibleName("Preset name")
+        self.preset_name_save = SmallButton("Save", "save")
+        self.preset_name_cancel = SmallButton("Cancel")
+        self.preset_name_note = Note()
+        self.naming_box = block(
+            _row(
+                (self.preset_name, 1),
+                (self.preset_name_save, 0),
+                (self.preset_name_cancel, 0),
+                spacing=6,
+            ),
+            self.preset_name_note,
+            spacing=5,
+        )
+        self.naming_box.hide()
         self.notes = hint()
         self.notes.setFont(scaled_font(self.notes, 0.9))
 
@@ -362,10 +546,6 @@ class ExportDialog(QDialog):
         for kind in KINDS:
             self.view.add_option(kind, VIEW_NAMES[kind], f"The {VIEW_NAMES[kind]} plot")
         self.view.setAccessibleName("View")
-        self.colorbar_row = SwitchRow("Colour bar", "")
-        self.colorbar = self.colorbar_row.switch
-        self.colorbar_label = QLineEdit()
-        self.colorbar_label.setAccessibleName("Colour bar label")
         self.models_row = SwitchRow("Model curves", "")
         self.models = self.models_row.switch
         self._models_wanted = True  # the choice, kept while the switch is off and disabled
@@ -382,6 +562,44 @@ class ExportDialog(QDialog):
         for letter in PANEL_LETTERS:
             self.panel_label.add_option(letter, letter, f"Panel {letter}: bold, top left")
         self.panel_label.setAccessibleName("Panel label")
+
+        # colour: the map's colour range and the colour bar
+        self.levels_mode = SegmentedControl(size="sm", expand=True)
+        for mode in COLOUR_RANGES:
+            self.levels_mode.add_option(mode, *RANGE_OPTIONS[mode])
+        self.levels_mode.setAccessibleName("Colour range")
+        self.level_lo = number_field("", "Colour range minimum")
+        self.level_hi = number_field("", "Colour range maximum")
+        dash = QLabel("–")
+        dash.setProperty("kit", "muted")
+        self.levels_note = hint()
+        self.levels_note.setFont(scaled_font(self.levels_note, 0.9))
+        self.colorbar_row = SwitchRow("Colour bar", "")
+        self.colorbar = self.colorbar_row.switch
+        self.colorbar_position = SegmentedControl(size="sm")
+        for location in COLORBAR_LOCATIONS:
+            self.colorbar_position.add_option(location, *LOCATION_OPTIONS[location])
+        self.colorbar_position.setAccessibleName("Colour bar position")
+        self.colorbar_label = QLineEdit()
+        self.colorbar_label.setAccessibleName("Colour bar label")
+
+        # ticks
+        self.tick_direction = SegmentedControl(size="sm", expand=True)
+        for direction in TICK_DIRECTIONS:
+            self.tick_direction.add_option(direction, *TICK_OPTIONS[direction])
+        self.tick_direction.set_value("out")
+        self.tick_direction.setAccessibleName("Tick direction")
+        self.tick_length = number_field("pt", "Tick length")
+        self.tick_width = number_field("pt", "Tick width")
+        self.mirror_row = SwitchRow("All four sides", "Ticks on the top and right axes too")
+        self.tick_mirror = self.mirror_row.switch
+        self.minor_row = SwitchRow("Minor ticks", "Unlabelled ticks between the labelled ones")
+        self.minor_ticks = self.minor_row.switch
+        self.minor_intervals = SpinBox(*MINOR_INTERVALS, 2)
+        self.minor_intervals.setAccessibleName("Minor intervals")
+        self.minor_intervals.setToolTip("Into how many parts the minor ticks split each step")
+        self.minor_length = number_field("pt", "Minor tick length")
+        self.minor_intervals.setFixedHeight(self.minor_length.sizeHint().height())
 
         # labels
         self.x_label = QLineEdit()
@@ -405,29 +623,23 @@ class ExportDialog(QDialog):
         title.setFont(scaled_font(title, 1.08, bold=True))
         subtitle = hint("The plot on screen at print size")
         layout.addWidget(block(title, subtitle, spacing=2))
-        layout.addWidget(block(section_label("Journal"), self.preset, self.notes))
-        sizes = QHBoxLayout()
-        sizes.setSpacing(8)
-        for text, field in (
-            ("Height", self.height_field),
-            ("Text", self.font_field),
-            ("Lines", self.line_field),
-        ):
-            sizes.addWidget(labelled(text, field), 1)
-        sizes_box = QWidget()
-        sizes_box.setLayout(sizes)
-        sizes.setContentsMargins(0, 0, 0, 0)
+        journal = _row((self.preset, 1), (self.user_presets_button, 0))
+        layout.addWidget(block(section_label("Journal"), journal, self.naming_box, self.notes))
+        sizes = _row(
+            (labelled("Height", self.height_field), 1),
+            (labelled("Text", self.font_field), 1),
+            (labelled("Lines", self.line_field), 1),
+        )
         width_box = block(labelled("Width (mm)", self.width_stack), self.width_caption, spacing=4)
-        layout.addWidget(block(section_label("Size"), width_box, sizes_box))
+        layout.addWidget(block(section_label("Size"), width_box, sizes))
+        self.dpi_field.setFixedWidth(104)
         dpi_row = QWidget()
         dpi_line = QHBoxLayout(dpi_row)
         dpi_line.setContentsMargins(0, 0, 0, 0)
         dpi_line.setSpacing(10)
-        self.dpi_field.setFixedWidth(104)
         dpi_line.addWidget(labelled("Resolution", self.dpi_field))
         dpi_line.addWidget(self.dpi_hint, 1, Qt.AlignmentFlag.AlignBottom)
         layout.addWidget(block(section_label("File"), self.format, dpi_row))
-        self.colorbar_box = block(self.colorbar_row, self.colorbar_label, spacing=6)
         panel_box = labelled("Panel label", self.panel_label)
         self.panel_caption = panel_box.findChild(QLabel)  # shows the preset's style
         self.points_box = block(self.points_row, self.points_scope, spacing=6)
@@ -435,11 +647,50 @@ class ExportDialog(QDialog):
             block(
                 section_label("Content"),
                 labelled("View", self.view),
-                self.colorbar_box,
                 self.models_row,
                 self.points_box,
                 panel_box,
                 spacing=12,
+            )
+        )
+        levels_row = _row(
+            (self.level_lo, 1),
+            (dash, 0),
+            (self.level_hi, 1),
+            spacing=6,
+            align=Qt.AlignmentFlag.AlignVCenter,
+        )
+        self.levels_box = block(
+            labelled("Colour range", self.levels_mode), levels_row, self.levels_note, spacing=6
+        )
+        bar_row = _row(
+            (labelled("Position", self.colorbar_position), 0),
+            (labelled("Label", self.colorbar_label), 1),
+            spacing=10,
+        )
+        self.colorbar_box = block(self.colorbar_row, bar_row, spacing=8)
+        layout.addWidget(
+            block(section_label("Colour"), self.levels_box, self.colorbar_box, spacing=12)
+        )
+        tick_sizes = _row(
+            (labelled("Direction", self.tick_direction), 1),
+            (labelled("Length", self.tick_length), 1),
+            (labelled("Width", self.tick_width), 1),
+        )
+        minor_sizes = _row(
+            (labelled("Intervals", self.minor_intervals), 1),
+            (labelled("Length", self.minor_length), 1),
+            (QWidget(), 1),
+        )
+        self.minor_box = block(self.minor_row, minor_sizes, spacing=8)
+        layout.addWidget(
+            block(
+                section_label("Ticks"),
+                tick_sizes,
+                self.mirror_row,
+                self.minor_box,
+                hint("Empty lengths and widths follow the text size and the line width."),
+                spacing=10,
             )
         )
         layout.addWidget(
@@ -492,16 +743,33 @@ class ExportDialog(QDialog):
 
     def _wire(self) -> None:
         self.preset.valueChanged.connect(self._on_preset)
+        self.user_presets_menu.aboutToShow.connect(self.fill_user_preset_menu)
+        self.preset_name.textChanged.connect(self._update_naming)
+        self.preset_name.returnPressed.connect(self._finish_naming)
+        self.preset_name.installEventFilter(self)  # Escape cancels the name, not the window
+        self.preset_name_save.clicked.connect(self._finish_naming)
+        self.preset_name_cancel.clicked.connect(self.cancel_naming)
         for control in self.widths.values():
             control.valueChanged.connect(self._changed)
         for field in self._number_fields().values():
             field.edit.textChanged.connect(self._changed)
         self.format.valueChanged.connect(self._changed)
         self.view.valueChanged.connect(self._on_view)
-        for switch in (self.colorbar, self.models, self.points):
+        for switch in (self.colorbar, self.models, self.points, self.tick_mirror, self.minor_ticks):
             switch.toggled.connect(self._changed)
-        self.points_scope.valueChanged.connect(self._changed)
-        self.panel_label.valueChanged.connect(self._changed)
+        for control in (
+            self.points_scope,
+            self.panel_label,
+            self.colorbar_position,
+            self.tick_direction,
+        ):
+            control.valueChanged.connect(self._changed)
+        self.levels_mode.valueChanged.connect(self._on_colour_range)
+        for field in (self.level_lo, self.level_hi):
+            field.edit.textChanged.connect(self._on_level_typed)
+        for field in self._tick_fields().values():
+            field.edit.textChanged.connect(self._changed)
+        self.minor_intervals.valueChanged.connect(self._changed)
         for edit in (self.x_label, self.y_label, self.colorbar_label):
             edit.textChanged.connect(self._changed)
         self.close_button.clicked.connect(self.close)
@@ -533,6 +801,13 @@ class ExportDialog(QDialog):
             "font": self.font_field,
             "line": self.line_field,
             "dpi": self.dpi_field,
+        }
+
+    def _tick_fields(self) -> dict[str, UnitField]:
+        return {
+            "tick_length": self.tick_length,
+            "tick_width": self.tick_width,
+            "minor_length": self.minor_length,
         }
 
     @contextmanager
@@ -567,6 +842,45 @@ class ExportDialog(QDialog):
             self.format.value(),
         )
 
+    def style_check(self) -> StyleCheck:
+        """The colour bar place and the ticks as typed, with their errors."""
+        return figure_style(
+            colorbar_location=self.colorbar_position.value(),
+            direction=self.tick_direction.value(),
+            mirror=self.tick_mirror.isChecked(),
+            length=self.tick_length.edit.text(),
+            width=self.tick_width.edit.text(),
+            minor=self.minor_ticks.isChecked(),
+            minor_intervals=self.minor_intervals.value(),
+            minor_length=self.minor_length.edit.text(),
+        )
+
+    def current_style(self) -> FigureStyle:
+        return self.style_check().style
+
+    def level_key(self) -> str:
+        """The level key of the map on screen (plot kind, derivative, axis, per unit)."""
+        return self.controller.selection.level_key
+
+    def fixed_levels(self) -> tuple[float, float] | None:
+        """The fixed colour range kept for the map on screen, in the display unit."""
+        key = self.level_key()
+        kept = self._fixed.get(key)
+        return None if kept is None else display_levels(key, kept, Unit(self.controller.unit))
+
+    def colour_range_problem(self) -> str:
+        """Why the typed colour range cannot be used ("" if it can, or does not apply)."""
+        if self.view.value() != "map" or self.levels_mode.value() != RANGE_FIXED:
+            return ""
+        return levels_problem(number(self.level_lo), number(self.level_hi))
+
+    def problems(self) -> list[str]:
+        """What keeps the figure from being drawn and saved."""
+        problems = self.print_size().errors + self.style_check().errors
+        if self.colour_range_problem():
+            problems.append(self.colour_range_problem())
+        return problems
+
     def _on_models(self, checked: bool) -> None:
         if self.models.isEnabled():  # the user's choice (not the switch turned off with it)
             self._models_wanted = checked
@@ -581,6 +895,8 @@ class ExportDialog(QDialog):
             points=points,
             x_label=self.x_label.text(),
             y_label=self.y_label.text(),
+            colour_range=self.levels_mode.value(),
+            fixed_levels=self.fixed_levels(),
         )
 
     def panel_letter(self) -> str | None:
@@ -589,12 +905,15 @@ class ExportDialog(QDialog):
 
     def figure_state(self):
         """What the figure shows now (export FigureState), as it would be saved."""
-        return figure_state(self.controller, self.content())
+        snapshot = self.controller.figure_state()
+        self._keep_fixed(snapshot)
+        return figure_state(self.controller, self.content(), snapshot=snapshot)
 
     def job(self, dpi: float, state=None) -> FigureJob:
+        problems = self.problems()
+        if problems:
+            raise ValueError(problems[0])
         size = self.print_size()
-        if not size.ok:
-            raise ValueError(size.errors[0])
         return FigureJob(
             state=self.figure_state() if state is None else state,
             preset=self.current_preset(),
@@ -604,6 +923,7 @@ class ExportDialog(QDialog):
             line_pt=size.line_pt,
             panel_label=self.panel_letter(),
             dpi=dpi,
+            style=self.current_style(),
         )
 
     def default_file_name(self) -> str:
@@ -614,6 +934,380 @@ class ExportDialog(QDialog):
             self.width_key(),
             self.format.value(),
         )
+
+    # ------------------------------------------------------------------ colour range
+    def _snapshot(self):
+        """The window's figure snapshot, or None without data."""
+        try:
+            return self.controller.figure_state()
+        except ValueError:
+            return None
+
+    def _keep_fixed(self, snapshot) -> None:
+        """Fixed levels start from the window's levels the first time a plot gets them."""
+        if self.levels_mode.value() != RANGE_FIXED:
+            return
+        key = self.level_key()
+        if key not in self._fixed:
+            unit = Unit(self.controller.unit)
+            self._fixed[key] = canonical_levels(key, tuple(snapshot.levels), unit)
+            self.settings.update(fixed_levels=self._stored_fixed())
+
+    def _stored_fixed(self) -> dict[str, list[float]]:
+        return {key: [lo, hi] for key, (lo, hi) in self._fixed.items()}
+
+    def _sync_level_fields(self, snapshot=None) -> None:
+        """Show the colour range in the fields: the fixed levels of the plot on screen (again
+        when the plot or the unit changed), else the levels Window or Auto draw with."""
+        mode = self.levels_mode.value()
+        key, unit = self.level_key(), Unit(self.controller.unit)
+        if mode == RANGE_FIXED:
+            if key not in self._fixed:
+                snapshot = snapshot if snapshot is not None else self._snapshot()
+                if snapshot is not None:
+                    self._keep_fixed(snapshot)
+            if self._shown_levels == (key, unit):
+                return
+            levels = self.fixed_levels()
+            if levels is None:
+                return
+            texts = [_number_text(v) for v in levels]
+            self._shown_levels = (key, unit)
+        else:
+            self._shown_levels = None
+            if snapshot is None:
+                return
+            levels = map_levels(snapshot, FigureContent(colour_range=mode))
+            texts = [_number_text(v, 4) for v in levels]
+        with self._quietly():
+            self.level_lo.edit.setText(texts[0])
+            self.level_hi.edit.setText(texts[1])
+
+    def _on_colour_range(self, _mode: str) -> None:
+        if self._quiet:
+            return
+        self._shown_levels = None
+        self._changed()
+
+    def _on_level_typed(self, _text: str = "") -> None:
+        if self._quiet or self.levels_mode.value() != RANGE_FIXED:
+            return
+        lo, hi = number(self.level_lo), number(self.level_hi)
+        if not levels_problem(lo, hi):
+            key, unit = self.level_key(), Unit(self.controller.unit)
+            self._fixed[key] = canonical_levels(key, (lo, hi), unit)
+            self._shown_levels = (key, unit)
+        self._changed()
+
+    # ------------------------------------------------------------------ user presets
+    def user_presets(self) -> list[UserPreset]:
+        """The user's presets, by name."""
+        return list(self._user_presets)
+
+    def user_preset(self, name: str | None) -> UserPreset | None:
+        """The user's preset called *name* (any case), if there is one."""
+        if not name:
+            return None
+        return next((p for p in self._user_presets if same_name(p.name, name)), None)
+
+    def active_user_preset(self) -> str | None:
+        """The user's preset whose settings the window shows, if any."""
+        return self._active_preset
+
+    def current_user_preset(self, name: str) -> UserPreset:
+        """The window's style settings as a preset called *name*; ValueError if they cannot be
+        kept (a field with an error, or no name)."""
+        problems = self.print_size().errors + self.style_check().errors
+        if problems:
+            raise ValueError(f"fix the settings first: {problems[0]}")
+        preset = self.current_preset()
+        return UserPreset(
+            name=name,
+            journal=preset.key,
+            width=self.width_key(),
+            width_mm=number(self.custom_width) if preset.free_size else None,
+            height_mm=number(self.height_field),
+            font_pt=number(self.font_field),
+            line_pt=number(self.line_field),
+            format=self.format.value(),
+            dpi=number(self.dpi_field),
+            colorbar=self.colorbar.isChecked(),
+            style=self.current_style(),
+            colour_range=self.levels_mode.value(),
+        )
+
+    def save_user_preset(self, name: str) -> UserPreset:
+        """Keep the window's style settings as the preset *name* (replacing one so called)."""
+        preset = self.current_user_preset(name)
+        others = [p for p in self._user_presets if not same_name(p.name, preset.name)]
+        replaced = len(others) < len(self._user_presets)
+        self._set_user_presets([*others, preset])
+        self._active_preset = preset.name
+        logger.info("Saved the figure preset %r.", preset.name)
+        verb = "Replaced" if replaced else "Saved"
+        self._show_note("ok", f"{verb} the preset “{preset.name}”.")
+        return preset
+
+    def apply_user_preset(self, name: str) -> None:
+        """Show the settings of the user's preset *name*."""
+        preset = self.user_preset(name)
+        if preset is None:
+            raise ValueError(f"there is no preset called {name!r}")
+        with self._quietly():
+            self.preset.set_value(preset.journal)
+            self._set_preset_defaults(preset.journal)
+            control = self.widths.get(preset.journal)
+            if control is not None:
+                control.set_value(preset.width)
+            if preset.width_mm is not None:
+                self.custom_width.edit.setText(f"{preset.width_mm:g}")
+            for field, value in (
+                (self.height_field, preset.height_mm),
+                (self.font_field, preset.font_pt),
+                (self.line_field, preset.line_pt),
+                (self.dpi_field, preset.dpi),
+            ):
+                field.edit.setText(f"{value:g}")
+            self.format.set_value(preset.format)
+            self.colorbar.setChecked(preset.colorbar)
+            self._show_style(preset.style)
+            self.levels_mode.set_value(preset.colour_range)
+        self._shown_levels = None
+        self._active_preset = preset.name
+        self._changed()
+
+    def rename_user_preset(self, old: str, new: str) -> UserPreset:
+        """Give the user's preset *old* the name *new*."""
+        preset = self.user_preset(old)
+        if preset is None:
+            raise ValueError(f"there is no preset called {old!r}")
+        name = clean_name(new)
+        clash = self.user_preset(name)
+        if clash is not None and clash is not preset:
+            raise PresetError(f"a preset called “{clash.name}” exists already")
+        renamed = dataclasses.replace(preset, name=name)
+        self._set_user_presets([renamed if p is preset else p for p in self._user_presets])
+        if same_name(self._active_preset or "", preset.name):
+            self._active_preset = name
+        self._show_note("ok", f"Renamed “{preset.name}” to “{name}”.")
+        return renamed
+
+    def delete_user_preset(self, name: str) -> None:
+        """Forget the user's preset *name*."""
+        preset = self.user_preset(name)
+        if preset is None:
+            raise ValueError(f"there is no preset called {name!r}")
+        self._set_user_presets([p for p in self._user_presets if p is not preset])
+        if same_name(self._active_preset or "", preset.name):
+            self._active_preset = None
+        logger.info("Deleted the figure preset %r.", preset.name)
+        self._show_note("ok", f"Deleted the preset “{preset.name}”.")
+
+    def import_user_presets(self, path: str | Path | None = None) -> list[UserPreset]:
+        """Add the presets of a preset file (those with a name in use replace the old ones);
+        a file that cannot be read changes nothing and says why inline."""
+        path = path or open_file(self, "Import figure presets", PRESET_FILTER)
+        if not path:
+            return []
+        path = Path(path)
+        try:
+            presets = presets_from_json(path.read_bytes())
+        except (OSError, ValueError) as exc:
+            reason = error_text(exc) if isinstance(exc, OSError) else str(exc)
+            logger.warning("Could not import figure presets from %s: %s", path, reason)
+            self._show_note("err", f"Could not import presets from {path.name}: {reason}.")
+            return []
+        kept = [
+            p for p in self._user_presets if not any(same_name(p.name, n.name) for n in presets)
+        ]
+        replaced = len(self._user_presets) - len(kept)
+        self._set_user_presets([*kept, *presets])
+        logger.info("Imported %d figure presets from %s", len(presets), path)
+        text = f"Imported {len(presets)} preset{'s' if len(presets) != 1 else ''} from {path.name}"
+        if replaced:
+            text += f" ({replaced} replaced)"
+        self._show_note("ok", text + ".")
+        return presets
+
+    def export_user_presets(self, path: str | Path | None = None) -> Path | None:
+        """Write the user's presets to a preset file (.json); None if nothing was written."""
+        if not self._user_presets:
+            return None
+        path = path or save_file(self, "Export figure presets", PRESET_FILTER)
+        if not path:
+            return None
+        path = Path(path)
+        if path.suffix.lower() != ".json":
+            path = path.with_name(path.name + ".json")
+        try:
+            path.write_text(presets_to_json(self._user_presets), encoding="utf-8")
+        except OSError as exc:
+            logger.warning("Could not export figure presets: %s", error_text(exc))
+            self._show_note("err", f"Could not export the presets: {error_text(exc)}.")
+            return None
+        n = len(self._user_presets)
+        logger.info("Exported %d figure presets to %s", n, path)
+        self._show_note("ok", f"Exported {n} preset{'s' if n != 1 else ''} to {path.name}.")
+        return path
+
+    def _set_user_presets(self, presets: list[UserPreset]) -> None:
+        self._user_presets = sorted(presets, key=lambda p: p.name.casefold())
+        self.presets.text = presets_to_json(self._user_presets) if self._user_presets else ""
+
+    def _load_user_presets(self) -> None:
+        """Read the stored presets (after a restore or reset too); bad ones are skipped."""
+        presets, problems = stored_presets(self.presets.text) if self.presets.text else ([], [])
+        for problem in problems:
+            logger.warning("Skipped a stored figure preset: %s", problem)
+        self._user_presets = sorted(presets, key=lambda p: p.name.casefold())
+        if self.user_preset(self._active_preset) is None:
+            self._active_preset = None
+        self._update_preset_button()
+
+    def _update_preset_button(self) -> None:
+        """The button names the user's preset the window shows (it stops when one changes)."""
+        try:
+            current = self.current_user_preset("current")
+        except ValueError:
+            current = None
+        active = self.user_preset(self._active_preset)
+        if current is None or (active is not None and not active.same_settings(current)):
+            active = None
+        if active is None and current is not None:
+            active = next((p for p in self._user_presets if p.same_settings(current)), None)
+        self._active_preset = active.name if active is not None else None
+        button = self.user_presets_button
+        button.setText(self._active_preset or MY_PRESETS)
+        button.setAccessibleName(f"My presets: {self._active_preset or 'none chosen'}")
+        button.updateGeometry()
+        button.update()
+
+    def _describe(self, preset: UserPreset) -> str:
+        journal = PRESETS[preset.journal]
+        width = preset.width_mm if preset.width_mm is not None else journal.widths_mm[preset.width]
+        bar = f"colour bar {preset.style.colorbar_location}" if preset.colorbar else "no bar"
+        return (
+            f"{journal.name} · {width:g} × {preset.height_mm:g} mm · {preset.font_pt:g} pt · "
+            f"{FORMAT_LABELS[preset.format]} · {bar} · ticks {preset.style.ticks.direction} · "
+            f"colour range {RANGE_OPTIONS[preset.colour_range][0]}"
+        )
+
+    def fill_user_preset_menu(self) -> None:
+        """The user's presets (the one shown ticked), then save, rename, delete, import and
+        export (built each time the menu opens)."""
+        menu = self.user_presets_menu
+        menu.clear()
+        self.preset_actions = {}
+        if not self._user_presets:
+            empty = menu.addAction("No presets saved yet")
+            empty.setEnabled(False)
+        for preset in self._user_presets:
+            action = menu.addAction(f"{preset.name}\t{PRESET_NAMES[preset.journal]}")
+            action.setCheckable(True)
+            action.setChecked(same_name(preset.name, self._active_preset or ""))
+            action.setToolTip(self._describe(preset))
+            action.triggered.connect(lambda _c=False, n=preset.name: self.apply_user_preset(n))
+            self.preset_actions[preset.name] = action
+        menu.addSeparator()
+        active = self._active_preset
+        choose_first = "Choose one of your presets first"
+        save = menu.addAction("Save as preset…")
+        save.setToolTip("Keep these settings under a name")
+        icons.set_icon(save, "save", "muted")
+        save.triggered.connect(lambda: self.start_naming("save"))
+        rename = menu.addAction(f"Rename “{active}”…" if active else "Rename…")
+        rename.setEnabled(active is not None)
+        rename.setToolTip("" if active else choose_first)
+        rename.triggered.connect(lambda: self.start_naming("rename"))
+        delete = menu.addAction(f"Delete “{active}”" if active else "Delete")
+        delete.setEnabled(active is not None)
+        delete.setToolTip("" if active else choose_first)
+        icons.set_icon(delete, "trash-2", "muted")
+        delete.triggered.connect(lambda: active and self.delete_user_preset(active))
+        menu.addSeparator()
+        load = menu.addAction("Import presets…")
+        load.setToolTip("Add the presets of a file (.json)")
+        icons.set_icon(load, "upload", "muted")
+        load.triggered.connect(lambda: self.import_user_presets())
+        write = menu.addAction("Export presets…")
+        write.setToolTip("Save your presets to a file (.json)")
+        write.setEnabled(bool(self._user_presets))
+        icons.set_icon(write, "download", "muted")
+        write.triggered.connect(lambda: self.export_user_presets())
+        self.menu_actions = {
+            "save": save,
+            "rename": rename,
+            "delete": delete,
+            "import": load,
+            "export": write,
+        }
+
+    def start_naming(self, mode: str) -> None:
+        """Ask for a name inline: to save the settings ("save") or rename ("rename") the
+        preset shown."""
+        old = self._active_preset or ""
+        if mode == "rename" and not old:
+            return
+        self._naming = (mode, old if mode == "rename" else "")
+        self.preset_name_save.setText("Rename" if mode == "rename" else "Save")
+        self.preset_name.setText(old)
+        self.naming_box.show()
+        self.preset_name.setFocus(Qt.FocusReason.OtherFocusReason)
+        self.preset_name.selectAll()
+        self._update_naming()
+
+    def naming(self) -> str | None:
+        """ "save" or "rename" while a name is asked for, else None."""
+        return None if self._naming is None else self._naming[0]
+
+    def cancel_naming(self) -> None:
+        self._naming = None
+        self.naming_box.hide()
+
+    def _update_naming(self) -> None:
+        if self._naming is None:
+            return
+        mode, old = self._naming
+        try:
+            name = clean_name(self.preset_name.text())
+        except PresetError:
+            name = ""
+        clash = self.user_preset(name)
+        level, text = "muted", PRESET_KEEPS if mode == "save" else f"A new name for “{old}”."
+        if clash is not None and mode == "save":
+            level, text = "warn", f"Replaces your preset “{clash.name}”."
+        elif clash is not None and not same_name(clash.name, old):
+            level, text = "err", f"A preset “{clash.name}” exists already."
+        self.preset_name_note.set_text(text, level)
+        self.preset_name_save.setEnabled(bool(name) and level != "err")
+
+    def _finish_naming(self) -> None:
+        if self._naming is None or not self.preset_name_save.isEnabled():
+            return
+        mode, old = self._naming
+        try:
+            if mode == "rename":
+                self.rename_user_preset(old, self.preset_name.text())
+            else:
+                self.save_user_preset(self.preset_name.text())
+        except ValueError as exc:
+            self.preset_name_note.set_text(sentence(str(exc)), "err")
+            return
+        self.cancel_naming()
+
+    def eventFilter(self, watched, event) -> bool:
+        if (
+            watched is self.preset_name
+            and event.type() == QEvent.Type.KeyPress
+            and event.key() == Qt.Key.Key_Escape
+        ):
+            self.cancel_naming()
+            return True
+        return super().eventFilter(watched, event)
+
+    def _show_note(self, level: str, text: str) -> None:
+        self._note = (level, text)
+        self._update_form()
 
     # ------------------------------------------------------------------ opening
     def open_for_window(self) -> None:
@@ -657,7 +1351,39 @@ class ExportDialog(QDialog):
                 self.colorbar_label.setText(str(v["colorbar_label"]))
             letter = v["panel_label"]
             self.panel_label.set_value(letter if letter in PANEL_LETTERS else NO_PANEL)
+            location = v["colorbar_location"]
+            self.colorbar_position.set_value(
+                location if location in COLORBAR_LOCATIONS else "right"
+            )
+            mode = v["colour_range"]
+            self.levels_mode.set_value(mode if mode in COLOUR_RANGES else RANGE_WINDOW)
+            self._fixed = {}
+            for level_key, pair in v["fixed_levels"].items():
+                levels = _stored_levels(pair)
+                if levels is not None and _is_level_key(level_key):
+                    self._fixed[level_key] = levels
+            direction = v["tick_direction"]
+            self.tick_direction.set_value(direction if direction in TICK_DIRECTIONS else "out")
+            self.tick_mirror.setChecked(bool(v["tick_mirror"]))
+            self.minor_ticks.setChecked(bool(v["minor_ticks"]))
+            lo, hi = MINOR_INTERVALS
+            intervals = v["minor_intervals"]
+            self.minor_intervals.setValue(intervals if lo <= intervals <= hi else 2)
+            for name, field in self._tick_fields().items():
+                field.edit.setText(_number_text(v[name]))
+        self._shown_levels = None
         self._changed()
+
+    def _show_style(self, style: FigureStyle) -> None:
+        ticks = style.ticks
+        self.colorbar_position.set_value(style.colorbar_location)
+        self.tick_direction.set_value(ticks.direction)
+        self.tick_mirror.setChecked(ticks.mirror)
+        self.minor_ticks.setChecked(ticks.minor)
+        self.minor_intervals.setValue(ticks.minor_intervals)
+        self.tick_length.edit.setText(_number_text(ticks.length_pt))
+        self.tick_width.edit.setText(_number_text(ticks.width_pt))
+        self.minor_length.edit.setText(_number_text(ticks.minor_length_pt))
 
     def _set_preset_defaults(self, key: str) -> None:
         preset = get_preset(key)
@@ -700,7 +1426,7 @@ class ExportDialog(QDialog):
     def _changed(self, *_args) -> None:
         if self._quiet:
             return
-        self._saved_note = None
+        self._note = None
         self._update_form()
         self._store()
         self._schedule()
@@ -722,6 +1448,7 @@ class ExportDialog(QDialog):
     def _update_form(self) -> None:
         preset = self.current_preset()
         size = self.print_size()
+        style = self.style_check()
         self.width_stack.setCurrentIndex(list(PRESETS).index(preset.key))
         key = self.width_key()
         self.width_caption.setText(column_name(preset, key) if key else "Any width")
@@ -734,6 +1461,11 @@ class ExportDialog(QDialog):
         self.panel_caption.setText(f"Panel label · {name} style: {preset.panel_label('a')}, bold")
         for name, field in self._number_fields().items():
             field.set_invalid(name in size.invalid)
+        for name, field in self._tick_fields().items():
+            field.set_invalid(name in style.invalid)
+        if size.ok:
+            for name, value in auto_tick_sizes(size.font_pt, size.line_pt).items():
+                self._tick_fields()[name].edit.setPlaceholderText(f"{value:.3g}")
 
         fmt = self.format.value()
         raster = fmt in RASTER_FORMATS
@@ -755,15 +1487,18 @@ class ExportDialog(QDialog):
         self.x_label.setPlaceholderText(x_auto)
         self.y_label.setPlaceholderText(y_auto)
         self._update_content(kind)
+        self._sync_level_fields()
+        self._update_levels(kind)
+        self._update_preset_button()
 
-        items = [("err", text) for text in size.errors]
+        items = [("err", text) for text in self.problems()]
         if self._preview_error:
             items.append(("err", self._preview_error))
         items += [("warn", text) for text in size.warnings]
-        if self._saved_note is not None:
-            items.append(self._saved_note)
+        if self._note is not None:
+            items.append(self._note)
         self.messages.set_items(items)
-        self._update_save_button(size)
+        self._update_save_button()
 
     def _update_content(self, kind: str) -> None:
         n_models, n_curves, n_points = self._snapshot_counts
@@ -780,7 +1515,9 @@ class ExportDialog(QDialog):
             else "Values of the map"
         )
         self.colorbar_row.description_label.setVisible(True)
-        self.colorbar_label.setEnabled(can_bar and self.colorbar.isChecked())
+        bar_shown = can_bar and self.colorbar.isChecked()
+        self.colorbar_label.setEnabled(bar_shown)
+        self.colorbar_position.setEnabled(bar_shown)
 
         can_draw = not stacked and n_models > 0
         self.models.setEnabled(can_draw)
@@ -805,10 +1542,36 @@ class ExportDialog(QDialog):
         self.points_row.description_label.setVisible(True)
         self.points_scope.setEnabled(n_points > 0 and self.points.isChecked())
 
-    def _update_save_button(self, size: PrintSize | None = None) -> None:
-        size = size or self.print_size()
+        minor = self.minor_ticks.isChecked()
+        self.minor_intervals.setEnabled(minor)
+        self.minor_length.setEnabled(minor)
+
+    def _update_levels(self, kind: str) -> None:
+        """The colour range: for maps only (stacked traces are coloured by field); its fields
+        are typed in Fixed and show the levels drawn with otherwise."""
+        is_map = kind == "map"
+        mode = self.levels_mode.value()
+        fixed = is_map and mode == RANGE_FIXED
+        self.levels_mode.setEnabled(is_map)
+        for field in (self.level_lo, self.level_hi):
+            field.setEnabled(fixed)
+        lo, hi = number(self.level_lo), number(self.level_hi)
+        problem = self.colour_range_problem()
+        reversed_ = lo is not None and hi is not None
+        self.level_lo.set_invalid(bool(problem) and (lo is None or reversed_))
+        self.level_hi.set_invalid(bool(problem) and (hi is None or reversed_))
+        if not is_map:
+            note = "Stacked traces are coloured by field: the range is for maps."
+        elif mode == RANGE_FIXED:
+            note = f"In the plot's values. Remembered for {level_label(self.level_key())}."
+        else:
+            note = RANGE_NOTES[mode]
+        self.levels_note.setText(note)
+
+    def _update_save_button(self) -> None:
         saving = self.renderer.saving()
-        self.save_button.setEnabled(size.ok and not saving and not self._preview_error)
+        ok = not self.problems() and not self._preview_error
+        self.save_button.setEnabled(ok and not saving)
         self.save_button.setText("Saving…" if saving else "Save…")
 
     def _store(self) -> None:
@@ -825,7 +1588,17 @@ class ExportDialog(QDialog):
             dpi=number(self.dpi_field),
             colorbar=self.colorbar.isChecked(),
             colorbar_label=self._map_colorbar_label(),
+            colorbar_location=self.colorbar_position.value(),
             panel_label="" if self.panel_letter() is None else self.panel_letter(),
+            colour_range=self.levels_mode.value(),
+            fixed_levels=self._stored_fixed(),
+            tick_direction=self.tick_direction.value(),
+            tick_mirror=self.tick_mirror.isChecked(),
+            tick_length=number(self.tick_length),
+            tick_width=number(self.tick_width),
+            minor_ticks=self.minor_ticks.isChecked(),
+            minor_intervals=self.minor_intervals.value(),
+            minor_length=number(self.minor_length),
         )
 
     def _map_colorbar_label(self) -> str:
@@ -836,7 +1609,8 @@ class ExportDialog(QDialog):
 
     # ------------------------------------------------------------------ drawing
     def _snapshot_state(self):
-        """The figure state now; also counts the models and points the window has."""
+        """The figure state now; also counts the models and points the window has and shows
+        the colour range drawn with."""
         snapshot = self.controller.figure_state()
         sets = point_sets(snapshot, POINTS_ALL)
         self._snapshot_counts = (
@@ -844,6 +1618,8 @@ class ExportDialog(QDialog):
             len(sets),
             sum(s.x.size for s in sets),
         )
+        self._keep_fixed(snapshot)
+        self._sync_level_fields(snapshot)
         return figure_state(self.controller, self.content(), snapshot=snapshot)
 
     def _draw_preview(self) -> None:
@@ -860,8 +1636,7 @@ class ExportDialog(QDialog):
             self._preview_error = ""
             self.preview.set_message("")
         self._update_form()
-        size = self.print_size()
-        if not size.ok:
+        if self.problems():
             return  # the errors are shown; the last drawing stays
         ratio = self.devicePixelRatioF()
         self.renderer.preview(self.job(self.preview.wanted_dpi() * ratio, state), ratio)
@@ -883,16 +1658,14 @@ class ExportDialog(QDialog):
             self.preview.set_message(f"The preview could not be drawn: {message}")
             return
         logger.error("Export figure: could not save the figure: %s", message)
-        self._saved_note = ("err", f"Could not save the figure: {message}")
-        self._update_form()
+        self._show_note("err", f"Could not save the figure: {message}")
 
     def _on_saved(self, path: str) -> None:
         size = self.print_size()
         name = Path(path).name
         what = f"{size.width_mm:g} × {size.height_mm:g} mm" if size.ok else ""
         logger.info("Saved figure %s (%s, %s)", path, self.current_preset().name, what)
-        self._saved_note = ("ok", f"Saved {name}")
-        self._update_form()
+        self._show_note("ok", f"Saved {name}")
         status = self.main_window.statusBar()
         status.showMessage(f"Saved figure {name}", 6000)
         self.figureSaved.emit(path)
@@ -901,7 +1674,7 @@ class ExportDialog(QDialog):
     def save(self) -> None:
         """Ask for a file (suffix of the chosen format) and save the figure there."""
         size = self.print_size()
-        if not size.ok or self.renderer.saving():
+        if self.problems() or self.renderer.saving():
             return
         fmt = self.format.value()
         start = self.default_file_name()
@@ -915,10 +1688,9 @@ class ExportDialog(QDialog):
         try:
             job = self.job(size.dpi)
         except ValueError as exc:
-            self._saved_note = ("err", f"Could not save the figure: {exc}")
-            self._update_form()
+            self._show_note("err", f"Could not save the figure: {exc}")
             return
-        self._saved_note = None
+        self._note = None
         self.renderer.save(job, out)
         self._update_form()
 
@@ -941,6 +1713,14 @@ class ExportDialog(QDialog):
             self._follow_window()  # e.g. a model changed in the window's inspector
 
 
-def _forget(settings: ExportSettings, listener) -> None:
-    if listener in settings.listeners:
-        settings.listeners.remove(listener)
+def _is_level_key(key) -> bool:
+    try:
+        parse_level_key(key)
+    except ValueError:
+        return False
+    return True
+
+
+def _forget(holder, listener) -> None:
+    if listener in holder.listeners:
+        holder.listeners.remove(listener)

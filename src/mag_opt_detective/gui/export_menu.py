@@ -1,8 +1,9 @@
 """Export > Journal figure…: the journal figure window, next to the quick PNG/SVG save.
 
 The window (:mod:`~mag_opt_detective.gui.export_dialog`) is built the first time it opens, so
-matplotlib is only imported then. What it remembers (:class:`ExportSettings`) is bound to the
-settings from the start, so it is restored with everything else.
+matplotlib is only imported then. What it remembers (:class:`ExportSettings`) and the user's own
+presets (:class:`PresetStore`) are bound to the settings from the start, so they are restored
+with everything else.
 """
 
 from __future__ import annotations
@@ -18,6 +19,7 @@ from mag_opt_detective.gui import icons
 from mag_opt_detective.gui.controller import user_action
 
 SETTINGS_KEY = "export/figure"
+PRESETS_KEY = "export/presets"
 SHORTCUT = "Ctrl+Shift+E"
 MENU_TEXT = "Journal figure…"  # also the window's title and header
 
@@ -33,7 +35,17 @@ DEFAULTS: dict[str, object] = {
     "dpi": None,
     "colorbar": True,
     "colorbar_label": "",
+    "colorbar_location": "right",
     "panel_label": "",
+    "colour_range": "window",  # the map's colour range: "window", "auto" or "fixed"
+    "fixed_levels": {},  # level key -> [lo, hi]; per-unit energy derivatives per cm^-1
+    "tick_direction": "out",
+    "tick_mirror": False,
+    "tick_length": None,  # pt; None follows the text size
+    "tick_width": None,  # pt; None: the line width
+    "minor_ticks": False,
+    "minor_intervals": 2,
+    "minor_length": None,  # pt; None follows the text size
 }
 
 
@@ -42,6 +54,10 @@ def _valid(default, value) -> bool:
         return isinstance(value, bool)
     if isinstance(default, str):
         return isinstance(value, str)
+    if isinstance(default, dict):
+        return isinstance(value, dict)
+    if isinstance(default, int):
+        return isinstance(value, int) and not isinstance(value, bool)
     # numbers (default None): a finite number or None
     if value is None:
         return True
@@ -86,6 +102,35 @@ class ExportSettings:
         return True
 
 
+class PresetStore:
+    """Settings protocol for the user's figure presets: the JSON text of a preset file ("" for
+    none). Only its shape is checked here; the export window reads the presets themselves
+    (:func:`export.user_presets.stored_presets`) when it opens, so matplotlib is not imported
+    at start. *listeners* are called after a restore or reset."""
+
+    def __init__(self):
+        self.text = ""
+        self.listeners: list = []
+
+    def settings_value(self) -> str:
+        return self.text
+
+    def set_settings_value(self, value) -> bool:
+        if not isinstance(value, str):
+            return False
+        if value:
+            try:
+                data = json.loads(value)
+            except ValueError:
+                return False
+            if not isinstance(data, dict) or not isinstance(data.get("presets"), list):
+                return False
+        self.text = value
+        for listener in list(self.listeners):
+            listener()
+        return True
+
+
 class _CloseWatcher(QObject):
     """Closes the export window together with the main window."""
 
@@ -108,7 +153,7 @@ def open_dialog(window) -> None:
         try:
             from mag_opt_detective.gui.export_dialog import ExportDialog
 
-            dialog = ExportDialog(window, window.export_settings)
+            dialog = ExportDialog(window, window.export_settings, window.export_presets)
         finally:
             QApplication.restoreOverrideCursor()
         window.export_dialog = dialog
@@ -118,6 +163,7 @@ def open_dialog(window) -> None:
 def install(window) -> None:
     """Add Export > Journal figure… (Ctrl+Shift+E) before the quick image save in the menus."""
     window.export_settings = ExportSettings()
+    window.export_presets = PresetStore()
     window.export_dialog = None
     action = QAction(MENU_TEXT, window)
     action.setShortcut(QKeySequence(SHORTCUT))
@@ -133,3 +179,4 @@ def install(window) -> None:
     window.installEventFilter(_CloseWatcher(window))
     if window.persistence is not None:
         window.persistence.bind(SETTINGS_KEY, window.export_settings)
+        window.persistence.bind(PRESETS_KEY, window.export_presets)

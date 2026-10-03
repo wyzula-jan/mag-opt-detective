@@ -11,12 +11,22 @@ from pathlib import Path
 import numpy as np
 import pytest
 from PIL import Image
-from PySide6.QtCore import QSettings
+from PySide6.QtCore import QSettings, Qt
 from PySide6.QtGui import QKeySequence
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QFileDialog, QMessageBox
 
 import gui_helpers
-from gui_helpers import click_map, infobar_text, load_sweep, process, save_to, set_unit
+from gui_helpers import (
+    click_map,
+    infobar_text,
+    load_sweep,
+    open_from,
+    process,
+    save_to,
+    select,
+    set_unit,
+)
 from mag_opt_detective.core.spectra import FieldMap
 from mag_opt_detective.core.units import Unit, from_cm1
 from mag_opt_detective.export import (
@@ -26,10 +36,12 @@ from mag_opt_detective.export import (
     FigureStyle,
     StackedOptions,
     TickStyle,
+    presets_from_json,
     robust_levels,
 )
 from mag_opt_detective.gui.controller import AppController
-from mag_opt_detective.gui.export_menu import DEFAULTS, ExportSettings
+from mag_opt_detective.gui.export_menu import DEFAULTS, ExportSettings, PresetStore
+from mag_opt_detective.gui.export_render import draw, executor
 from mag_opt_detective.gui.export_state import (
     POINTS_CURRENT,
     POINTS_NONE,
@@ -628,9 +640,7 @@ def test_export_settings_drop_invalid_values():
     assert not settings.set_settings_value("[1, 2]")
 
 
-# ---------------------------------------------------------------------- colour range and style
-
-
+# ---------------------------------------------------------------------- colour range
 def test_colour_range_of_the_adapter(controller):
     c = controller
     c.set_ranges(field_range=(0.6, 1.4))  # zoomed: Auto still uses the whole map
@@ -644,6 +654,94 @@ def test_colour_range_of_the_adapter(controller):
     assert figure_state(c, unset).levels == pytest.approx((0.9, 1.1))
 
 
+def test_colour_range_window_auto_and_fixed(processed, qtbot, no_dialogs):
+    w = processed
+    c = w.controller
+    c.set_ranges(field_range=(0.6, 1.4))
+    dialog = open_export(w, qtbot)
+    assert dialog.levels_mode.value() == "window"
+    assert dialog.figure_state().levels == pytest.approx((0.9, 1.1))  # the window's
+    assert not dialog.level_lo.isEnabled()  # shows the levels drawn with
+    assert [dialog.level_lo.edit.text(), dialog.level_hi.edit.text()] == ["0.9", "1.1"]
+    c.set_levels(c.selection.level_key, 0.95, 1.05)  # the window changes: followed
+    assert dialog.figure_state().levels == pytest.approx((0.95, 1.05))
+
+    dialog.levels_mode.set_value("auto")
+    redraw(dialog, qtbot)
+    auto = robust_levels(c.current_map().values)  # the whole map, not the zoomed part
+    assert dialog.figure_state().levels == pytest.approx(auto)
+    assert float(dialog.level_lo.edit.text()) == pytest.approx(auto[0], rel=1e-3)
+
+    dialog.levels_mode.set_value("fixed")  # starts from the window's levels
+    assert dialog.level_lo.isEnabled()
+    assert [dialog.level_lo.edit.text(), dialog.level_hi.edit.text()] == ["0.95", "1.05"]
+    dialog.level_lo.edit.setText("0.97")
+    dialog.level_hi.edit.setText("1.01")
+    assert dialog.figure_state().levels == (0.97, 1.01)
+    assert c.current_levels() == pytest.approx((0.95, 1.05))  # the window keeps its own
+    assert "Remembered for R(B)/R(0)" in dialog.levels_note.text()
+    redraw(dialog, qtbot)
+    first = dialog.preview.image()
+
+    dialog.level_hi.edit.setText("0.9")  # below the minimum: refused inline
+    assert dialog.level_lo.is_invalid() and dialog.level_hi.is_invalid()
+    assert "minimum below its maximum" in " ".join(dialog.messages.texts("err"))
+    assert not dialog.save_button.isEnabled()
+    dialog.flush()
+    assert dialog.is_idle() and dialog.preview.image() is first  # the last drawing stays
+    dialog.level_hi.edit.setText("")
+    assert "Enter both ends" in " ".join(dialog.messages.texts("err"))
+    dialog.level_hi.edit.setText("1.03")
+    assert dialog.save_button.isEnabled() and not dialog.messages.texts("err")
+    assert dialog.figure_state().levels == (0.97, 1.03)
+
+
+def test_fixed_levels_are_kept_per_plot_in_cm1(processed, qtbot):
+    w = processed
+    c = w.controller
+    dialog = open_export(w, qtbot)
+    dialog.levels_mode.set_value("fixed")
+    dialog.level_lo.edit.setText("0.97")
+    dialog.level_hi.edit.setText("1.03")
+    select(w, order=1, per_unit=True)  # d/dE per cm-1: its own levels
+    key = c.selection.level_key
+    assert key == "Ratio_der1_E_unit"
+    in_window = c.figure_state().levels
+    lo, hi = (float(dialog.level_lo.edit.text()), float(dialog.level_hi.edit.text()))
+    assert (lo, hi) == pytest.approx(in_window, rel=1e-5)  # prefilled from the window
+    dialog.level_lo.edit.setText("-0.002")
+    dialog.level_hi.edit.setText("0.004")
+    assert dialog.figure_state().levels == (-0.002, 0.004)
+    stored = dialog.settings.values["fixed_levels"]
+    assert stored["Ratio"] == [0.97, 1.03]
+    assert stored[key] == pytest.approx([-0.002, 0.004])  # per cm-1
+
+    set_unit(w, "meV")  # per meV: the same levels, in the new unit's scale
+    assert float(dialog.level_lo.edit.text()) == pytest.approx(-0.002 * MEV)
+    assert float(dialog.level_hi.edit.text()) == pytest.approx(0.004 * MEV)
+    assert dialog.figure_state().levels == pytest.approx((-0.002 * MEV, 0.004 * MEV))
+    dialog.level_hi.edit.setText(f"{0.005 * MEV:g}")
+    assert dialog.settings.values["fixed_levels"][key] == pytest.approx([-0.002, 0.005])
+
+    select(w, order=0)  # back to the ratio: its own values, not the derivative's
+    assert [dialog.level_lo.edit.text(), dialog.level_hi.edit.text()] == ["0.97", "1.03"]
+    assert dialog.figure_state().levels == (0.97, 1.03)
+
+
+def test_the_colour_range_is_for_maps(processed, qtbot):
+    w = processed
+    dialog = open_export(w, qtbot)
+    dialog.levels_mode.set_value("fixed")
+    dialog.level_hi.edit.setText("0.1")  # invalid for the map ...
+    dialog.view.set_value("stacked")  # ... but stacked traces are coloured by field
+    assert not dialog.levels_mode.isEnabled() and not dialog.level_lo.isEnabled()
+    assert "coloured by field" in dialog.levels_note.text()
+    assert not dialog.messages.texts("err") and dialog.save_button.isEnabled()
+    dialog.view.set_value("map")
+    assert dialog.messages.texts("err") and not dialog.save_button.isEnabled()
+
+
+# ---------------------------------------------------------------------- colour bar and ticks
 def test_style_of_the_adapter():
     check = figure_style("top", "in", True, "4", "", True, 5, "1.5")
     assert check.ok
@@ -655,3 +753,247 @@ def test_style_of_the_adapter():
         "The tick length must be 0–20 pt.",
         "Enter the tick width in pt, or leave it empty.",
     ]
+
+
+def test_colour_bar_position_and_ticks(processed, qtbot, no_dialogs):
+    dialog = open_export(processed, qtbot)
+    assert dialog.current_style() == FigureStyle()  # today's look by default
+    assert dialog.tick_length.edit.placeholderText() == "3.15"  # 0.45 × 7 pt
+    assert dialog.tick_width.edit.placeholderText() == "0.5"  # the line width
+    assert not dialog.minor_intervals.isEnabled() and not dialog.minor_length.isEnabled()
+    dialog.colorbar_position.set_value("top")
+    dialog.tick_direction.set_value("in")
+    dialog.tick_mirror.setChecked(True)
+    dialog.minor_ticks.setChecked(True)
+    assert dialog.minor_intervals.isEnabled()
+    dialog.minor_intervals.setValue(4)
+    dialog.tick_length.edit.setText("4")
+    expected = FigureStyle("top", TickStyle("in", True, 4.0, None, True, 4, None))
+    assert dialog.current_style() == expected
+    redraw(dialog, qtbot)
+    image = dialog.preview.image()
+    assert image.width() / image.height() == pytest.approx(89 / 70, rel=0.01)  # same size
+
+    dialog.tick_width.edit.setText("20")
+    assert dialog.tick_width.is_invalid() and not dialog.save_button.isEnabled()
+    assert "The tick width must be 0.05–10 pt." in dialog.messages.texts("err")
+    dialog.tick_width.edit.setText("")
+    assert dialog.save_button.isEnabled()
+    dialog.colorbar.setChecked(False)
+    assert not dialog.colorbar_position.isEnabled()
+
+
+def test_save_uses_the_colour_range_and_style(processed, qtbot, tmp_path, monkeypatch):
+    dialog = open_export(processed, qtbot)
+    dialog.levels_mode.set_value("fixed")
+    dialog.level_lo.edit.setText("0.96")
+    dialog.level_hi.edit.setText("1.04")
+    dialog.colorbar_position.set_value("top")
+    dialog.tick_direction.set_value("in")
+    dialog.tick_mirror.setChecked(True)
+    dialog.minor_ticks.setChecked(True)
+    dialog.format.set_value("png")
+    dialog.dpi_field.edit.setText("300")
+    job = dialog.job(300)
+    assert job.state.levels == (0.96, 1.04)
+    assert job.style == FigureStyle("top", TickStyle("in", True, minor=True))
+    path, _seen = save_as(dialog, qtbot, monkeypatch, tmp_path / "figure.png")
+    with Image.open(path) as image:
+        saved = np.asarray(image)
+    qtbot.waitUntil(dialog.is_idle, timeout=WAIT_MS)
+    # matplotlib draws on the export thread only (its settings are global)
+    fig, rgba = executor().submit(lambda: (job.figure(), draw(job))).result()
+    np.testing.assert_array_equal(saved, rgba[..., :3])  # the file has the settings
+    ax, cax = fig.axes
+    assert cax.get_xlim() == (0.96, 1.04) and cax.get_position().y0 > ax.get_position().y1
+    dialog.format.set_value("pdf")
+    pdf, _seen = save_as(dialog, qtbot, monkeypatch, tmp_path / "figure.pdf")
+    assert pdf.suffix == ".pdf" and _pdf_size_mm(pdf) == pytest.approx((89, 70), abs=0.01)
+
+
+def test_style_and_colour_range_are_remembered(qtbot, tmp_path, sweep, errors):
+    ini = str(tmp_path / "settings.ini")
+    w = make_window(qtbot, ini, sweep)
+    dialog = open_export(w, qtbot)
+    dialog.levels_mode.set_value("fixed")
+    dialog.level_lo.edit.setText("0.97")
+    dialog.level_hi.edit.setText("1.02")
+    dialog.colorbar_position.set_value("top")
+    dialog.tick_direction.set_value("in")
+    dialog.tick_mirror.setChecked(True)
+    dialog.minor_ticks.setChecked(True)
+    dialog.minor_intervals.setValue(5)
+    dialog.minor_length.edit.setText("1.5")
+    w.close()
+    w2 = make_window(qtbot, ini, sweep)
+    dialog = open_export(w2, qtbot)
+    assert dialog.levels_mode.value() == "fixed"
+    assert dialog.figure_state().levels == (0.97, 1.02)
+    expected = FigureStyle("top", TickStyle("in", True, None, None, True, 5, 1.5))
+    assert dialog.current_style() == expected
+    w2.reset_settings()
+    assert dialog.levels_mode.value() == "window" and dialog.current_style() == FigureStyle()
+    assert not errors
+
+
+# ---------------------------------------------------------------------- user presets
+def menu_texts(dialog) -> list[str]:
+    dialog.fill_user_preset_menu()
+    return [a.text() for a in dialog.user_presets_menu.actions() if not a.isSeparator()]
+
+
+def name_preset(dialog, mode: str, name: str) -> None:
+    """Choose Save as preset… or Rename… in the menu, type *name* and press Return."""
+    dialog.fill_user_preset_menu()
+    dialog.menu_actions[mode].trigger()
+    assert dialog.naming() == mode and dialog.naming_box.isVisibleTo(dialog)
+    dialog.preset_name.setText(name)
+    dialog.preset_name.returnPressed.emit()
+
+
+def test_user_presets_save_list_apply_rename_delete(processed, qtbot, no_dialogs):
+    dialog = open_export(processed, qtbot)
+    assert dialog.user_presets_button.text() == "My presets"
+    assert menu_texts(dialog)[0] == "No presets saved yet"
+    assert not dialog.menu_actions["rename"].isEnabled()
+    assert not dialog.menu_actions["export"].isEnabled()
+    dialog.preset.set_value("aps")
+    dialog.widths["aps"].set_value("double")
+    dialog.height_field.edit.setText("80")
+    dialog.colorbar_position.set_value("top")
+    dialog.tick_direction.set_value("in")
+    dialog.levels_mode.set_value("auto")
+    dialog.x_label.setText("B")  # content: not part of a preset
+    name_preset(dialog, "save", "  Thesis  ")
+    assert not dialog.naming_box.isVisibleTo(dialog)
+    assert dialog.messages.texts("ok") == ["Saved the preset “Thesis”."]
+    assert dialog.user_presets_button.text() == "Thesis"
+    (preset,) = dialog.user_presets()
+    assert (preset.journal, preset.width, preset.height_mm) == ("aps", "double", 80)
+    assert preset.colour_range == "auto"
+    assert preset.style == FigureStyle("top", TickStyle("in"))
+    assert "x_label" not in preset.to_dict()
+
+    dialog.preset.set_value("nature")  # another journal: no longer the preset
+    assert dialog.user_presets_button.text() == "My presets"
+    assert menu_texts(dialog)[0] == "Thesis\tAPS"
+    dialog.preset_actions["Thesis"].trigger()  # choose it again
+    assert dialog.preset.value() == "aps" and dialog.widths["aps"].value() == "double"
+    assert dialog.print_size().height_mm == 80 and dialog.levels_mode.value() == "auto"
+    assert dialog.current_style() == FigureStyle("top", TickStyle("in"))
+    assert dialog.x_label.text() == "B"
+    assert dialog.user_presets_button.text() == "Thesis"
+    assert dialog.preset_actions["Thesis"].isChecked()
+
+    name_preset(dialog, "save", "thesis")  # the same name: replaces it
+    assert dialog.messages.texts("ok") == ["Replaced the preset “thesis”."]
+    dialog.height_field.edit.setText("90")
+    name_preset(dialog, "save", "Second")
+    assert [p.name for p in dialog.user_presets()] == ["Second", "thesis"]
+    dialog.apply_user_preset("thesis")
+    name_preset(dialog, "rename", "Second")  # taken: refused inline
+    assert dialog.naming() == "rename"
+    assert dialog.preset_name_note.level() == "err"
+    assert not dialog.preset_name_save.isEnabled()
+    dialog.preset_name.setText("PhD thesis")
+    dialog.preset_name_save.click()
+    assert dialog.naming() is None
+    assert [p.name for p in dialog.user_presets()] == ["PhD thesis", "Second"]
+    assert dialog.user_presets_button.text() == "PhD thesis"
+    dialog.fill_user_preset_menu()
+    assert dialog.menu_actions["delete"].text() == "Delete “PhD thesis”"
+    dialog.menu_actions["delete"].trigger()
+    assert [p.name for p in dialog.user_presets()] == ["Second"]
+    assert dialog.user_presets_button.text() == "My presets"
+    assert dialog.messages.texts("ok") == ["Deleted the preset “PhD thesis”."]
+
+
+def test_saving_a_preset_needs_valid_settings(processed, qtbot, no_dialogs):
+    dialog = open_export(processed, qtbot)
+    dialog.height_field.edit.setText("")
+    name_preset(dialog, "save", "Broken")
+    assert dialog.naming() == "save" and dialog.user_presets() == []
+    assert dialog.preset_name_note.text().startswith("Fix the settings first: Enter the height")
+    dialog.preset_name.setText("   ")
+    assert not dialog.preset_name_save.isEnabled()
+    QTest.keyClick(dialog.preset_name, Qt.Key.Key_Escape)  # cancels the name, not the window
+    assert dialog.naming() is None and dialog.isVisible()
+
+
+def test_a_preset_based_on_a_journal_keeps_its_checks(processed, qtbot):
+    dialog = open_export(processed, qtbot)
+    dialog.font_field.edit.setText("9")
+    dialog.save_user_preset("Big text")
+    dialog.preset.set_value("custom")
+    assert not dialog.messages.texts("warn")
+    dialog.apply_user_preset("Big text")
+    assert dialog.preset.value() == "nature" and dialog.font_field.edit.text() == "9"
+    assert any("5–7 pt; using 7 pt" in text for text in dialog.messages.texts("warn"))
+
+
+def test_user_presets_export_and_import(processed, qtbot, tmp_path, monkeypatch, no_dialogs):
+    dialog = open_export(processed, qtbot)
+    dialog.tick_direction.set_value("in")
+    dialog.save_user_preset("Inward")
+    dialog.preset.set_value("aps")
+    dialog.save_user_preset("APS plain")
+    save_to(monkeypatch, tmp_path / "presets")
+    dialog.fill_user_preset_menu()
+    dialog.menu_actions["export"].trigger()
+    path = tmp_path / "presets.json"
+    assert [p.name for p in presets_from_json(path.read_text())] == ["APS plain", "Inward"]
+    assert dialog.messages.texts("ok") == ["Exported 2 presets to presets.json."]
+
+    for name in ("APS plain", "Inward"):
+        dialog.delete_user_preset(name)
+    dialog.save_user_preset("Inward")  # replaced by the imported one
+    open_from(monkeypatch, path)
+    dialog.fill_user_preset_menu()
+    dialog.menu_actions["import"].trigger()
+    assert [p.name for p in dialog.user_presets()] == ["APS plain", "Inward"]
+    assert dialog.user_preset("Inward").style.ticks.direction == "in"
+    assert dialog.messages.texts("ok") == ["Imported 2 presets from presets.json (1 replaced)."]
+
+    newer = tmp_path / "newer.json"
+    newer.write_text(json.dumps({"version": 7, "presets": []}))
+    bad = tmp_path / "bad.json"
+    bad.write_text(json.dumps({"version": 1, "presets": [{"name": "X", "journal": "cell"}]}))
+    for file, reason in ((newer, "newer version of the app"), (bad, "unknown journal 'cell'")):
+        assert dialog.import_user_presets(file) == []
+        (message,) = dialog.messages.texts("err")
+        assert message.startswith(f"Could not import presets from {file.name}:")
+        assert reason in message
+    assert dialog.import_user_presets(tmp_path / "missing.json") == []
+    assert [p.name for p in dialog.user_presets()] == ["APS plain", "Inward"]  # unchanged
+
+
+def test_user_presets_are_remembered(qtbot, tmp_path, sweep, errors):
+    ini = str(tmp_path / "settings.ini")
+    w = make_window(qtbot, ini, sweep)
+    dialog = open_export(w, qtbot)
+    dialog.colorbar_position.set_value("top")
+    dialog.save_user_preset("Top bar")
+    dialog.preset.set_value("custom")
+    dialog.save_user_preset("Free")
+    w.close()
+    stored = QSettings(ini, QSettings.Format.IniFormat).value("v2/export/presets")
+    assert [p.name for p in presets_from_json(stored)] == ["Free", "Top bar"]
+
+    w2 = make_window(qtbot, ini, sweep)
+    dialog = open_export(w2, qtbot)  # a new window and export window
+    assert [p.name for p in dialog.user_presets()] == ["Free", "Top bar"]
+    assert dialog.user_presets_button.text() == "Free"  # the settings shown are that preset
+    dialog.apply_user_preset("Top bar")
+    assert dialog.colorbar_position.value() == "top" and dialog.preset.value() == "nature"
+    w2.reset_settings()
+    assert dialog.user_presets() == [] and dialog.user_presets_button.text() == "My presets"
+    assert not errors
+
+
+def test_preset_store_checks_the_stored_text():
+    store = PresetStore()
+    assert store.set_settings_value('{"version": 1, "presets": []}')
+    assert not store.set_settings_value("not json")
+    assert not store.set_settings_value('{"presets": 3}')
+    assert not store.set_settings_value(5)
+    assert store.set_settings_value("") and store.text == ""
