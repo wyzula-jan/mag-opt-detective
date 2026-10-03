@@ -607,7 +607,11 @@ def test_the_classic_histogram_follows_the_theme(qtbot):
     qtbot.addWidget(scale.widget)
     scale.apply_theme(LIGHT)
     hist = scale.hist
-    assert hist.plot.opts["brush"].color().rgb() == qcolor(LIGHT.foreground).rgb()
+    brush = hist.plot.opts["brush"].color()  # a light grey fill, not an opaque block
+    assert brush.rgb() == qcolor(LIGHT.foreground).rgb()
+    assert brush.alphaF() == pytest.approx(0.3, abs=0.01)
     for line in hist.region.lines:
         assert line.pen.color().rgb() == qcolor(LIGHT.accent).rgb()
-    assert hist.region.brush.color().rgb() == qcolor(LIGHT.accent).rgb()
+    region = hist.region.brush.color()
+    assert region.rgb() == qcolor(LIGHT.accent).rgb()
+    assert region.alphaF() == pytest.approx(0.12, abs=0.01)
