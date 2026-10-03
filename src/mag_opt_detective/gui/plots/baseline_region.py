@@ -6,8 +6,10 @@ window), and dragging the band keeps its width. :attr:`~BaselineRegion.edited` a
 :attr:`~BaselineRegion.editFinished` report the user's drags, rounded to a power of ten below a
 screen pixel; :meth:`~BaselineRegion.set_region` (the typed fields) emits nothing. A grip in the
 middle of each edge, a stronger fill and edge under the mouse and the cursors show what can be
-dragged. Over a colour map the edges have a dark shadow, as the processing guides, so they read
-on any colours; over spectra a halo in the background colour keeps them clear of the traces.
+dragged; :meth:`~BaselineRegion.setMovable` turns all that off (the band is then only shown).
+Over a colour map the edges have a dark shadow, as the processing guides, so they read on any
+colours; over spectra a halo in the background colour keeps them clear of the traces, and the
+fill (a separate item, :attr:`~BaselineRegion.fill`) lies below the traces.
 """
 
 from __future__ import annotations
@@ -16,13 +18,16 @@ import math
 from dataclasses import dataclass
 
 import pyqtgraph as pg
+import shiboken6
 from PySide6.QtCore import QLineF, QPointF, Qt, Signal
 from PySide6.QtGui import QBrush, QColor, QPen
+from PySide6.QtWidgets import QGraphicsItem
 
 HORIZONTAL, VERTICAL = "horizontal", "vertical"  # energy on the y axis (map) or the x axis
 LABEL = "Baseline region"
 GRIP = 9.0  # px: diameter of the grip in the middle of each edge
 HALO = 1.6  # px: the shadow around a grip
+LABEL_MARGIN = 3.0  # px: room a label inside a band needs on each side
 
 
 @dataclass(frozen=True)
@@ -61,7 +66,7 @@ def theme_style(accent: QColor, background: QColor) -> RegionStyle:
         return color
 
     fill = QColor(background)
-    fill.setAlphaF(0.8)
+    fill.setAlphaF(0.7)
     return RegionStyle(
         pen=pg.mkPen(tint(0.9), width=1.4),
         hover_pen=pg.mkPen(accent, width=2.4),
@@ -75,12 +80,13 @@ def theme_style(accent: QColor, background: QColor) -> RegionStyle:
 
 class BaselineRegion(pg.LinearRegionItem):
     """A band over an energy range (*orientation* HORIZONTAL: energy on the y axis) that the
-    user drags by its edges or body; see the module docstring."""
+    user drags by its edges or body, labelled *label*; see the module docstring. Put it on a
+    plot with :meth:`add_to`."""
 
     edited = Signal(float, float)  # the user drags the region: (lo, hi)
     editFinished = Signal(float, float)  # the user let go of it
 
-    def __init__(self, orientation: str, style: RegionStyle, z: float = 9.5):
+    def __init__(self, orientation: str, style: RegionStyle, label: str = LABEL):
         super().__init__(values=(0.0, 1.0), orientation=orientation, swapMode=None)
         self._horizontal = orientation == HORIZONTAL
         self._limits: tuple[float | None, float | None] = (None, None)
@@ -88,23 +94,32 @@ class BaselineRegion(pg.LinearRegionItem):
         self._quiet = False  # set_region: not the user
         self._placing = False
         self._drag: tuple[float, float, float] | None = None  # region and press of a band drag
-        self.setZValue(z)
-        shape = Qt.CursorShape
+        self.fill = pg.LinearRegionItem(orientation=orientation, movable=False, pen=pg.mkPen(None))
+        for line in self.fill.lines:
+            line.hide()
         for line in self.lines:
             line.addMarker("o", position=0.5, size=GRIP)  # the grip (it also widens the hit area)
-            line.setCursor(shape.SizeVerCursor if self._horizontal else shape.SizeHorCursor)
             line.sigPositionChanged.connect(self._keep_apart)
-        self.setCursor(Qt.CursorShape.SizeAllCursor)
+        self._set_cursors(True)
         # above the upper edge at the left of the map; right of the lower edge at the top of
         # the stacked plot (the label follows its edge and stays in view)
         edge, position, anchor = (
             (self.lines[1], 0.01, (0, 1)) if self._horizontal else (self.lines[0], 0.98, (0, 0))
         )
-        self.label = pg.InfLineLabel(edge, LABEL, position=position, anchors=[anchor, anchor])
+        self.label = pg.InfLineLabel(edge, label, position=position, anchors=[anchor, anchor])
         self._style = style
         self.set_style(style)
+        self.sigRegionChanged.connect(self._follow)
         self.sigRegionChanged.connect(self._on_changed)
         self.sigRegionChangeFinished.connect(self._on_finished)
+
+    def add_to(self, plot: pg.PlotItem, z: float, fill_z: float) -> None:
+        """Put the band on *plot* (outside its auto-range): the edges, grips and label at *z*,
+        the fill at *fill_z* (e.g. below spectra, so they keep their colours)."""
+        self.setZValue(z)
+        self.fill.setZValue(fill_z)
+        plot.addItem(self.fill, ignoreBounds=True)
+        plot.addItem(self, ignoreBounds=True)
 
     # ------------------------------------------------------------------ appearance
     def set_style(self, style: RegionStyle) -> None:
@@ -112,15 +127,74 @@ class BaselineRegion(pg.LinearRegionItem):
         for line in self.lines:
             line.setPen(style.pen)
             line.setHoverPen(style.hover_pen)
-        hovered = self.mouseHovering
-        self.setBrush(style.brush)
-        self.setHoverBrush(style.hover_brush)
-        if hovered:
-            self.currentBrush = self.hoverBrush
+        self.setBrush(pg.mkBrush(None))  # the fill item paints the band
+        self.setHoverBrush(pg.mkBrush(None))
+        self.fill.setBrush(style.brush)
+        self.fill.setHoverBrush(style.hover_brush)
+        self._show_hover()
         self.label.setColor(style.label)
         self.label.fill = style.label_fill
         self.label.update()
         self.update()
+
+    def setMouseHover(self, hover: bool) -> None:
+        super().setMouseHover(hover)
+        self._show_hover()
+
+    def _show_hover(self) -> None:
+        fill = self.fill
+        fill.currentBrush = fill.hoverBrush if self.mouseHovering else fill.brush
+        fill.update()
+
+    def setMovable(self, m: bool = True) -> None:
+        """Let the user drag the band and its edges, or only show it (no hover, no cursors:
+        drags go to the plot, e.g. to zoom)."""
+        super().setMovable(m)
+        if not hasattr(self, "_horizontal"):  # called while pyqtgraph builds the item
+            return
+        self._set_cursors(m)
+        if not m:
+            self.moving = False
+            for item in (self, *self.lines):
+                item.setMouseHover(False)
+
+    def _set_cursors(self, movable: bool) -> None:
+        shape = Qt.CursorShape
+        edge = shape.SizeVerCursor if self._horizontal else shape.SizeHorCursor
+        cursors = ((self.lines[0], edge), (self.lines[1], edge), (self, shape.SizeAllCursor))
+        for item, cursor in cursors:
+            if movable:
+                item.setCursor(cursor)
+            else:
+                item.unsetCursor()
+
+    def itemChange(self, change, value):
+        result = super().itemChange(change, value)
+        if change == QGraphicsItem.GraphicsItemChange.ItemVisibleHasChanged:
+            fill = getattr(self, "fill", None)
+            if fill is not None and shiboken6.isValid(fill):
+                fill.setVisible(bool(value))
+        return result
+
+    def viewTransformChanged(self) -> None:
+        super().viewTransformChanged()
+        self._fit_label()
+
+    def _follow(self, _item=None) -> None:
+        self.fill.setRegion(self.getRegion())
+        self._fit_label()
+
+    def _fit_label(self) -> None:
+        """A label inside a vertical band shows only while it fits in it."""
+        label, view = getattr(self, "label", None), self.getViewBox()
+        if self._horizontal or label is None or not isinstance(view, pg.ViewBox):
+            return
+        pixel = view.viewPixelSize()[0]
+        lo, hi = self.getRegion()
+        width = (hi - lo) / pixel if math.isfinite(pixel) and pixel > 0 else math.inf
+        fits = width >= label.boundingRect().width() + 2 * LABEL_MARGIN
+        if fits != label.isVisibleTo(self):
+            label.setVisible(fits)
 
     def paint(self, p, *args) -> None:
         super().paint(p, *args)  # the fill
@@ -182,7 +256,7 @@ class BaselineRegion(pg.LinearRegionItem):
         """Dragged values are rounded to this: the power of ten below a screen pixel (0, no
         rounding, while the plot is not on screen)."""
         view, widget = self.getViewBox(), self.getViewWidget()
-        if view is None or widget is None or not widget.isVisible():
+        if not isinstance(view, pg.ViewBox) or widget is None or not widget.isVisible():
             return 0.0
         pixel = view.viewPixelSize()[1 if self._horizontal else 0]
         if not (math.isfinite(pixel) and pixel > 0):

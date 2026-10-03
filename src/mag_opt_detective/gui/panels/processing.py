@@ -3,10 +3,11 @@
 Both ranges are typed in the display unit and kept in cm^-1 (:class:`EnergyEdit`). While the
 panel is open, the map shows the window as guides (overlay layer "guides": dashed lines at its
 ends), and the map and the stacked plot show the baseline region as a band to drag by its edges
-or body (:class:`BaselineRegion`); *Edit on plot* keeps the band there when the panel is closed.
-The band and the fields follow each other. With *Live* on, a new region is applied to the maps
-of the last Process at once (:meth:`AppController.apply_baseline`), at most about ten times a
-second while it is dragged (:class:`LiveApply`); otherwise it waits for the next Process.
+or body with the Pan tool (:class:`BaselineRegion`); *Edit on plot* keeps the band there when the
+panel is closed. The band and the fields follow each other. With *Live* on, a new region is
+applied to the maps of the last Process at once (:meth:`AppController.apply_baseline`), at most
+about ten times a second while it is dragged (:class:`LiveApply`); otherwise it waits for the
+next Process. A library map keeps the baseline it was plotted with: the band only shows there.
 """
 
 from __future__ import annotations
@@ -22,7 +23,7 @@ from PySide6.QtCore import QObject, Qt, QTimer
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QScrollArea, QStackedWidget, QWidget
 
 from mag_opt_detective.core.units import Range, Unit, from_cm1
-from mag_opt_detective.gui.controller import LIBRARY_KEEPS_BASELINE, fmt, user_action
+from mag_opt_detective.gui.controller import fmt, user_action
 from mag_opt_detective.gui.display import unit_text
 from mag_opt_detective.gui.kit import Switch
 from mag_opt_detective.gui.panels.common import (
@@ -51,11 +52,15 @@ GUIDES = "guides"
 VIEW_ENERGY_LINK = "view-energy"
 BASELINE_HINT = (
     "While this panel is open, the map shows the window and the plots show the region: drag "
-    "it or its edges there."
+    "it or its edges there with Pan (V)."
 )
 LIVE_TIP = "Apply the baseline at once while you drag or type the region, without processing again"
 EDIT_TIP = "Keep the region on the map and the stacked plot while this panel is closed"
-LIVE_LIBRARY = f"Live waits for a processed map: {LIBRARY_KEEPS_BASELINE}."
+LIBRARY_NOTE = (
+    "The library map shown keeps the baseline it was plotted with: the region applies when you "
+    "process or plot a map again."
+)
+NAVIGATE = "navigate"  # the plot tool that drags the band (Pan); the others leave it alone
 LOG_DELAY = 600  # ms: a live change is logged once the region rests this long
 
 # guides are drawn over the colour map, so they use data colours (light on any map)
@@ -503,11 +508,12 @@ def install(window) -> None:
     # the window's guides on the map and the baseline region on the map and the stacked plot
     regions = {
         "map": BaselineRegion(HORIZONTAL, data_style()),
-        "stacked": BaselineRegion(VERTICAL, stacked_style(window), z=5.0),  # above the traces
+        "stacked": BaselineRegion(VERTICAL, stacked_style(window), label="Baseline"),
     }
-    for view, region in regions.items():
+    regions["map"].add_to(window.plots.map.plot, z=9.5, fill_z=9.45)  # below the overlays
+    regions["stacked"].add_to(window.plots.stacked.plot, z=5.0, fill_z=-1.0)  # fill below traces
+    for region in regions.values():
         region.hide()
-        window.plots[view].plot.addItem(region, ignoreBounds=True)
     guides = MapGuides(window.plots.map, regions["map"])
     panel.guides, panel.regions = guides, regions
     stack = page.parentWidget()
@@ -554,8 +560,8 @@ def install(window) -> None:
             live_problem = problem
         on = panel.baseline_live.isChecked()
         text, level = "", "muted"
-        if on and c.result is not None and c.result_source == "library":
-            text, level = LIVE_LIBRARY, "info"
+        if panel.baseline_on.isChecked() and c.result is not None and c.result_source == "library":
+            text, level = LIBRARY_NOTE, "info"
         elif on and live_problem and panel.baseline_note.isHidden():  # the fields say it first
             text, level = live_problem, "warn"
         panel.live_note.set_text(text, level)
@@ -642,6 +648,17 @@ def install(window) -> None:
         region.edited.connect(from_plot)
         region.editFinished.connect(from_plot)
         region.editFinished.connect(lambda *_args: live.flush())
+
+    def sync_movable(*_args) -> None:
+        """The band is dragged with the Pan tool; other tools (zoom, pick, auto-pick) and
+        library maps only show it, and drags go to the plot."""
+        movable = window.tools.active() == NAVIGATE and c.result_source != "library"
+        for region in regions.values():
+            region.setMovable(movable)
+
+    window.tools.toolChanged.connect(sync_movable)
+    c.resultChanged.connect(sync_movable)
+    sync_movable()
 
     def on_theme() -> None:
         regions["stacked"].set_style(stacked_style(window))

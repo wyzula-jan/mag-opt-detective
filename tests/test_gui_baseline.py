@@ -21,7 +21,7 @@ from mag_opt_detective.gui.controller import AppController, SweepFiles
 from mag_opt_detective.gui.main_window import MainWindow
 from mag_opt_detective.gui.panels import library
 from mag_opt_detective.gui.panels.processing import (
-    LIVE_LIBRARY,
+    LIBRARY_NOTE,
     LOG_DELAY,
     LiveApply,
     default_region,
@@ -495,9 +495,11 @@ def test_library_maps_are_not_baselined_live(processed, errors):
     library.plot_entry(w, c.library[0].key)
     assert c.result_source == "library"
     shown = shown_image(w).copy()
+    assert not panel.live_note.isHidden() and panel.live_note.text() == LIBRARY_NOTE
+    assert all(r.isVisible() and not r.movable for r in panel.regions.values())  # only shown
     panel.baseline_live.setChecked(True)
-    assert not panel.live_note.isHidden() and panel.live_note.text() == LIVE_LIBRARY
-    drag_like(panel.regions["map"], 900, 1100)
+    assert panel.live_note.text() == LIBRARY_NOTE
+    drag_like(panel.regions["map"], 900, 1100)  # (typed would do the same)
     panel.live.flush()
     np.testing.assert_array_equal(shown_image(w), shown)
     assert c.changed_since_process()
@@ -506,6 +508,7 @@ def test_library_maps_are_not_baselined_live(processed, errors):
     process(w)
     assert panel.live_note.isHidden() and not c.changed_since_process()
     assert c.result.baseline_region == (900, 1100) and not errors
+    assert all(r.movable for r in panel.regions.values())
 
 
 def test_live_never_shows_the_missing_reference_note(window, lines, errors):
@@ -618,3 +621,58 @@ def test_live_baseline_on_real_data(window, data_dir, errors):
     panel.live.flush()
     np.testing.assert_allclose(shown_image(window), fresh_result(window).ratio.values)
     assert not errors
+
+
+# ---------------------------------------------------------------------- review round
+def test_the_band_moves_only_with_the_pan_tool(processed, qtbot):
+    w, c = processed, processed.controller
+    regions = w.panels["processing"].regions
+    assert w.tools.active() == "navigate"
+    assert all(r.movable and r.hasCursor() for r in regions.values())
+    others = [name for name in w.tools.names() if name != "navigate"]
+    assert {"zoom", "pick", "autopick"} <= set(others)
+    for name in others:
+        assert w.tools.set_active(name)
+        assert not any(r.movable or r.hasCursor() for r in regions.values()), name
+        assert all(r.isVisible() for r in regions.values())  # still shown
+    w.tools.set_active("navigate")
+    assert all(r.movable for r in regions.values())
+
+    w.resize(1400, 900)
+    w.show()
+    qtbot.waitExposed(w)
+    w.tools.set_active("zoom")
+    plot = w.plots.map
+    before = plot.plot.vb.viewRange()
+    mouse_drag(qtbot, plot, [(0.8, 500), (1.0, 600), (1.6, 900)])  # starts inside the band
+    assert c.processing.baseline == (450.0, 550.0)  # the band stayed ...
+    assert plot.plot.vb.viewRange() != before  # ... and the box zoomed
+    w.tools.set_active("navigate")
+    mouse_drag(qtbot, plot, [(0.8, 500), (0.8, 550), (0.8, 600)])  # Pan: the band moves
+    assert c.processing.baseline[0] == pytest.approx(550, abs=5)
+
+
+def test_the_stacked_fill_lies_below_the_traces(processed, qtbot):
+    w = processed
+    region = w.panels["processing"].regions["stacked"]
+    curves = w.plots.stacked.curves()
+    assert region.fill.zValue() < min(curve.zValue() for curve in curves) < region.zValue()
+    assert region.fill.getRegion() == pytest.approx((450, 550))
+    assert region.fill.isVisible()
+    w.show_panel("sample")
+    assert not region.isVisible() and not region.fill.isVisible()
+    w.show_panel("processing")
+    assert region.fill.isVisible()
+
+    w.resize(1400, 900)
+    w.show()
+    qtbot.waitExposed(w)
+    w.plot_area.set_current_view("stacked")
+    qtbot.wait(50)
+    drag_like(region, 500, 900)
+    assert region.fill.getRegion() == pytest.approx(region.region())
+    assert region.label.format == "Baseline" and region.label.isVisibleTo(region)
+    drag_like(region, 500, 510)  # narrower than its label: hidden
+    assert not region.label.isVisibleTo(region)
+    drag_like(region, 500, 900)
+    assert region.label.isVisibleTo(region)
