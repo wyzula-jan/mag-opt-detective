@@ -101,7 +101,8 @@ uv sync                                                # back to the dev environ
 saves journal figures in every format and exits with 0. The spec also writes
 `THIRD_PARTY_NOTICES.txt` (`packaging/third_party_notices.py`); the *App bundles*
 workflow builds and smoke-tests the bundles on Linux, macOS and Windows for pull requests
-that touch the packaging and for version tags, which also publish a release. The README
+and pushes to `main` that touch the packaging, and for every new version when the *Release*
+workflow calls it; only the *Release* workflow publishes them (see Releases). The README
 screenshots are rendered by `docs/make_screenshots.py` (synthetic data only).
 
 ## Docs site
