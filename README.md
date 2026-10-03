@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/wyzula-jan/mag-opt-detective/actions/workflows/ci.yml/badge.svg)](https://github.com/wyzula-jan/mag-opt-detective/actions/workflows/ci.yml)
 
-Desktop tool to plot, pick, fit and export magneto-optical FTIR measurements: field sweeps
+Desktop app to plot, pick, fit and export magneto-optical FTIR measurements: field sweeps
 recorded with Bruker OPUS, either as OPUS binary files (`*.0`, `*.1`, …) or as two-column
 text files written by the OPUS export macro.
 
@@ -81,7 +81,7 @@ range, then merge spectral ranges, merge field ranges or average repeated sweeps
 
 **Export.**
 - **Data table…** (Ctrl+E): the map shown, tab-separated.
-- **Image…** (Ctrl+Shift+E): the journal figure window, with a live preview. Presets
+- **Journal figure…** (Ctrl+Shift+E): the figure window, with a live preview. Presets
   **Nature**, **APS** and **Custom**: width and height in mm, text and lines in pt, dpi;
   the map or the stacked plot, its colour range (as in the window, Auto or Fixed), the
   colour bar on the right or on top, ticks (in or out, on all four sides, minor ticks),
@@ -91,7 +91,7 @@ range, then merge spectral ranges, merge field ranges or average repeated sweeps
 - **Quick image (PNG/SVG)…**: the plot as on screen, with its colour scale.
 
 Choices (units, ranges, levels, colours, layout) are remembered between sessions;
-*View › Reset Settings* restores the defaults (and keeps your figure presets).
+*View › Reset settings* restores the defaults (and keeps your figure presets).
 
 ![Picked points in the dark appearance, in meV, with the slim colour bar](docs/images/points-dark.png)
 
@@ -129,10 +129,10 @@ Unpack it and start `mag-opt-detective` (`.exe` on Windows, *Magneto-Optical Det
 on macOS). The bundles are not code-signed: on macOS right-click the app and choose *Open*
 the first time, on Windows choose *More info › Run anyway*.
 
-The first **Image…** export after installing takes about 20 s while matplotlib builds its
-font cache. The cache is kept for later sessions in `~/Library/Caches/mag-opt-detective`
-(macOS), `%LOCALAPPDATA%\mag-opt-detective` (Windows) or `~/.cache/mag-opt-detective`
-(Linux).
+The first **Journal figure…** export after installing takes about 20 s while matplotlib
+builds its font cache. The cache is kept for later sessions in
+`~/Library/Caches/mag-opt-detective` (macOS), `%LOCALAPPDATA%\mag-opt-detective` (Windows)
+or `~/.cache/mag-opt-detective` (Linux).
 
 Build one yourself (the dev tools stay out of the bundle):
 
@@ -165,8 +165,7 @@ to the zero-field list.
 
 ## Exported files
 
-**Data tables** are tab-separated, compatible with the files written by the old versions,
-in the energy unit shown:
+**Data tables** are tab-separated, in the energy unit shown; the library loads them back:
 
 ```
 Energy (meV)	0.25T	0.50T	...
@@ -182,7 +181,7 @@ Energy (meV)	LL 1	LL 2
 1.0		24.797
 ```
 
-Tables without the unit (written before version 5) are read in the unit shown.
+Tables without the unit in the first header cell are read in the unit shown.
 
 **Fit results** (TSV) start with `#` lines (model, curve assignment, number of points, χ²),
 then one row per parameter: `parameter`, `value`, `sigma`, `unit`.
@@ -239,11 +238,12 @@ committed.
 
 ## Citing
 
-If you use Magneto-Optical Detective for an analysis in a publication, please cite it.
+If you use Magneto-Optical Detective for an analysis in a publication, please cite it with
+the version you used (*Help › About* shows it, and so does its release).
 [`CITATION.cff`](CITATION.cff) has the details (GitHub shows them under *Cite this
 repository*), for example:
 
-> J. Wyzula, *Magneto-Optical Detective*, version 5.0,
+> J. Wyzula, *Magneto-Optical Detective*, version *x.y.z*,
 > https://github.com/wyzula-jan/mag-opt-detective
 
 ## Licence
@@ -268,8 +268,3 @@ licence, parts MIT), see
 [`LICENSE-lucide.txt`](src/mag_opt_detective/gui/icons/LICENSE-lucide.txt). The app bundles
 contain every licence text in `THIRD_PARTY_NOTICES.txt`, which *Help › About › Licences…*
 also shows.
-
-## History
-
-Versions up to 4.9 were PyQt5 scripts versioned by file name. The last of them is
-kept in git under the tag `v4.9-legacy`.
