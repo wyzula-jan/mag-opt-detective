@@ -658,7 +658,8 @@ class _Name(ElidedLabel):
 
 
 class ModelCard(QWidget):
-    """One model: header (chevron, colour, name, show switch, remove), editor and fit area."""
+    """One model: header (chevron, colour, name, show switch, remove), editor and fit area
+    ("Fit to points…" opens it in its place)."""
 
     def __init__(self, entry: ms.ModelEntry, owner: Owner, fit_area: QWidget, parent=None):
         super().__init__(parent)
@@ -724,9 +725,12 @@ class ModelCard(QWidget):
         self.editor.refresh()
         with QSignalBlocker(self.fit_button):
             self.fit_button.setChecked(not self.fit_area.isHidden())
+        self.fit_button.setVisible(self.fit_area.isHidden())
 
     def _on_fit_button(self, on: bool) -> None:
+        """The fit area takes the button's place (its header closes it again)."""
         self.fit_area.setVisible(on)
+        self.fit_button.setVisible(not on)
         if on:
             self.fit_area.refresh()
 

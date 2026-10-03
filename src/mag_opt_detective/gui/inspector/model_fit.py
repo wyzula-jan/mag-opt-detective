@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from PySide6.QtCore import QSignalBlocker
+from PySide6.QtCore import QSignalBlocker, Qt
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QComboBox,
@@ -29,6 +29,7 @@ from mag_opt_detective.gui.controller import EXPECTED_ERRORS
 from mag_opt_detective.gui.display import UNIT_TEXT
 from mag_opt_detective.gui.inspector import model_state as ms
 from mag_opt_detective.gui.inspector.model_widgets import (
+    FIELD_HEIGHT,
     CurveDot,
     TableBox,
     mono_label,
@@ -37,6 +38,7 @@ from mag_opt_detective.gui.inspector.model_widgets import (
 )
 from mag_opt_detective.gui.kit import SegmentedControl
 from mag_opt_detective.gui.panels.common import (
+    ElidedLabel,
     LinkButton,
     Note,
     WidthWatcher,
@@ -151,8 +153,9 @@ class FitArea(QWidget):
         fit_row.addWidget(self.points_link)
 
         self.results = QWidget()
-        self.result_table = TableBox()
-        self.result_table.grid.setColumnStretch(1, 1)
+        self.result_table = TableBox()  # name | value ± sigma | unit, numbers on the right
+        self.result_table.grid.setColumnStretch(0, 1)
+        self.result_table.grid.setHorizontalSpacing(3)
         self.stats = QLabel()
         self.stats.setProperty("kit", "muted")
         self.stats.setWordWrap(True)
@@ -252,6 +255,7 @@ class FitArea(QWidget):
                 QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
             )
             combo.setMinimumContentsLength(6)
+            combo.setFixedHeight(FIELD_HEIGHT)
             combo.currentIndexChanged.connect(lambda _i, n=name: self._on_combo(n))
             row = i + 1
             grid.addWidget(dot, row, 0)
@@ -287,14 +291,24 @@ class FitArea(QWidget):
             if widget is not None:
                 widget.hide()
                 widget.deleteLater()
+        right = Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
         for row, (label, value, sigma, text) in enumerate(report.rows):
             value_text, sigma_text = ms.format_with_sigma(value, sigma)
-            name = muted_label(label, 0.94)
-            number = mono_label(f"{value_text} ± {sigma_text}")
+            name = ElidedLabel(label)
+            name.setProperty("kit", "muted")
+            name.setFont(scaled_font(name, 0.94))
+            name.setToolTip(label)
+            number = mono_label(value_text)
+            number.setAlignment(right)
             number.setAccessibleName(f"{label} = {value_text} ± {sigma_text}")
-            grid.addWidget(name, row, 0)
-            grid.addWidget(number, row, 1)
-            grid.addWidget(muted_label(display_unit(text, unit), 0.88), row, 2)
+            plus_minus = mono_label("±")
+            plus_minus.setProperty("kit", "muted")
+            error = mono_label(sigma_text)
+            error.setAccessibleName(f"Uncertainty of {label}")
+            unit_label = muted_label(display_unit(text, unit), 0.88)
+            unit_label.setContentsMargins(3, 0, 0, 0)
+            for column, widget in enumerate((name, number, plus_minus, error, unit_label)):
+                grid.addWidget(widget, row, column)
         squared = "(cm⁻¹)²" if unit is Unit.CM1 else f"{UNIT_TEXT.get(unit, str(unit))}²"
         self.stats.setText(  # a line each: a wrapped line would split an item
             f"χ² {report.chi2:.3g} {squared}\n"

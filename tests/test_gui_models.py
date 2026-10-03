@@ -7,7 +7,7 @@ import threading
 import numpy as np
 import pytest
 from PySide6.QtCore import QPoint, QSettings, Qt
-from PySide6.QtWidgets import QApplication, QLabel, QStyle
+from PySide6.QtWidgets import QApplication, QStyle
 
 import gui_helpers
 from gui_helpers import inspector_page, load_sweep, process, save_to, set_unit
@@ -58,6 +58,16 @@ def load_table(window, tmp_path, field, columns, unit="meV", name="points.csv"):
     cm1 = {k: convert(np.asarray(v, float), unit, "cm-1") for k, v in columns.items()}
     PointTable(field, cm1).save_tsv(path, unit=unit)  # the table keeps cm-1
     window.controller.load_points(path)
+
+
+def result_cells(area) -> list[list[str]]:
+    """The texts of the fit result table, row by row (name, value, ±, sigma, unit)."""
+    grid = area.result_table.grid
+    return [
+        [grid.itemAtPosition(row, column).widget().text() for column in range(5)]
+        for row in range(grid.rowCount())
+        if grid.itemAtPosition(row, 0) is not None
+    ]
 
 
 def zeeman_points(rng, noise=0.02):
@@ -349,10 +359,8 @@ def test_fit_zeeman_branches_to_picked_points(window, sweep, tmp_path, errors):
         assert abs(result.values[name] - value) < 4 * sigma
     assert result.dof == 60 - 4
     assert not area.results.isHidden()
-    texts = [label.text() for label in area.result_table.findChildren(QLabel)]
-    assert texts[:3] == ["E₀ (Branch 1)", texts[1], "cm⁻¹"]
     value, sigma = ms.format_with_sigma(result.values["e0_0"] * MEV, result.stderr["e0_0"] * MEV)
-    assert texts[1] == f"{value} ± {sigma}"
+    assert result_cells(area)[0] == ["E₀ (Branch 1)", value, "±", sigma, "cm⁻¹"]
     report = ms.fit_report(entry, result, window.controller.unit)
     assert report.chi2 == pytest.approx(result.chi2 * MEV**2, rel=1e-4)  # (cm-1)^2
     assert area.stats.text().splitlines() == [
@@ -1051,4 +1059,15 @@ def test_a_unit_switch_keeps_values_suffixes_and_sliders(window, sweep, qtbot, e
     assert ms.params(zeeman)["e0_0"].value == pytest.approx(20.0)  # kept in meV
     hi = zeditor.rows[0].e0.slider.range()[1]
     assert hi >= sweep["x"][-1]  # E₀ spans the processed map (cm⁻¹ now)
+    assert not errors
+
+
+def test_the_fit_area_takes_the_place_of_its_button(window, errors):
+    zeeman = add(window, "zeeman")
+    card = card_of(window, zeeman)
+    assert not card.fit_button.isHidden() and card.fit_area.isHidden()
+    card.fit_button.click()
+    assert card.fit_button.isHidden() and not card.fit_area.isHidden()
+    card.fit_area.close_button.click()
+    assert not card.fit_button.isHidden() and card.fit_area.isHidden()
     assert not errors
