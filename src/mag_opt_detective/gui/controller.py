@@ -27,6 +27,7 @@ from typing import NamedTuple
 import numpy as np
 from PySide6.QtCore import QObject, Signal
 
+from mag_opt_detective.core.fitting import Assignment, FitResult, Model, Observation, fit
 from mag_opt_detective.core.pipeline import (
     PlotKind,
     ProcessOptions,
@@ -815,6 +816,77 @@ class AppController(QObject):
             curve=self.curve,
             overlays={name: source(unit) for name, source in self._overlays.items()},
         )
+
+    # --- models and fitting (Models section) -------------------------------------------
+    # Models register their curves with set_overlay; overlaysChanged tells listeners (e.g. an
+    # export preview) that registered curves changed. Fits use the picked points (cm^-1).
+    overlaysChanged = Signal()
+
+    def notify_overlays(self) -> None:
+        """Announce that overlay curves registered with :meth:`set_overlay` changed."""
+        self.overlaysChanged.emit()
+
+    def picked_curves(self) -> dict[str, int]:
+        """The curves with picked points and how many each has, in table order."""
+        if self.points is None:
+            return {}
+        counts = {
+            name: int(np.isfinite(self.points.column(name)).sum()) for name in self.points.names
+        }
+        return {name: n for name, n in counts.items() if n}
+
+    def fit_observations(
+        self, mapping: Mapping[str, int | None], unit: Unit | str
+    ) -> list[Observation]:
+        """The picked curves of *mapping* (curve -> branch; None skips it), energies in *unit*."""
+        if not self.picked_curves():
+            raise panel_error("there are no picked points to fit; pick some first", "points")
+        observations = []
+        for name, branch in mapping.items():
+            if branch is None or self.points is None or name not in self.points.names:
+                continue
+            field_values, energy = self.points.points(name)
+            if field_values.size:
+                observations.append(Observation(field_values, from_cm1(energy, unit), branch, name))
+        if not observations:
+            raise ValueError("assign at least one picked curve to a branch")
+        return observations
+
+    def fit_model(
+        self,
+        model: Model,
+        mapping: Mapping[str, int | None],
+        assignment: Assignment | str = Assignment.BRANCH,
+    ) -> FitResult:
+        """Fit *model* (not changed) to the picked curves of *mapping*; see :func:`fit`.
+
+        Raises ValueError with a readable message for missing points, too few points for the
+        free parameters, a model that cannot be evaluated or a fit that does not converge.
+        """
+        observations = self.fit_observations(mapping, model.unit)
+        n_points = sum(obs.field.size for obs in observations)
+        n_free = sum(not p.fixed for p in model.params)
+        if n_free == 0:
+            raise ValueError("every parameter is fixed, so there is nothing to fit")
+        if n_points <= n_free:
+            raise ValueError(
+                f"{n_points} points cannot fit {n_free} free parameters; "
+                "pick more points or fix parameters"
+            )
+        result = fit(model, observations, assignment)
+        if not result.success:
+            raise ValueError(f"the fit did not converge ({result.message})")
+        if not all(math.isfinite(v) for v in result.values.values()):
+            raise ValueError("the fit gave values that are not finite")
+        logger.info(
+            "Fit (%s, %d points): chi2 = %.4g %s^2, dof = %d",
+            Assignment(assignment).value,
+            n_points,
+            result.chi2,
+            model.unit,
+            result.dof,
+        )
+        return result
 
     # --- points ------------------------------------------------------------------------
     @contextlib.contextmanager
