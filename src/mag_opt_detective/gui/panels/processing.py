@@ -784,12 +784,14 @@ def install(window) -> None:
 
     def show_mark(*_args) -> None:
         # while the band is dragged the chip keeps its width, so the summary beside it stays
-        chip.set_held(any(region.is_dragging() for region in regions.values()))
         chip.set_mark(baseline_mark(c))
+        chip.set_held(any(region.is_dragging() for region in regions.values()))
 
     for signal in (c.resultChanged, c.processingChanged, c.unitChanged, c.restored):
         signal.connect(show_mark)
     panel.baseline_live.toggled.connect(show_mark)
+    for region in regions.values():  # a drag ended (after Live applied what it left)
+        region.editFinished.connect(show_mark)
     window.themeChanged.connect(chip.update)
     show_mark()
 

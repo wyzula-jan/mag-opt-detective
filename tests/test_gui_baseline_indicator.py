@@ -4,7 +4,7 @@ import math
 
 import pyqtgraph as pg
 import pytest
-from PySide6.QtCore import QPoint, QPointF, Qt
+from PySide6.QtCore import QEvent, QObject, QPoint, QPointF, Qt
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QLabel
 
@@ -233,15 +233,54 @@ def test_the_chip_gets_narrower_and_never_widens_the_window(processed, qtbot):
 def test_the_chip_keeps_its_width_while_held(qtbot):
     widget = BaselineChip()
     qtbot.addWidget(widget)
-    widget.set_mark(BaselineMark((1000.5, 1200.25), Unit.CM1))
-    wide = widget.sizeHint().width()
+    widget.set_mark(BaselineMark((612.0, 992.0), Unit.CM1))
+    narrow = widget.sizeHint().width()
     widget.set_held(True)
-    widget.set_mark(BaselineMark((1, 2), Unit.CM1))
-    assert widget.sizeHint().width() == wide
+    wide = widget.sizeHint().width()
+    assert wide > narrow  # room for one more digit at each end
+    for region in ((707.0, 1087.0), (1000.0, 9999.0), (1.0, 2.0)):
+        widget.set_mark(BaselineMark(region, Unit.CM1))
+        assert widget.sizeHint().width() == wide
+    widget.set_mark(BaselineMark((99999.5, 99999.75), Unit.CM1))  # (more than one digit)
+    wider = widget.sizeHint().width()
+    assert wider > wide
+    widget.set_mark(BaselineMark((612.0, 992.0), Unit.CM1))
+    assert widget.sizeHint().width() == wider
     widget.set_held(False)
-    assert widget.sizeHint().width() < wide
+    assert widget.sizeHint().width() == narrow
     widget.set_mark(None)
     assert widget.isHidden()
+
+
+class Paints(QObject):
+    """The form a chip has whenever it is painted."""
+
+    def __init__(self, chip_widget: BaselineChip):
+        super().__init__(chip_widget)
+        self.forms: list[int | None] = []
+        self._chip = chip_widget
+        chip_widget.installEventFilter(self)
+
+    def eventFilter(self, watched, event) -> bool:
+        if event.type() == QEvent.Type.Paint:
+            self.forms.append(self._chip.form())
+        return False
+
+
+def test_a_wider_region_is_painted_at_its_new_width(processed, qtbot):
+    w, c = processed, processed.controller
+    w.resize(1400, 900)
+    w.show()
+    qtbot.waitExposed(w)
+    w.panels["processing"].baseline_live.setChecked(True)
+    paints = Paints(chip(w))
+    for region in ((612.0, 992.0), (707.0, 1087.0), (707.25, 1087.75), (450.0, 550.0)):
+        c.set_processing(baseline=region)  # applied at once (Live)
+        w.panels["processing"].live.flush()
+        assert c.result.baseline_region == region
+        qtbot.waitUntil(lambda: bool(paints.forms), timeout=2000)
+        qtbot.wait(20)
+    assert paints.forms and set(paints.forms) == {0}
 
 
 def move_pause_ms() -> int:
@@ -254,14 +293,11 @@ def viewport_pos(plot, x: float, y: float) -> QPoint:
     return plot.view.mapFromScene(plot.plot.vb.mapViewToScene(QPointF(x, y)))
 
 
-def test_a_live_drag_neither_flickers_nor_moves_the_status_bar(processed, qtbot):
-    w, c = processed, processed.controller
-    panel = w.panels["processing"]
-    w.resize(1400, 900)
-    w.show_panel("processing")
-    w.show()
-    qtbot.waitExposed(w)
-    panel.baseline_live.setChecked(True)
+def live_drag(w, qtbot, edges: list[float], pause: bool = False) -> list:
+    """Drag the upper edge of the map's band through *edges* (cm^-1) with Live on; the chip's
+    (mark, asked width) after every change while dragged. *pause*: wait until Live applied the
+    last position before letting go (then the release changes nothing)."""
+    c = w.controller
     seen = []
 
     def record() -> None:
@@ -271,20 +307,57 @@ def test_a_live_drag_neither_flickers_nor_moves_the_status_bar(processed, qtbot)
     c.resultChanged.connect(record)
     plot = w.plots.map
     viewport = plot.view.viewport()
-    steps = [viewport_pos(plot, 1.2, 550.0 + 7.3 * k) for k in range(25)]  # the upper edge
+    steps = [viewport_pos(plot, 1.2, edge) for edge in edges]
     QTest.mouseMove(viewport, steps[0])
     QTest.mousePress(viewport, LEFT, PLAIN, steps[0])
     for step in steps[1:]:
         qtbot.wait(move_pause_ms())
         QTest.mouseMove(viewport, step)
+    live = w.panels["processing"].live
+    if pause:
+        qtbot.waitUntil(lambda: not live.is_pending() and not live.is_busy(), timeout=3000)
+        assert c.result.baseline_region == c.processing.baseline
     during = list(seen)
     QTest.mouseRelease(viewport, LEFT, PLAIN, steps[-1])
-    assert len({m.text() for m, _ in during}) > 1  # the applied region changed on the way
+    c.processingChanged.disconnect(record)
+    c.resultChanged.disconnect(record)
+    return during
+
+
+@pytest.fixture
+def dragging(processed, qtbot):
+    """The processed window at 1400 x 900 with the Processing panel open and Live on."""
+    w = processed
+    w.resize(1400, 900)
+    w.show_panel("processing")
+    w.show()
+    qtbot.waitExposed(w)
+    w.panels["processing"].baseline_live.setChecked(True)
+    return w
+
+
+def test_a_live_drag_neither_flickers_nor_moves_the_status_bar(dragging, qtbot):
+    w, c = dragging, dragging.controller
+    paints = Paints(chip(w))
+    edges = [550.0 + 20 * k for k in range(29)]  # 550 - 1110: across 999 -> 1000
+    during = live_drag(w, qtbot, edges)
+    texts = [m.text() for m, _ in during]
+    assert len(set(texts)) > 1  # the applied region changed on the way
+    assert any("– 9" in t for t in texts) and any("– 10" in t for t in texts)
     assert not any(m.pending for m, _ in during) and all(m.live for m, _ in during)
     widths = [width for _, width in during]
-    assert widths == sorted(widths)  # never narrower while dragged
-    assert mark(w).text() == f"Baseline {format_range(*c.result.baseline_region, 'cm⁻¹')}"
+    assert len(set(widths)) == 1  # room for one more digit from the first change on
+    assert paints.forms and set(paints.forms) == {0}  # never painted without "Baseline"
+    assert mark(w).text() == f"Baseline {region_text(*c.result.baseline_region, Unit.CM1)}"
     assert c.result.baseline_region == c.processing.baseline
+    assert chip(w).sizeHint().width() == chip(w).widths(mark(w))[0] + chip(w).MARGIN
+
+
+def test_the_width_is_released_when_a_drag_ends_without_a_change(dragging, qtbot):
+    w = dragging
+    edges = [550.0 + 20 * k for k in range(8)]
+    during = live_drag(w, qtbot, edges, pause=True)
+    assert during and during[-1][1] > chip(w).widths(during[-1][0])[0] + chip(w).MARGIN
     assert chip(w).sizeHint().width() == chip(w).widths(mark(w))[0] + chip(w).MARGIN
 
 

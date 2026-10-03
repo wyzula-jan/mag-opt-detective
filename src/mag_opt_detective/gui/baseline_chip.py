@@ -10,6 +10,7 @@ controller; :class:`BaselineChip` draws it and gets narrower (and then empty) wh
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 from PySide6.QtCore import QRectF, QSize, Qt
@@ -23,6 +24,7 @@ from mag_opt_detective.gui.theme import current_tokens
 
 ICON = "sliders-horizontal"  # the Processing panel's icon: the chip opens it
 WHAT = "each spectrum is shifted so that this region averages 1"
+NUMBER = re.compile(r"[0-9]+(?:\.[0-9]+)?")
 
 
 @dataclass(frozen=True)
@@ -120,6 +122,11 @@ def live_applies(controller) -> bool:
     return True
 
 
+def widest(text: str) -> str:
+    """*text* with each number as wide as one digit more can make it (for reserving room)."""
+    return NUMBER.sub(lambda m: "8" + re.sub("[0-9]", "8", m.group()), text)
+
+
 class BaselineChip(QAbstractButton):
     """A chip with the Processing icon, "Baseline 500 – 880 cm⁻¹", a "Live" tag and the
     warning dot (see :class:`BaselineMark`); a click is for opening the Processing panel.
@@ -127,7 +134,8 @@ class BaselineChip(QAbstractButton):
     Its width may be anything down to zero: given less than it asks for it drops the word
     "Baseline", then shows the icon (and the dot) alone, then nothing. While held
     (:meth:`set_held`, e.g. during a drag of the region) it asks for no less width than it
-    had, so the widgets beside it stay where they are while the numbers change.
+    had, and room for one more digit at each end, so the widgets beside it stay where they are
+    while the numbers change.
     """
 
     HEIGHT = 22  # the chip; the widget adds MARGIN above and below for the dot
@@ -141,7 +149,8 @@ class BaselineChip(QAbstractButton):
         super().__init__(parent)
         self._height = height
         self._mark: BaselineMark | None = None
-        self._held = 0  # the width asked for when held, 0 when not held
+        self._holding = False
+        self._held = 0  # the width asked for at least while held
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setFocusPolicy(Qt.FocusPolicy.TabFocus)
         self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
@@ -160,17 +169,45 @@ class BaselineChip(QAbstractButton):
             self.setToolTip(mark.tooltip())
             self.setAccessibleName(mark.accessible_name())
             self.setAccessibleDescription(mark.tooltip())
-        if old is None or mark is None or self.widths(old) != self.widths(mark):
-            self.updateGeometry()
+        resized = old is None or mark is None or self.widths(old) != self.widths(mark)
+        if self._holding:
+            resized = self._hold(self._held) or resized
         self.setVisible(mark is not None)
+        if resized:
+            self._relayout()
         self.update()
 
     def set_held(self, held: bool) -> None:
-        """Keep (True) or release (False) the width the chip asks for."""
-        width = max(self._held, self.sizeHint().width()) if held else 0
-        if width != self._held:
-            self._held = width
-            self.updateGeometry()
+        """Keep (True) or release (False) the width the chip asks for. Held, it starts with
+        room for one more digit at each end of the region shown."""
+        if held == self._holding:
+            return
+        self._holding = held
+        if held:
+            mark, reserve = self._mark, 0
+            if mark is not None and mark.region:
+                texts = [("Baseline ", "muted"), (widest(mark.range_text()), "fg")]
+                reserve = self._width(texts, mark.live) + self.MARGIN
+            changed = self._hold(reserve)
+        else:
+            changed, self._held = self._held != 0, 0
+        if changed:
+            self._relayout()
+
+    def _hold(self, width: int) -> bool:
+        """Ask for at least *width* and the width the mark shown needs; True if that is more
+        than before."""
+        width = max(width, self.sizeHint().width())
+        changed, self._held = width != self._held, width
+        return changed
+
+    def _relayout(self) -> None:
+        """Take the new size at once: painted at the old one, the chip would drop to a
+        narrower form for a frame."""
+        self.updateGeometry()
+        parent = self.parentWidget()
+        if self.isVisible() and parent is not None and parent.layout() is not None:
+            parent.layout().activate()
 
     # --- drawing -------------------------------------------------------------------------
     def _fonts(self) -> tuple[QFont, QFont]:
@@ -192,19 +229,18 @@ class BaselineChip(QAbstractButton):
         texts = [("Baseline ", "muted"), (mark.range_text(), "fg")]
         return texts[form:] if form < 2 else []
 
+    def _width(self, texts: list[tuple[str, str]], live: bool) -> int:
+        width = self.PAD + self.ICON + self.PAD
+        if texts:
+            label = QFontMetrics(self._fonts()[0])
+            width += self.GAP + sum(label.horizontalAdvance(text) for text, _ in texts)
+            if live:
+                width += self.GAP + self._tag_width()
+        return width
+
     def widths(self, mark: BaselineMark) -> tuple[int, ...]:
         """The chip's width in each form of :meth:`form` (without the margin for the dot)."""
-        label = QFontMetrics(self._fonts()[0])
-        widths = []
-        for form in range(3):
-            width = self.PAD + self.ICON + self.PAD
-            texts = self._texts(mark, form)
-            if texts:
-                width += self.GAP + sum(label.horizontalAdvance(text) for text, _ in texts)
-                if mark.live:
-                    width += self.GAP + self._tag_width()
-            widths.append(width)
-        return tuple(widths)
+        return tuple(self._width(self._texts(mark, form), mark.live) for form in range(3))
 
     def sizeHint(self) -> QSize:
         width = self.widths(self._mark)[0] + self.MARGIN if self._mark is not None else 0
