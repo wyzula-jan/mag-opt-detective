@@ -547,6 +547,29 @@ def test_visible_models_are_overlays_of_the_figure(window, sweep, qtbot, errors)
     assert not errors
 
 
+def test_the_section_never_widens_the_inspector(window, sweep, tmp_path, errors):
+    """With every card open and a fit shown, Models needs no more width than Colour (the
+    inspector content cannot scroll sideways, so wider content would be clipped)."""
+    load_sweep(window, sweep)
+    process(window)
+    field, columns = zeeman_points(np.random.default_rng(1))
+    load_table(window, tmp_path, field, columns)
+    models = models_of(window)
+    add(window, "zeeman")
+    custom = add(window, "custom")
+    card_of(window, custom).editor.code.edit.setPlainText("E0 + a*B\nE1 + b*B**2  # second")
+    zeeman = models.entries[1]
+    card_of(window, zeeman).editor.add_button.click()
+    card_of(window, zeeman).editor.coupled.setChecked(True)
+    for entry in models.entries:
+        card_of(window, entry).fit_button.click()
+    card_of(window, zeeman).fit_area.fit_button.click()
+    assert models.result(zeeman) is not None
+    colour = window.inspector["colour"].minimumSizeHint().width()
+    assert window.inspector["models"].minimumSizeHint().width() <= colour
+    assert not errors
+
+
 # ---------------------------------------------------------------------- settings
 def test_models_are_remembered(qtbot, tmp_path):
     ini = str(tmp_path / "settings.ini")

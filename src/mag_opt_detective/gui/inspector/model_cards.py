@@ -407,11 +407,16 @@ class ExpressionEditor(QWidget):
         self.message = Note(EXPRESSION_HINT)
         self.unit = SegmentedControl(size="xs")
         for value, text in OUTPUT_UNITS:
-            self.unit.add_option(value.value, text, f"The expression gives energies in {text}")
+            button = self.unit.add_option(
+                value.value, text, f"The expression gives energies in {text}"
+            )
+            button.setFont(scaled_font(button, 0.92))
         self.unit.setAccessibleName("Output unit of the expression")
+        unit_label = muted_label("Unit", 0.94)
+        unit_label.setToolTip("The unit of the energies the expression gives (and of its terms)")
         unit_row = QHBoxLayout()
         unit_row.setContentsMargins(0, 0, 0, 0)
-        unit_row.addWidget(muted_label("Output unit", 0.94))
+        unit_row.addWidget(unit_label)
         unit_row.addStretch(1)
         unit_row.addWidget(self.unit)
         self.table = TableBox()
