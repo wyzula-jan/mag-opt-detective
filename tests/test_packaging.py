@@ -5,6 +5,8 @@ from pathlib import Path
 
 import pytest
 
+import mag_opt_detective
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -46,3 +48,30 @@ def test_the_bundle_keeps_the_matplotlib_cache(tmp_path):
     environ = {"MPLCONFIGDIR": "/tmp/_MEI-run"}
     launcher.use_persistent_matplotlib_cache(environ, blocked / "matplotlib")
     assert environ["MPLCONFIGDIR"] == "/tmp/_MEI-run"  # the temporary folder stays
+
+
+# ---------------------------------------------------------------------- notices
+@pytest.fixture(scope="module")
+def notices():
+    return load("third_party_notices.py")
+
+
+def test_notices_cover_the_runtime_packages_only(notices):
+    names = {notices.normalise(d.metadata["Name"]) for d in notices.runtime_distributions()}
+    assert {"numpy", "scipy", "matplotlib", "pillow", "pyqtgraph", "shiboken6"} <= names
+    assert {"pyside6-essentials", "fonttools", "contourpy", "kiwisolver"} <= names
+    assert not names & {"pytest", "pytest-qt", "ruff", "pre-commit", "pyyaml", "pyinstaller"}
+    assert "mag-opt-detective" not in names
+
+
+def test_notices_hold_the_licence_texts(notices, tmp_path):
+    path = notices.write_notices(tmp_path / "THIRD_PARTY_NOTICES.txt")
+    text = path.read_text(encoding="utf-8")
+    assert text.startswith(f"Magneto-Optical Detective {mag_opt_detective.__version__}")
+    for dist in notices.runtime_distributions():
+        assert f"{dist.metadata['Name']} {dist.version}" in text
+    assert "GNU LESSER GENERAL PUBLIC LICENSE" in text  # Qt and PySide6
+    assert "GNU GENERAL PUBLIC LICENSE" in text  # which the LGPL refers to
+    assert "PYTHON SOFTWARE FOUNDATION LICENSE" in text.upper()
+    assert "Lucide" in text
+    assert "NumPy Developers" in text  # numpy's own licence file

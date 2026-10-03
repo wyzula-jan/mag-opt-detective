@@ -55,7 +55,7 @@ from PySide6.QtWidgets import (
 from mag_opt_detective import __version__
 from mag_opt_detective.core.processing import Axis
 from mag_opt_detective.core.units import Unit
-from mag_opt_detective.gui import console, export_menu, icons, plot_panel
+from mag_opt_detective.gui import console, export_menu, icons, licences, plot_panel
 from mag_opt_detective.gui.controller import AppController
 from mag_opt_detective.gui.display import format_range, process_key, unit_text
 from mag_opt_detective.gui.inspector import colour, models, traces, view
@@ -1043,13 +1043,12 @@ class MainWindow(QMainWindow):
         QMessageBox.information(self, "Shortcuts", f"<table cellspacing='6'>{rows}</table>")
 
     def show_about(self) -> None:
-        QMessageBox.about(
+        licences.about_box(
             self,
-            "About",
             f"<b>Magneto-Optical Detective {__version__}</b><br>"
             f"Python {platform.python_version()}, Qt {qVersion()}, PySide6 {pyside_version}<br>"
             f"numpy {np.__version__}, scipy {scipy.__version__}, pyqtgraph {pg.__version__}",
-        )
+        ).exec()
 
     def event(self, event) -> bool:
         # The tool shortcuts are single letters for the whole window; a list, table or combo
