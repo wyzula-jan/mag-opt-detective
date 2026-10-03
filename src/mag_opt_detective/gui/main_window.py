@@ -55,8 +55,8 @@ from PySide6.QtWidgets import (
 from mag_opt_detective import __version__
 from mag_opt_detective.core.processing import Axis
 from mag_opt_detective.core.units import Unit
-from mag_opt_detective.gui import console, export_menu, icons, licences, plot_panel
-from mag_opt_detective.gui.controller import DATA_CHANGED, DATA_CURRENT, AppController
+from mag_opt_detective.gui import console, export_menu, icons, licences, links, plot_panel
+from mag_opt_detective.gui.controller import DATA_CHANGED, DATA_CURRENT, AppController, user_action
 from mag_opt_detective.gui.display import format_range, process_key, unit_text
 from mag_opt_detective.gui.inspector import colour, models, traces, view
 from mag_opt_detective.gui.kit import (
@@ -93,6 +93,7 @@ SHORTCUTS = [
     ("W", "Auto-pick: follow a clicked line, or find the lines in a drawn region"),
     ("Ctrl+Z / Ctrl+Shift+Z", "Undo / redo a point edit (Alt-click removes a point)"),
     ("A", "Fit the plot to the data"),
+    ("F1", "Open the documentation"),
 ]
 KINDS = (
     ("Ratio", "R(B)/R(0)", "Ctrl+1"),
@@ -774,13 +775,30 @@ class MainWindow(QMainWindow):
         reset.setEnabled(self.persistence is not None)
         view_menu.addAction(reset)
 
-        help_menu = self.menuBar().addMenu("&Help")
-        shortcuts = QAction("&Shortcuts", self)
-        shortcuts.triggered.connect(self.show_shortcuts)
-        about = QAction("&About", self)
-        about.triggered.connect(self.show_about)
-        help_menu.addAction(shortcuts)
-        help_menu.addAction(about)
+        # Help: the web links (gui/links.py), the shortcuts, then the group of the app itself,
+        # About (on macOS Qt moves it into the application menu); commands[...] names them
+        self.help_menu = self.menuBar().addMenu("&Help")
+        docs = self._action("documentation", "&Documentation", ("F1",), self.open_documentation)
+        docs.setStatusTip("Open the user guide in the web browser")
+        icons.set_icon(docs, "file-text")
+        feature = self._action("request_feature", "Request a &feature…", (), self.request_feature)
+        feature.setStatusTip("Suggest a feature: opens the feature request form on GitHub")
+        icons.set_icon(feature, "plus")
+        bug = self._action("report_bug", "Report a &bug…", (), self.report_bug)
+        bug.setStatusTip(
+            "Report a problem: opens the bug form on GitHub, with the app version and the "
+            "system filled in"
+        )
+        icons.set_icon(bug, "triangle-alert")
+        shortcuts = self._action("shortcuts", "&Shortcuts", (), self.show_shortcuts)
+        shortcuts.setStatusTip("List the keyboard shortcuts")
+        about = self._action("about", "&About", (), self.show_about)
+        about.setStatusTip("The version, how to cite the app and the licences")
+        self.help_menu.addActions([docs, feature, bug])
+        self.help_menu.addSeparator()
+        self.help_menu.addAction(shortcuts)
+        self.help_menu.addSeparator()
+        self.help_menu.addAction(about)
 
     def _wire_frame(self) -> None:
         c, tb = self.controller, self.toolbar
@@ -1096,6 +1114,30 @@ class MainWindow(QMainWindow):
             "for an analysis in a publication, please cite "
             "it with this version (see CITATION.cff in the repository).",
         ).exec()
+
+    # ------------------------------------------------------------------ web links
+    @user_action("Open the documentation")
+    def open_documentation(self) -> None:
+        links.open_url(links.DOCS_URL)
+
+    @user_action("Request a feature")
+    def request_feature(self) -> None:
+        links.open_url(links.feature_request_url())
+
+    @user_action("Report a bug")
+    def report_bug(self) -> None:
+        """Open the bug form, filled in with :func:`links.environment` and the plot shown."""
+        links.open_url(links.bug_report_url(links.environment(self.plot_summary())))
+
+    def plot_summary(self) -> str:
+        """The plot shown in a few words, e.g. ``"Map: R(B)/R(0), meV"`` (no names or data)."""
+        c = self.controller
+        if c.result is None:
+            return "Nothing processed"
+        view = self.plot_area.current_view()
+        what = plot_panel.value_label(self, view) if view == "reference" else c.description()
+        library = ", a library map" if c.result_source == "library" else ""
+        return f"{view.capitalize()}: {what}, {unit_text(c.unit)}{library}"
 
     def event(self, event) -> bool:
         # The tool shortcuts are single letters for the whole window; a list, table or combo
