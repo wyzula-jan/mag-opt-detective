@@ -15,7 +15,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from PySide6.QtCore import QEvent, QObject, QSize, Qt
-from PySide6.QtGui import QAction, QKeySequence
+from PySide6.QtGui import QAction, QKeySequence, QPainter
 from PySide6.QtWidgets import QFileDialog, QHBoxLayout, QLabel, QToolButton, QVBoxLayout, QWidget
 
 from mag_opt_detective.core.opus import is_opus_file
@@ -50,6 +50,7 @@ from mag_opt_detective.gui.panels.files import (
     breakable,
     fmt_field,
 )
+from mag_opt_detective.gui.theme import current_tokens
 from mag_opt_detective.gui.watch import OK, PROBLEM, FolderWatcher, WatchStatus, sweep_folder
 from mag_opt_detective.gui.widgets import last_dir, set_last_dir
 
@@ -141,9 +142,24 @@ class WatchBox(QWidget):
             self.state.set_text(*watch_text(status))
 
 
+class _TokenLabel(QLabel):
+    """A one-line label painted in the theme token *token* (read at paint time)."""
+
+    token = "muted"
+
+    def paintEvent(self, event) -> None:
+        painter = QPainter(self)
+        painter.setPen(current_tokens()[self.token])
+        painter.setFont(self.font())
+        flags = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+        painter.drawText(self.contentsRect(), int(flags), self.text())
+        painter.end()
+
+
 class WatchChip(QWidget):
     """The watching state in the status bar (hidden while not watching), with a button that
-    stops it: ``Watching Demo_sweep · 23 files · 12:03:10``."""
+    stops it: ``Watching Demo_sweep · 23 files · 12:03:10``; a problem shows in the warning
+    colour."""
 
     MAX_NAME = 28  # characters of the folder name shown
 
@@ -152,8 +168,7 @@ class WatchChip(QWidget):
         self.icon_label = QLabel()
         self.icon_label.setFixedSize(16, 16)
         self.icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.text_label = QLabel()
-        self.text_label.setProperty("kit", "muted")
+        self.text_label = _TokenLabel()
         self.text_label.setFont(scaled_font(self.text_label, 0.94))
         self.stop_button = QToolButton()
         self.stop_button.setProperty("kit", "tool")
@@ -182,16 +197,19 @@ class WatchChip(QWidget):
         if len(name) > self.MAX_NAME:
             name = name[: self.MAX_NAME - 1] + "…"
         parts = [f"Watching {name}", files_text(status.files)]
-        if status.level == PROBLEM:
-            parts.append("not processed")  # the reason is in the tooltip and the panel
-        elif status.note:
-            parts.append(status.note[:1].lower() + status.note[1:])
+        if status.brief:  # the whole note is in the tooltip and the panel
+            parts.append(status.brief)
         elif status.last is not None:
             parts.append(f"{status.last:%H:%M:%S}")
         self.text_label.setText(" · ".join(parts))
         self.setToolTip(f"{status.folder}\n{watch_text(status)[0]}")
         self._level = status.level
+        self.text_label.token = "warn" if status.level == PROBLEM else "muted"
+        self.text_label.update()
         self._update_icon()
+
+    def level(self) -> str:
+        return self._level
 
     def _update_icon(self) -> None:
         color = "warn" if self._level == PROBLEM else "muted"
@@ -463,8 +481,8 @@ def install_watch(window, panel: SamplePanel) -> FolderWatcher:
             watcher.stop()
         show()  # also when watching could not start
 
-    def on_skipped(path: str, text: str) -> None:
-        window.infobar.show_message("warning", f"Left out {Path(path).name}", text)
+    def on_skipped(title: str, text: str) -> None:
+        window.infobar.show_message("warning", title, text)
 
     def on_failed(exc: BaseException) -> None:
         window.report_error("Process new files", str(exc), panel=getattr(exc, "panel", None))

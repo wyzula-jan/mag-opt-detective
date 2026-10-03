@@ -14,7 +14,7 @@ import gui_helpers
 from helpers import sweep_name, write_opus, write_text
 from mag_opt_detective.core.pipeline import ReferenceMode
 from mag_opt_detective.gui import watch
-from mag_opt_detective.gui.controller import NO_REFERENCE_FILES, SweepFiles
+from mag_opt_detective.gui.controller import NO_REFERENCE_FILES, FieldRange, SweepFiles
 from mag_opt_detective.gui.main_window import MainWindow
 from mag_opt_detective.gui.panels.sample import WatchChip
 
@@ -197,11 +197,12 @@ def test_files_that_are_no_spectra_are_reported_once_and_left_out(window, clock,
     for _ in range(watch.MAX_FAILURES + 2):
         clock.now += 1.0
         watcher.check_now()
-    names = sorted(Path(path).name for path, _text in skipped)
-    assert names == ["Sample_4p2K_Sam1_a01p000T.txt", "notes.txt"]
-    text = dict((Path(p).name, t) for p, t in skipped)
-    assert text["notes.txt"].startswith("There is no field in its name")
-    assert text["Sample_4p2K_Sam1_a01p000T.txt"].startswith("It does not read as a spectrum")
+    text = dict(skipped)
+    assert sorted(text) == ["Left out Sample_4p2K_Sam1_a01p000T.txt", "Left out notes.txt"]
+    assert text["Left out notes.txt"].startswith("There is no field in its name")
+    assert text["Left out Sample_4p2K_Sam1_a01p000T.txt"].startswith(
+        "It does not read as a spectrum"
+    )
     assert gui_helpers.infobar_text(window).startswith("Left out ")
     assert c_files(window) == [sweep_name(0.5)]
     assert fields(window) == [0.5]
@@ -245,8 +246,9 @@ def test_files_found_during_an_update_make_one_more_update_after_it(window, cloc
     c.resultChanged.connect(during_update)
     spectrum(tmp_path, 1.0)
     arrive(window, clock)
-    assert results == [[0.5, 1.0]]  # the second update waits for the first
-    qtbot.waitUntil(lambda: len(results) == 2, timeout=2000)
+    assert results == [[0.5, 1.0]]  # the second update waits for the first, and the gap
+    clock.now += watch.MIN_GAP_S
+    qtbot.waitUntil(lambda: len(results) == 2, timeout=3000)  # the gap's timer
     assert results[1] == [0.5, 1.0, 1.5, 2.0] and not nested
     qtbot.wait(20)
     assert len(results) == 2
@@ -391,6 +393,7 @@ def test_a_spectrum_written_again_comes_back(window, clock, tmp_path):
     c = window.controller
     target = tmp_path / sweep_name(1.0)
     os.remove(target)  # measured again: the old file goes first
+    clock.now += watch.MIN_GAP_S
     watcher.check_now()
     assert fields(window) == [0.5] and c_files(window) == [sweep_name(0.5)]
     write_text(target, X, 1.3 * BASE)
@@ -403,6 +406,182 @@ def test_a_spectrum_written_again_comes_back(window, clock, tmp_path):
     spectrum(tmp_path, 1.5)
     arrive(window, clock)
     assert c_files(window) == [sweep_name(1.0), sweep_name(1.5)]
+
+
+def test_a_failed_update_or_check_does_not_end_watching(
+    window, clock, tmp_path, monkeypatch, caplog
+):
+    zero(tmp_path, old=True)
+    spectrum(tmp_path, 0.5, old=True)
+    watcher = window.folder_watch
+    watcher.start(tmp_path)
+    c = window.controller
+
+    def boom(*_args, **_kwargs):
+        raise RuntimeError("boom")
+
+    with monkeypatch.context() as patch, caplog.at_level(logging.ERROR, "mag_opt_detective"):
+        patch.setattr(c, "process_update", boom)
+        spectrum(tmp_path, 1.0)
+        arrive(window, clock)
+    assert state_text(window).startswith("The update failed (RuntimeError('boom'))")
+    assert chip(window).level() == watch.PROBLEM
+    errors = [r for r in caplog.records if r.levelno >= logging.ERROR]
+    assert [r.exc_info is not None for r in errors] == [True]  # in the Log, with its trace
+    assert watcher.watching() and watcher.interval() > 0  # still looking
+    spectrum(tmp_path, 1.5)
+    arrive(window, clock)
+    assert fields(window) == [0.5, 1.0, 1.5]
+    assert state_text(window).startswith("Watching · 4 files · last update")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(c, "read_spectrum", boom)
+        spectrum(tmp_path, 2.0)
+        arrive(window, clock)
+    assert state_text(window).startswith("The check failed (RuntimeError('boom'))")
+    assert watcher.interval() > 0
+    arrive(window, clock)
+    assert fields(window) == [0.5, 1.0, 1.5, 2.0]
+
+
+def test_a_folder_out_of_reach_is_looked_at_until_it_is_back(window, clock, tmp_path, errors):
+    folder = tmp_path / "share"
+    folder.mkdir()
+    zero(folder, old=True)
+    spectrum(folder, 0.5, old=True)
+    watcher = window.folder_watch
+    watcher.start(folder)
+    away = tmp_path / "away"
+    folder.rename(away)  # the network drive is gone
+    watcher.check_now()
+    assert watcher.watching() and watcher.interval() == watch.UNREACHABLE_MS
+    assert state_text(window).startswith("Folder not reachable since ")
+    assert chip(window).level() == watch.PROBLEM and "not reachable since" in chip(window).text()
+    assert fields(window) == [0.5] and len(window.controller.processing.sample_files.field) == 1
+    clock.now += 60
+    watcher.check_now()
+    assert errors == []
+
+    away.rename(folder)  # back, with a spectrum written meanwhile
+    spectrum(folder, 1.0)
+    watcher.check_now()
+    assert state_text(window).startswith("Watching · 2 files")
+    assert watcher.interval() == watch.RECHECK_MS
+    clock.now += SETTLE
+    watcher.check_now()
+    assert fields(window) == [0.5, 1.0]
+
+
+def test_a_file_with_another_energy_axis_is_held_back(window, clock, tmp_path, errors):
+    zero(tmp_path, old=True)
+    spectrum(tmp_path, 0.5, old=True)
+    watcher = window.folder_watch
+    watcher.start(tmp_path)
+    skipped = count(watcher.skipped)
+    path = tmp_path / sweep_name(1.0)
+    lines = [f"{a:.8f}\t{b:.8f}\n" for a, b in zip(X, 1.1 * BASE, strict=True)]
+    path.write_text("".join(lines[:40]))  # a slow writer paused half-way: it parses
+    arrive(window, clock)
+    clock.now += 1.0
+    watcher.check_now()
+    assert c_files(window) == [sweep_name(0.5)] and skipped == [] and errors == []
+    clock.now += 1.0
+    watcher.check_now()  # the third check with the same axis: reported once
+    assert [title for title, _text in skipped] == [f"Left out {sweep_name(1.0)}"]
+    assert skipped[0][1].startswith("Its energy axis differs from the sweep's: 40 points")
+
+    with path.open("a") as fh:
+        fh.write("".join(lines[40:]))
+    os.utime(path, ns=(time.time_ns(), time.time_ns() + 1000))
+    arrive(window, clock)
+    assert fields(window) == [0.5, 1.0] and errors == []
+
+
+def test_held_files_are_tried_again_when_the_sweep_is_complete(window, clock, tmp_path):
+    def text(y, rows=None) -> str:
+        return "".join(f"{a:.8f}\t{b:.8f}\n" for a, b in list(zip(X, y, strict=True))[:rows])
+
+    first = [tmp_path / BEFORE, tmp_path / sweep_name(0.5)]
+    for path, y in zip(first, (BASE, 1.05 * BASE), strict=True):
+        path.write_text(text(y, 40))  # listed while still half-written
+        _aged(path, True)
+    watcher = window.folder_watch
+    watcher.start(tmp_path)
+    assert window.controller.result.ratio.energy.size == 40
+    spectrum(tmp_path, 1.0)  # complete: another axis than the (half) sweep
+    arrive(window, clock)
+    for _ in range(watch.MAX_FAILURES):
+        clock.now += 1.0
+        watcher.check_now()
+    assert c_files(window) == [sweep_name(0.5)]  # left out for now
+    for path, y in zip(first, (BASE, 1.05 * BASE), strict=True):
+        path.write_text(text(y))  # the first files are finished
+    arrive(window, clock)
+    for _ in range(2):
+        clock.now += watch.MIN_GAP_S
+        watcher.check_now()
+    assert fields(window) == [0.5, 1.0]
+    assert window.controller.result.ratio.energy.size == X.size
+
+
+def test_a_custom_field_range_waits_for_its_files(window, clock, tmp_path, errors):
+    c = window.controller
+    c.set_processing(custom_field=True, sample_field=FieldRange(0.5, 0.5, 2.0))
+    zero(tmp_path, old=True)
+    for b in (0.5, 1.0):
+        spectrum(tmp_path, b, old=True)
+    window.folder_watch.start(tmp_path)
+    assert state_text(window) == (
+        "Waiting for 2 more files to match the custom field range · 3 files"
+    )
+    spectrum(tmp_path, 1.5)
+    arrive(window, clock)
+    assert state_text(window).startswith("Waiting for 1 more file to match")
+    assert c.result is None and errors == []
+    spectrum(tmp_path, 2.0)
+    arrive(window, clock)
+    assert fields(window) == [0.5, 1.0, 1.5, 2.0] and errors == []
+
+
+def test_files_left_out_together_are_reported_together(window, clock, tmp_path, caplog):
+    zero(tmp_path, old=True)
+    spectrum(tmp_path, 0.5, old=True)
+    watcher = window.folder_watch
+    watcher.start(tmp_path)
+    skipped = count(watcher.skipped)
+    for i in range(5):
+        (tmp_path / f"report_{i}.pdf").write_bytes(bytes(range(256)) * 4)
+    with caplog.at_level(logging.WARNING, "mag_opt_detective"):
+        arrive(window, clock)
+        for _ in range(watch.MAX_FAILURES):
+            clock.now += 1.0
+            watcher.check_now()
+    assert skipped == [
+        (
+            "Left out 5 files that are not spectra",
+            "report_0.pdf, report_1.pdf, report_2.pdf and 2 more. " + watch.TRIED_AGAIN,
+        )
+    ]
+    warnings = [r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING]
+    assert len(warnings) == 1 and "Left out 5 files" in warnings[0]
+    assert gui_helpers.infobar_text(window).startswith("Left out 5 files that are not spectra")
+
+
+def test_updates_keep_a_gap_between_them(window, clock, tmp_path, monkeypatch):
+    monkeypatch.setattr(watch, "SETTLE_S", 0.5)
+    zero(tmp_path, old=True)
+    spectrum(tmp_path, 0.5, old=True)
+    watcher = window.folder_watch
+    watcher.start(tmp_path)  # an update now
+    spectrum(tmp_path, 1.0)
+    watcher.check_now()
+    clock.now += 0.6
+    watcher.check_now()  # complete, but within MIN_GAP_S of the last update
+    assert fields(window) == [0.5]
+    assert len(window.controller.processing.sample_files.field) == 1
+    clock.now += 0.5
+    watcher.check_now()
+    assert fields(window) == [0.5, 1.0]
 
 
 # ---------------------------------------------------------------------- stopping

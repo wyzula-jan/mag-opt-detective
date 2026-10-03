@@ -5,7 +5,13 @@ import numpy as np
 from helpers import sweep_name, write_text
 from mag_opt_detective.gui import watch
 from mag_opt_detective.gui.controller import SweepFiles
-from mag_opt_detective.gui.watch import Arrivals, folder_listing, path_key, sweep_folder
+from mag_opt_detective.gui.watch import (
+    Arrivals,
+    folder_listing,
+    path_key,
+    skip_report,
+    sweep_folder,
+)
 
 X = np.linspace(100.0, 1000.0, 11)
 
@@ -56,3 +62,27 @@ def test_folder_listing_and_the_folder_of_a_sweep(tmp_path):
     assert sweep_folder(SweepFiles((str(other),), (b,))) == str(tmp_path)  # in-field decide
     assert sweep_folder(SweepFiles()) is None
     assert path_key(f"{tmp_path}/./x.txt") == path_key(tmp_path / "x.txt")
+
+
+def test_reports_of_files_left_out():
+    one = skip_report([("/f/a.txt", watch.NOT_SPECTRUM, "could not convert 'x'.")])
+    assert one == (
+        "Left out a.txt",
+        "It does not read as a spectrum: could not convert 'x'. It is read again when it changes.",
+    )
+    assert skip_report([("/f/n.txt", watch.NO_FIELD, "")]) == (
+        "Left out n.txt",
+        "There is no field in its name (like …_a01p250T).",
+    )
+    mixed = skip_report(
+        [
+            ("/f/b.pdf", watch.NOT_SPECTRUM, "x"),
+            ("/f/a.pdf", watch.NOT_SPECTRUM, "x"),
+            ("/f/n.txt", watch.NO_FIELD, ""),
+        ]
+    )
+    assert mixed == (
+        "Left out 3 files",
+        "2 do not read as spectra, 1 have no field in their names: a.pdf, b.pdf, n.txt. "
+        + watch.TRIED_AGAIN,
+    )
