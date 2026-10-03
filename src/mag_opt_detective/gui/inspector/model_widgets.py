@@ -261,6 +261,16 @@ def columns(widget: QWidget) -> Columns:
     return _COLUMNS[key]
 
 
+def symmetric_range(half: float):
+    """A slider range of ``[-half, half]``, widened for a value beyond it (signed values)."""
+
+    def range_for(value: float) -> tuple[float, float]:
+        end = max(half, nice_ceil(1.5 * abs(value))) if abs(value) > half else half
+        return -end, end
+
+    return range_for
+
+
 def default_range(value: float) -> tuple[float, float]:
     """A slider range around *value*: from 0 to about twice it (-1 … 1 for 0)."""
     if value == 0 or not math.isfinite(value):
@@ -358,8 +368,11 @@ class ParamRow(QWidget):
     once on release (``(value, False)``); typing in the field emits ``(value, False)``.
 
     In the range mode the slider spans *range_for(value)* (re-derived when a value falls
-    outside it or the unit changes); the relative span is taken of at least *floor*.
-    :meth:`set_value` is silent.
+    outside it or the unit changes). The relative span is taken of at least *floor*, or of
+    *floor_share* of the size of the last value set or typed (at 0: of that size), so a value
+    can be dragged across 0.
+    *nonnegative*: the slider never goes below 0 (the field still takes what *minimum*
+    allows). :meth:`set_value` is silent.
     """
 
     valueEdited = Signal(float, bool)
@@ -377,6 +390,8 @@ class ParamRow(QWidget):
         mode: SliderMode | None = None,
         range_for=default_range,
         floor: float = 0.0,
+        floor_share: float | None = None,
+        nonnegative: bool = False,
         mono: bool = False,
         parent=None,
     ):
@@ -384,6 +399,8 @@ class ParamRow(QWidget):
         name = name or caption
         self._range_for = range_for
         self._range_stale = True
+        self._floor_share = floor_share
+        self._scale = 1.0  # the size of the value (floor_share)
         self._wide: bool | None = None
         self.caption = ElidedLabel(caption)
         self.caption.setProperty("kit", "muted")
@@ -402,7 +419,8 @@ class ParamRow(QWidget):
         self.slider = NudgeSlider()
         self.slider.setAccessibleName(name)
         self.slider.setToolTip(name)
-        self.slider.set_bounds(minimum, maximum)
+        low = 0.0 if nonnegative and (minimum is None or minimum < 0) else minimum
+        self.slider.set_bounds(low, maximum)
         self.slider.set_floor(floor)
         if integer:
             self.slider.set_step(1.0)
@@ -428,6 +446,7 @@ class ParamRow(QWidget):
         self.field.set_value(value)
         self.slider.set_value(value)
         self._fit_range(value)
+        self._share_floor(value)
 
     def set_unit(self, text: str) -> None:
         if text != self.field.unit_label.text():
@@ -447,6 +466,15 @@ class ParamRow(QWidget):
             self.slider.set_range(*self._range_for(value))
             self._range_stale = False
 
+    def _share_floor(self, value: float) -> None:
+        """The relative floor: *floor_share* of the value's scale (its last non-zero size),
+        the whole scale at 0."""
+        if self._floor_share is None or not math.isfinite(value):
+            return
+        if value:
+            self._scale = abs(value)
+        self.slider.set_floor(self._floor_share * self._scale if value else self._scale)
+
     def _on_slider(self, value: float) -> None:
         self.field.set_value(value)
         self.valueEdited.emit(value, True)  # committed by editingFinished
@@ -456,6 +484,7 @@ class ParamRow(QWidget):
             return
         self.slider.set_value(value)
         self._fit_range(value)
+        self._share_floor(value)
         self.valueEdited.emit(float(value), False)
 
     # --- layout --------------------------------------------------------------------------

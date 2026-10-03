@@ -41,8 +41,8 @@ from mag_opt_detective.gui.inspector.model_widgets import (
     default_range,
     fixed_range,
     muted_label,
-    nice_ceil,
     subscript,
+    symmetric_range,
     tool_button,
 )
 from mag_opt_detective.gui.kit import SegmentedControl, Switch
@@ -66,7 +66,8 @@ from mag_opt_detective.gui.theme import current_tokens
 DELTA_SPAN = 200.0  # meV: the half-gap slider's end (range mode)
 COUPLING_SPAN = 20.0  # meV: the couplings' slider end (range mode)
 VELOCITY_SPAN = (0.0, 30.0)  # 10⁵ m/s
-G_SPAN = (0.0, 10.0)
+G_SPAN = 10.0  # g spans -10 … 10 (g factors can be negative)
+EXPRESSION_FLOOR = 0.1  # an expression parameter's relative span: at least 10 % of its scale
 ENERGY_FLOOR = 1.0  # meV: the relative span of a smaller energy is taken of this
 # no-break spaces: the formula wraps only between its terms
 DIRAC_FORMULA = (
@@ -125,9 +126,9 @@ def energy_range(owner: Owner, span_mev: float | None = None):
     if span_mev is not None:
         return fixed_range(0.0, in_unit(span_mev, owner.unit))
     span = owner.energy_span()
-    if span is None:
+    if span is None or span[1] <= 0:
         return default_range
-    return fixed_range(0.0, nice_ceil(in_unit(span[1], owner.unit)))
+    return fixed_range(0.0, in_unit(span[1], owner.unit))
 
 
 def stack(*widgets: QWidget, spacing: int = 8) -> QVBoxLayout:
@@ -266,9 +267,12 @@ class BranchRow(QWidget):
         self.m.setFixedWidth(self.m.caption.sizeHint().width() + room + 14)
         self.form = FormButton()
         self.remove = tool_button("x", "Remove branch", "faint")
-        self.e0 = ParamRow("E₀", name="E₀, the energy at zero field", digits=5, mode=mode)
+        # E₀ may be typed below 0 (a linear branch), but the slider stops at 0
+        self.e0 = ParamRow(
+            "E₀", name="E₀, the energy at zero field", digits=5, mode=mode, nonnegative=True
+        )
         self.g = ParamRow(
-            "g", name="g factor", mode=mode, range_for=fixed_range(*G_SPAN), floor=1.0
+            "g", name="g factor", mode=mode, range_for=symmetric_range(G_SPAN), floor=1.0
         )
         head = QHBoxLayout()
         head.setContentsMargins(0, 0, 0, 0)
@@ -400,6 +404,7 @@ class ZeemanEditor(QWidget):
                     name=f"Coupling Δ {i + 1}–{j + 1}",
                     digits=5,
                     mode=self.owner.slider_mode,
+                    nonnegative=True,
                 )
                 row.valueEdited.connect(
                     lambda v, live, pair=(i, j): self._on_coupling(pair, v, live)
@@ -479,7 +484,7 @@ class ExpressionParam:
 
     def __init__(self, name: str, mode: SliderMode):
         self.name = name
-        self.value = ParamRow(name, name=name, mode=mode, mono=True)
+        self.value = ParamRow(name, name=name, mode=mode, mono=True, floor_share=EXPRESSION_FLOOR)
         self.label = ElidedLabel(name)  # a long name must not widen the table
         self.label.setFont(mono_font(0.88))
         self.label.setToolTip(name)

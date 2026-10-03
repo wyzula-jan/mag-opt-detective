@@ -995,14 +995,14 @@ def test_g_has_a_slider_that_drags_the_zeeman_curve(window, sweep, qtbot, errors
         energy, convert(branch_energy(field, p["e0_0"].value, 2.2, 1.0), "meV", "cm-1")
     )
 
-    # range mode: the handle spans 0 … 10 for g
+    # range mode: the handle spans -10 … 10 for g (g factors can be negative)
     inspector_page(window, "models").models.slider_mode.set("range", 10.0)
     slider = row.g.slider
-    assert slider.mode() == "range" and slider.range() == (0.0, 10.0)
+    assert slider.mode() == "range" and slider.range() == (-10.0, 10.0)
     assert slider.handle_x() == pytest.approx(slider.x_for(2.2))
-    qtbot.mouseClick(slider, Qt.MouseButton.LeftButton, pos=QPoint(round(slider.x_for(5)), 10))
-    step = 10.0 / (slider.track()[1] - slider.track()[0])  # a pixel
-    assert p["g_0"].value == pytest.approx(5.0, abs=step)
+    qtbot.mouseClick(slider, Qt.MouseButton.LeftButton, pos=QPoint(round(slider.x_for(-5)), 10))
+    step = 20.0 / (slider.track()[1] - slider.track()[0])  # a pixel
+    assert p["g_0"].value == pytest.approx(-5.0, abs=step)
     assert float(row.g.field.text()) == pytest.approx(p["g_0"].value)
     field, energy = models.curve_data()["zeeman"][0]
     np.testing.assert_allclose(
@@ -1114,7 +1114,7 @@ def test_a_unit_switch_keeps_values_suffixes_and_sliders(window, sweep, qtbot, e
     assert ms.params(zeeman)["e0_0"].value == pytest.approx(20.0)  # kept in meV
     energy = window.controller.result.ratio.energy  # cm⁻¹, as shown now
     top = float(np.nanmax(energy))
-    assert zeditor.rows[0].e0.slider.range()[1] >= top  # E₀ spans the processed map
+    assert zeditor.rows[0].e0.slider.range() == (0.0, pytest.approx(top))  # 0 to the map top
     assert not errors
 
 
@@ -1126,6 +1126,57 @@ def test_the_fit_area_takes_the_place_of_its_button(window, errors):
     assert card.fit_button.isHidden() and not card.fit_area.isHidden()
     card.fit_area.close_button.click()
     assert not card.fit_button.isHidden() and card.fit_area.isHidden()
+    assert not errors
+
+
+def test_signed_parameters_cross_zero_and_others_stop_at_zero(window, sweep, qtbot, errors):
+    """g (it can be negative, e.g. InSb) and expression parameters cross 0 in both modes; the
+    velocity, the half-gap, E₀ and the couplings stop at 0 when dragged."""
+    shown_window(window, qtbot)
+    load_sweep(window, sweep)
+    process(window)
+    every_model(window)
+    models = models_of(window)
+    dirac, zeeman, custom = models.entries
+    dcard, zeditor = card_of(window, dirac).editor, card_of(window, zeeman).editor
+    cparams = card_of(window, custom).editor.rows
+    models.slider_mode.set("relative", 50.0)
+    g = zeditor.rows[0].g
+    g.field.edit.setText("0.3")
+    drag_by(qtbot, g.slider, [-1.0])  # ±50 % of at least 1
+    assert ms.params(zeeman)["g_0"].value == pytest.approx(-0.2)
+    amplitude = cparams["amplitude"].value
+    amplitude.field.edit.setText("2")
+    for _ in range(6):  # halves, then steps of 10 % of its size: through 0
+        drag_by(qtbot, amplitude.slider, [-1.0])
+    assert ms.params(custom)["amplitude"].value < 0
+    for row, value in (
+        (dcard.velocity, lambda: ms.params(dirac)["velocity"].value),
+        (dcard.delta, lambda: ms.params(dirac)["delta"].value),
+        (zeditor.rows[1].e0, lambda: ms.params(zeeman)["e0_1"].value),
+        (zeditor.couplings[(0, 1)], lambda: zeeman.model.couplings[(0, 1)]),
+    ):
+        row.field.edit.setText("0.5")
+        for _ in range(3):
+            drag_by(qtbot, row.slider, [-1.0])
+        assert value() == 0.0 and row.field.text() == "0", row.slider.accessibleName()
+    models.slider_mode.set("range", 50.0)
+    for row in (dcard.delta, zeditor.rows[1].e0, zeditor.couplings[(0, 1)]):
+        assert row.slider.range()[0] == 0.0
+    assert g.slider.range() == (-10.0, 10.0)
+    x = round(g.slider.x_for(-4.0))
+    qtbot.mouseClick(g.slider, Qt.MouseButton.LeftButton, pos=QPoint(x, 10))
+    assert ms.params(zeeman)["g_0"].value < -3
+    # a linear branch's E₀ may still be typed below 0; a drag does not pull it up to 0
+    e0 = zeditor.rows[1].e0
+    e0.field.edit.setText("-40")  # cm⁻¹
+    assert ms.params(zeeman)["e0_1"].value == pytest.approx(-40 / MEV)
+    models.slider_mode.set("relative", 10.0)
+    drag_by(qtbot, e0.slider, [0.5])
+    assert -40 < float(e0.field.text()) < -38
+    drag_by(qtbot, e0.slider, [-1.0], release=False)  # further below: held where it was
+    assert float(e0.field.text()) >= -40
+    release(qtbot, e0.slider)
     assert not errors
 
 
