@@ -87,7 +87,7 @@ range, then merge spectral ranges, merge field ranges or average repeated sweeps
 - **Quick image (PNG/SVG)…**: the plot as on screen, with its colour scale.
 
 Choices (units, ranges, levels, colours, layout) are remembered between sessions;
-*View › Reset Settings* restores the defaults.
+*View › Reset Settings* restores the defaults (and keeps your figure presets).
 
 ![Picked points in the dark appearance, in meV, with the slim colour bar](docs/images/points-dark.png)
 
