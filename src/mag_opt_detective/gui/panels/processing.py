@@ -324,12 +324,12 @@ class LiveApply(QObject):
     idle again, found with zero timers: the first that comes back within IDLE seconds (at most
     SETTLE_MAX seconds after the start). A run started meanwhile (:meth:`flush`) takes over the
     measurement. The first change runs at once. Later ones wait, from that point, INTERVAL ms or
-    twice the typical cost (:meth:`cost`) if that is longer, so the window keeps at least two
-    thirds of the time to follow the mouse. When two of the last three costs are above SLOW
-    seconds it is slow: changes made while the region is dragged then wait until the drag ends
-    (:meth:`flush`), and typed ones until the typing pauses (SETTLE ms). It is fast again when
-    two of the last three are below FAST seconds. So a single stall (another program, garbage
-    collection) changes nothing, and a map that takes about SLOW behaves the same in every drag.
+    twice the typical cost (:meth:`cost`, at most SLOW) if that is longer, so the window keeps
+    at least two thirds of the time to follow the mouse. When two of the last three costs are
+    above SLOW seconds it is slow: changes made while the region is dragged then wait until the
+    drag ends (:meth:`flush`), and typed ones until the typing pauses (SETTLE ms). It is fast
+    again when two of the last three are below FAST seconds. So a single stall (another program,
+    garbage collection) changes nothing, and the vote keeps a map from flipping between drags.
 
     *apply* returns False when it had nothing to do; such a run does not count. *clock* gives
     the time in seconds (tests may pass their own).
@@ -338,7 +338,7 @@ class LiveApply(QObject):
     INTERVAL = 100  # ms
     SETTLE = 300  # ms
     SLOW = 0.12  # s (the 7726 x 64 sweep costs about 0.05 on the map, 0.07-0.1 stacked)
-    FAST = 0.1  # s (two of three decide, so the band can be narrow: stacked recovers)
+    FAST = 0.12  # s (the two-of-three vote alone keeps the mode from flipping)
     IDLE = 0.02  # s: a zero timer back this soon finds the window idle
     SETTLE_MAX = 1.0  # s: the longest a run's cost is measured
     HISTORY = 3  # costs the slow and fast decisions (and the typical cost) look at
@@ -384,8 +384,9 @@ class LiveApply(QObject):
         return statistics.median_low(self._costs) if self._costs else 0.0
 
     def gap(self) -> float:
-        """How long (ms) a change waits after the last run's cost while not slow."""
-        return max(self.INTERVAL, 2000 * self.cost())
+        """How long (ms) a change waits after the last run's cost while not slow (a lone first
+        stall counts as SLOW, so the next update does not wait seconds)."""
+        return max(self.INTERVAL, 2000 * min(self.cost(), self.SLOW))
 
     def request(self, dragging: bool = False) -> None:
         """A change: run now, or as soon as the rules above allow."""

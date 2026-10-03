@@ -423,32 +423,36 @@ def run_costing(qtbot, live, clock, cost: float, dragging: bool = False) -> None
 
 def test_live_apply_is_slow_with_hysteresis(qtbot):
     slow, fast = LiveApply.SLOW, LiveApply.FAST
-    between = (slow + fast) / 2
     clock = FakeClock()
     live = LiveApply(clock.run, clock=clock)
-    for _ in range(2):  # runs longer than SLOW ...
-        run_costing(qtbot, live, clock, 1.2 * slow)
-    assert live.slow and live.gap() == pytest.approx(2400 * slow)
-    live.request(dragging=True)  # ... make a drag wait for its end
+    run_costing(qtbot, live, clock, 1.2 * slow)  # one run longer than SLOW changes nothing ...
+    assert not live.slow
+    run_costing(qtbot, live, clock, 1.2 * slow)  # ... two make it slow
+    assert live.slow and live.gap() == pytest.approx(2000 * slow)
+    live.request(dragging=True)  # a drag then waits for its end
     qtbot.wait(2 * LiveApply.INTERVAL)
     assert clock.calls == 2 and live.is_pending()
-    clock.cost = between
+    clock.cost = fast / 2
     live.flush()
     settled(qtbot, live)
-    assert clock.calls == 3 and live.slow
-    live.request()  # typed: once the typing pauses
+    assert clock.calls == 3 and live.slow  # one quick run does not make it fast ...
+    live.request()  # (typed: once the typing pauses)
     live.request()
     assert clock.calls == 3
     qtbot.waitUntil(lambda: clock.calls == 4, timeout=3000)
     settled(qtbot, live)
-    assert live.slow and live.costs() == pytest.approx((1.2 * slow, between, between))
-    for _ in range(2):  # runs shorter than FAST: fast again
-        run_costing(qtbot, live, clock, fast / 2, dragging=True)
-    assert not live.slow
-    run_costing(qtbot, live, clock, between)
-    run_costing(qtbot, live, clock, between)
-    assert not live.slow  # between FAST and SLOW: still fast
-    assert live.costs() == pytest.approx((fast / 2, between, between))
+    assert not live.slow  # ... a second one does
+    assert live.costs() == pytest.approx((1.2 * slow, fast / 2, fast / 2))
+
+
+def test_a_first_stall_does_not_hold_the_next_update(qtbot):
+    clock = FakeClock()
+    live = LiveApply(clock.run, clock=clock)
+    run_costing(qtbot, live, clock, 20 * LiveApply.SLOW)  # the very first cost is a stall
+    assert not live.slow and live.gap() == pytest.approx(2000 * LiveApply.SLOW)
+    live.request()  # waits twice SLOW, not twice the stall
+    assert clock.calls == 1 and live.is_pending()
+    qtbot.waitUntil(lambda: clock.calls == 2, timeout=int(4000 * LiveApply.SLOW) + 200)
 
 
 def test_live_apply_ignores_a_single_stall(qtbot):
@@ -534,8 +538,8 @@ def test_live_apply_counts_only_runs_that_did_something(qtbot):
 @pytest.mark.parametrize("share", [0.0, 0.4, 0.9, 1.5])  # of SLOW: a run and its drawing
 def test_live_paces_a_drag_whatever_a_run_costs(processed, qtbot, monkeypatch, share):
     """While the band is dragged, apply_baseline runs at most once per INTERVAL or per its
-    cost plus twice that cost of idle time, the drawing it leaves for later included (that
-    drawing takes twice as long as the run, as on the stacked plot)."""
+    cost plus twice that cost (at most twice SLOW) of idle time, the drawing it leaves for later
+    included (that drawing takes twice as long as the run, as on the stacked plot)."""
     w, c = processed, processed.controller
     panel = w.panels["processing"]
     w.resize(1400, 900)
@@ -558,7 +562,8 @@ def test_live_paces_a_drag_whatever_a_run_costs(processed, qtbot, monkeypatch, s
     start = time.perf_counter()
     mouse_drag(qtbot, plot, steps, release=False)
     elapsed = time.perf_counter() - start
-    spacing = 0.98 * (cost + max(LiveApply.INTERVAL / 1000, 2 * cost))  # (timer precision)
+    idle = max(LiveApply.INTERVAL / 1000, 2 * min(cost, LiveApply.SLOW))
+    spacing = 0.98 * (cost + idle)  # (timer precision)
     assert 1 <= len(starts) <= 1 + elapsed / spacing
     assert all(b - a >= spacing for a, b in itertools.pairwise(starts))
     QTest.mouseRelease(plot.view.viewport(), LEFT, PLAIN, viewport_pos(plot, *steps[-1]))
