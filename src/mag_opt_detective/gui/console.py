@@ -2,14 +2,20 @@
 
 from __future__ import annotations
 
+import html
 import logging
+import time
+from collections import deque
 
 from PySide6.QtCore import QObject, QRectF, QSize, Qt, Signal
-from PySide6.QtGui import QFontDatabase, QPainter
+from PySide6.QtGui import QFontDatabase, QIcon, QPainter
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QPlainTextEdit,
+    QStyle,
+    QStyleOptionToolButton,
+    QStylePainter,
     QToolButton,
     QVBoxLayout,
     QWidget,
@@ -21,18 +27,51 @@ from mag_opt_detective.gui.widgets import Separator
 
 logger = logging.getLogger("mag_opt_detective")
 
+MAX_LINES = 5000
+
+
+def level_token(level: int) -> str:
+    """Colour token of a log line: errors in the error colour, warnings in the warning one."""
+    if level >= logging.ERROR:
+        return "err"
+    return "warn" if level >= logging.WARNING else "fg"
+
 
 class ConsoleWidget(QPlainTextEdit):
+    """The log lines: the time dimmed, errors and warnings in their colours (as the mockup's
+    ``.log``). :meth:`recolor` paints them again in the current theme."""
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setReadOnly(True)
-        self.setMaximumBlockCount(5000)
+        self.setMaximumBlockCount(MAX_LINES)
         self.setFont(QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont))
         self.setFrameShape(QPlainTextEdit.Shape.NoFrame)
+        self._lines: deque[tuple[str, str, int]] = deque(maxlen=MAX_LINES)
+
+    def append_line(self, stamp: str, text: str, level: int = logging.INFO) -> None:
+        self._lines.append((stamp, text, level))
+        self.appendHtml(self._html(stamp, text, level))
+
+    def recolor(self) -> None:
+        self.clear()
+        for line in self._lines:
+            self.appendHtml(self._html(*line))
+
+    @staticmethod
+    def _html(stamp: str, text: str, level: int) -> str:
+        tokens = current_tokens()
+        return (
+            f"<span style='white-space:pre-wrap'>"
+            f"<span style='color:{tokens['faint'].name()}'>{stamp}</span>  "
+            f"<span style='color:{tokens[level_token(level)].name()}'>{html.escape(text)}</span>"
+            "</span>"
+        )
 
 
 class _Emitter(QObject):
     message = Signal(str, int)  # text, level number
+    line = Signal(str, str, int)  # time, text, level number
 
 
 class QtLogHandler(logging.Handler):
@@ -46,17 +85,19 @@ class QtLogHandler(logging.Handler):
         self.errors = 0
         self._emitter = _Emitter()
         self.message = self._emitter.message
-        self._emitter.message.connect(lambda text, _level: console.appendPlainText(text))
-        self.setFormatter(logging.Formatter("%(asctime)s  %(message)s", "%H:%M:%S"))
+        self._emitter.line.connect(console.append_line)
+        self.setFormatter(logging.Formatter("%(message)s"))
 
     def emit(self, record: logging.LogRecord) -> None:
         try:
+            stamp = time.strftime("%H:%M:%S", time.localtime(record.created))
             text = self.format(record)
-            if record.levelno >= logging.WARNING:
+            if record.levelno >= logging.WARNING:  # also said in words, for copied lines
                 text = f"{text}  [{record.levelname.lower()}]"
             if record.levelno >= logging.ERROR:
                 self.errors += 1
-            self._emitter.message.emit(text, record.levelno)
+            self._emitter.line.emit(stamp, text, record.levelno)
+            self._emitter.message.emit(f"{stamp}  {text}", record.levelno)
         except RuntimeError:  # console already deleted
             pass
 
@@ -69,6 +110,8 @@ class Badge(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._count = 0
+        self.setFixedHeight(self.HEIGHT)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         self.hide()
 
     def count(self) -> int:
@@ -76,8 +119,8 @@ class Badge(QWidget):
 
     def set_count(self, count: int) -> None:
         self._count = count
+        self.setFixedWidth(self.sizeHint().width())
         self.setVisible(count > 0)
-        self.updateGeometry()
         self.update()
 
     def _text(self) -> str:
@@ -103,38 +146,65 @@ class Badge(QWidget):
         painter.end()
 
 
-class LogButton(QWidget):
-    """Status-bar button that opens the log, with a badge counting the unseen errors."""
+class LogButton(QToolButton):
+    """Status-bar button that opens the log; a pill after its text counts the unseen errors
+    (inside the button, as the mockup's ``.st-log .n``)."""
+
+    BADGE_GAP = 6
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.button = QToolButton()
-        self.button.setProperty("kit", "tool")
-        self.button.setCheckable(True)
-        self.button.setText("Log")
-        self.button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
-        self.button.setToolTip("Show or hide the log")
-        icons.set_icon(self.button, "terminal", "muted", on_color="accent")
-        self.badge = Badge()
-        row = QHBoxLayout(self)
-        row.setContentsMargins(0, 0, 4, 0)
-        row.setSpacing(2)
-        row.addWidget(self.button)
-        row.addWidget(self.badge)
-        self.toggled = self.button.toggled
+        self.setProperty("kit", "tool")
+        self.setCheckable(True)
+        self.setText("Log")
+        self.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        self.setToolTip("Show or hide the log")
+        icons.set_icon(self, "terminal", "muted", on_color="accent")
+        self.badge = Badge(self)
 
     def unseen(self) -> int:
         return self.badge.count()
 
     def set_unseen(self, errors: int) -> None:
         self.badge.set_count(errors)
-        self.button.setAccessibleName(f"Log, {errors} new errors" if errors else "Log")
+        self.setAccessibleName(f"Log, {errors} new errors" if errors else "Log")
+        self.updateGeometry()
+        self._place_badge()
 
-    def isChecked(self) -> bool:
-        return self.button.isChecked()
+    def _room(self) -> int:
+        """Width kept after the text for the pill (0 without one)."""
+        return 0 if self.badge.isHidden() else self.badge.width() + self.BADGE_GAP
 
-    def setChecked(self, checked: bool) -> None:
-        self.button.setChecked(checked)
+    def sizeHint(self) -> QSize:
+        hint = super().sizeHint()
+        return QSize(hint.width() + self._room(), hint.height())
+
+    def minimumSizeHint(self) -> QSize:
+        return self.sizeHint()
+
+    def paintEvent(self, event) -> None:
+        """The button as usual, its icon and text moved left of the pill."""
+        option = QStyleOptionToolButton()
+        self.initStyleOption(option)
+        painter = QStylePainter(self)
+        room = self._room()
+        if not room:
+            painter.drawComplexControl(QStyle.ComplexControl.CC_ToolButton, option)
+            return
+        label = QStyleOptionToolButton(option)
+        option.text, option.icon = "", QIcon()
+        painter.drawComplexControl(QStyle.ComplexControl.CC_ToolButton, option)
+        label.rect = option.rect.adjusted(0, 0, -room, 0)
+        painter.drawControl(QStyle.ControlElement.CE_ToolButtonLabel, label)
+
+    def _place_badge(self) -> None:
+        badge = self.badge
+        x = self.width() - badge.width() - self.BADGE_GAP
+        badge.move(x, (self.height() - badge.height()) // 2)
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._place_badge()
 
 
 class LogDrawer(QWidget):
@@ -182,6 +252,7 @@ def install(window) -> None:
     button = LogButton()
     window.log_button = button
     window.statusBar().addPermanentWidget(button)
+    window.themeChanged.connect(drawer.console.recolor)
     seen = [0]
 
     def sync(open_: bool) -> None:

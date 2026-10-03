@@ -17,10 +17,11 @@ from mag_opt_detective.core.pipeline import PlotKind, ReferenceMode
 from mag_opt_detective.core.processing import Axis
 from mag_opt_detective.core.units import Unit
 from mag_opt_detective.gui import display
+from mag_opt_detective.gui.console import Badge
 from mag_opt_detective.gui.kit import SlidePanel
 from mag_opt_detective.gui.main_window import MainWindow
 from mag_opt_detective.gui.plots import BarScale, HistogramScale
-from mag_opt_detective.gui.theme import Theme
+from mag_opt_detective.gui.theme import Theme, current_tokens
 
 window, errors = gui_helpers.window, gui_helpers.errors  # shared fixtures
 
@@ -66,7 +67,7 @@ def test_inspector_and_log_toggles(shown, qtbot):
     assert w.body_splitter.sizes()[2] == 0
     w.plot_area.inspector_button.click()
     assert w.inspector_panel.is_open()
-    w.log_button.button.click()
+    w.log_button.click()
     assert w.log_panel.is_open() and w.log_button.isChecked()
     qtbot.waitUntil(lambda: not w.log_panel.is_animating())
     assert w.stage_splitter.sizes()[1] == w.log_panel.open_size()
@@ -91,6 +92,30 @@ def test_log_badge_counts_unseen_errors(window):
     logger.error("after")
     QGuiApplication.processEvents()
     assert window.log_button.unseen() == 1
+
+
+def test_log_badge_sits_inside_the_button(shown, qtbot):
+    """A 16 px pill after the text, inside the button (it was stretched to the bar's height)."""
+    button, badge = shown.log_button, shown.log_button.badge
+    plain = button.sizeHint().width()
+    logging.getLogger("mag_opt_detective").error("an error")
+    qtbot.waitUntil(lambda: not badge.isHidden())
+    assert badge.parentWidget() is button and badge.height() == Badge.HEIGHT
+    assert button.sizeHint().width() >= plain + badge.width()  # room for it after the text
+    qtbot.waitUntil(lambda: badge.geometry().right() < button.width())
+    assert abs(badge.geometry().center().y() - button.rect().center().y()) <= 1
+
+
+def test_log_lines_are_coloured_by_level(window):
+    logger = logging.getLogger("mag_opt_detective")
+    logger.info("fine")
+    logger.error("broken <file>")
+    QGuiApplication.processEvents()
+    text = window.console.toPlainText().splitlines()
+    assert text[-1].endswith("broken <file>  [error]")  # the level also in words, for copies
+    tokens = current_tokens()
+    html = window.console.document().toHtml()
+    assert tokens["err"].name() in html and tokens["faint"].name() in html
 
 
 def test_colour_scale_style_switch_applies_to_every_map(shown, sweep, errors, qtbot):
