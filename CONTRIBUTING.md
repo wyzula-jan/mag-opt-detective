@@ -178,3 +178,52 @@ feat(io)!: write units into points export
 
 BREAKING CHANGE: point tables now start with an "Energy (unit)" header.
 ```
+
+## Releases
+
+Versions follow [Semantic Versioning](https://semver.org) and come from the commit messages:
+`tools/release.py` (standard library only) reads the commits since the last `vX.Y.Z` tag,
+merges skipped, and picks the next version.
+
+| Commits since the last release | Before 1.0.0 | From 1.0.0 |
+| --- | --- | --- |
+| a breaking change (`!` or a `BREAKING CHANGE:` footer), any type | minor | major |
+| `feat` | minor | minor |
+| `fix`, `perf` or `revert` | patch | patch |
+| only `docs`, `test`, `build`, `ci`, `chore`, `style` or `refactor` | no release | no release |
+
+After every merge to `main`, on `main` with a clean tree:
+
+```bash
+uv run python tools/release.py --dry-run   # the next version and its changelog section
+uv run python tools/release.py             # release it
+```
+
+A release writes the version into `pyproject.toml`, `uv.lock`,
+`src/mag_opt_detective/__init__.py` and `CITATION.cff` (with `date-released`), adds a section
+at the top of `CHANGELOG.md` (`feat` under Added, breaking changes and reverts under Changed,
+`fix` under Fixed, `perf` under Performance, each with its scope), commits these files as
+`chore(release): vX.Y.Z` (the hooks run) and creates the annotated tag `vX.Y.Z` with the
+section as its message. It pushes nothing. It refuses to run with uncommitted changes or on a
+commit that is already tagged, and says so when the new commits need no release. The *Release
+notes* page of the docs site is built from `CHANGELOG.md`.
+
+- `--version X.Y.Z` releases a version of your choice instead of the computed one. **1.0.0**,
+  the first public release, is made this way (`--version 1.0.0`); after it a breaking change
+  bumps the major version. At 1.0.0 also update the docs site's lines that say no release is
+  published yet: the home page's "In development" eyebrow and the notes on the home and
+  download pages.
+- `--notes FILE` replaces the generated section with your own Markdown (`###` headings at
+  most). The first release had no tag to count from: it was made with
+  `--first 0.1.0 --notes tools/release-notes-0.1.0.md`, a summary of the app instead of every
+  commit since the start.
+
+**Publishing.** Push with the tags: `git push --follow-tags origin main`. The *Release*
+workflow runs on every push to `main` (and by hand). When the version in `pyproject.toml` has a
+section in `CHANGELOG.md` and no GitHub release yet, it builds the app bundles with the *App
+bundles* workflow and creates the GitHub release `vX.Y.Z` on the release commit, from the
+pushed tag (or creating the tag when it was not pushed), with the section as its notes and the
+bundles attached; versions before 1.0.0 are marked as pre-releases. Any other push publishes
+nothing, and no version is published twice. If several versions were released between two
+pushes, only the newest gets a GitHub release; the others keep their tags and their
+`CHANGELOG.md` sections.
