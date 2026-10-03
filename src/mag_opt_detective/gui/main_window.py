@@ -122,14 +122,15 @@ def _types_text(event) -> bool:
     return modifiers == Qt.KeyboardModifier.NoModifier and bool(text) and text.isprintable()
 
 
-def _paint_dot(widget: QWidget, token: str = "warn", size: float = 9.0) -> None:
+def _paint_dot(widget: QWidget) -> None:
     """A status dot in the top-right corner of *widget*."""
     tokens = current_tokens()
     painter = QPainter(widget)
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    size = 9.0
     rect = QRectF(widget.width() - size - 2, 2, size, size)
     painter.setPen(tokens["win"])
-    painter.setBrush(tokens[token])
+    painter.setBrush(tokens["warn"])
     painter.drawEllipse(rect)
     painter.end()
 
