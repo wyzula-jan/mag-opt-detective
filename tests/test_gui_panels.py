@@ -428,6 +428,20 @@ def test_library_cut_limits_are_in_the_display_unit(window, sweep):
     assert not window.panels["library"].rows[entry.key].cut_box.isHidden()
 
 
+def test_a_failed_library_plot_keeps_the_name_of_the_map_shown(window, sweep, errors):
+    load_sweep(window, sweep)
+    process(window)
+    c = window.controller
+    library.save_current(window)
+    low = c.add_map(c.result.ratio.replace(energy=c.result.ratio.energy * 0.05), "Low")
+    library.plot_entry(window, c.library[0].key)
+    c.set_processing(baseline=(500.0, 600.0))
+    library.plot_entry(window, low.key)  # the baseline region misses this map
+    assert errors and "baseline region" in errors[-1]
+    assert c.result_name() == "Sample_4p2K_Sam1"
+    assert c.save_current_map().name == "Sample_4p2K_Sam1 (2)"
+
+
 def test_library_tables_can_take_the_custom_field_range(window, sweep, tmp_path, monkeypatch):
     load_sweep(window, sweep)
     process(window)

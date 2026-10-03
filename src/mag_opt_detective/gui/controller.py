@@ -992,8 +992,12 @@ class AppController(QObject):
         return lo, hi
 
     def _show_library(self, fmap: FieldMap, name: str) -> ProcessResult:
-        self._library_name = name
-        return self.from_map(fmap)
+        old, self._library_name = self._library_name, name  # read when the result is shown
+        try:
+            return self.from_map(fmap)
+        except Exception:
+            self._library_name = old  # the map shown keeps its name
+            raise
 
     def plot_entry(self, entry: LibraryEntry, cut_energy: bool = False) -> ProcessResult:
         """Show *entry*, cut to its E limits if *cut_energy*."""
