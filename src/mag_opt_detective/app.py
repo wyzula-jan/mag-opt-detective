@@ -11,7 +11,6 @@ from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication
 
 from mag_opt_detective import __version__
-from mag_opt_detective.gui.licences import APP_ICON
 from mag_opt_detective.gui.main_window import MainWindow
 from mag_opt_detective.gui.settings import default_settings
 from mag_opt_detective.gui.teardown import delete_widget
@@ -47,9 +46,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     app = QApplication.instance() or QApplication(argv)
     app.setApplicationName("Magneto-Optical Detective")
-    app.setWindowIcon(QIcon(str(APP_ICON)))
     theme = Theme("system")  # the window restores the user's choice
     theme.apply(app)
+    app.setWindowIcon(app_icon())
 
     if args.smoke_test:
         from mag_opt_detective import smoke

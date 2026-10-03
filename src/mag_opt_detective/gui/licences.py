@@ -26,7 +26,6 @@ import mag_opt_detective
 
 NOTICES = "THIRD_PARTY_NOTICES.txt"
 LUCIDE = Path(__file__).resolve().parent / "icons" / "LICENSE-lucide.txt"
-APP_ICON = Path(__file__).resolve().parent / "app_icon.png"  # packaging/make_icon.py
 APP = "mag-opt-detective"
 
 

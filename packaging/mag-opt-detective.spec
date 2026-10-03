@@ -3,6 +3,7 @@
 #   uv run --no-sync pyinstaller packaging/mag-opt-detective.spec --noconfirm
 # Result: dist/mag-opt-detective/ (and dist/Magneto-Optical Detective.app on macOS), each with
 # THIRD_PARTY_NOTICES.txt (see third_party_notices.py).
+import os
 import re
 import shutil
 import sys
@@ -18,8 +19,10 @@ from third_party_notices import write_notices  # noqa: E402
 NAME = "mag-opt-detective"
 # macOS wants one to three integers as the version (5.0.0.dev0 -> 5.0.0)
 BUNDLE_VERSION = re.match(r"\d+(\.\d+){0,2}", __version__).group()
-ICON = str(Path(SPECPATH).parent / "src" / "mag_opt_detective" / "gui" / "app_icon.png")
 NOTICES = write_notices(Path(workpath) / "THIRD_PARTY_NOTICES.txt")
+ICONS = os.path.join(SPECPATH, "icons")
+# Windows embeds the .ico in the .exe; macOS needs .icns (Linux has no file icon)
+ICON = os.path.join(ICONS, NAME + (".icns" if sys.platform == "darwin" else ".ico"))
 
 # matplotlib only draws figure exports (Agg, PDF, SVG, PS); leave out its GUI backends
 MPL_GUI_BACKENDS = [
