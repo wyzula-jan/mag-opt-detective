@@ -1211,5 +1211,6 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event) -> None:
         self.save_settings()
-        logger.removeHandler(self.log_handler)
+        # a window whose building failed before the log (closed at the exit) has no handler
+        logger.removeHandler(getattr(self, "log_handler", None))
         super().closeEvent(event)

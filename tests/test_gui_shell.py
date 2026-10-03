@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 import shiboken6
 from PySide6.QtCore import QEvent, QPoint, Qt
-from PySide6.QtGui import QGuiApplication, QImage
+from PySide6.QtGui import QCloseEvent, QGuiApplication, QImage
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QComboBox, QToolButton
 
@@ -17,7 +17,7 @@ from mag_opt_detective import __version__
 from mag_opt_detective.core.pipeline import PlotKind, ReferenceMode
 from mag_opt_detective.core.processing import Axis
 from mag_opt_detective.core.units import Unit
-from mag_opt_detective.gui import display, theme
+from mag_opt_detective.gui import console, display, theme
 from mag_opt_detective.gui.console import Badge, LogButton
 from mag_opt_detective.gui.kit import SlidePanel
 from mag_opt_detective.gui.main_window import MainWindow
@@ -491,3 +491,21 @@ def test_the_message_bar_is_as_tall_as_its_text(shown, qtbot):
     shown.report_error("Check for updates", "no connection to GitHub")
     qtbot.waitUntil(lambda: bar.height() == bar.heightForWidth(bar.width()))
     assert bar.width() == 560  # the widest bar: one line of title and one of text
+
+
+def test_a_window_whose_building_failed_closes_quietly(qapp, monkeypatch):
+    """teardown closes it at the exit: no AttributeError for the log it never had."""
+
+    def broken(_window):
+        raise RuntimeError("an area failed")
+
+    monkeypatch.setattr(console, "install", broken)
+    with pytest.raises(RuntimeError, match="an area failed"):
+        MainWindow()
+    [half] = [
+        w
+        for w in QApplication.topLevelWidgets()
+        if isinstance(w, MainWindow) and not hasattr(w, "log_handler")
+    ]
+    half.closeEvent(QCloseEvent())  # raised AttributeError before
+    half.deleteLater()
