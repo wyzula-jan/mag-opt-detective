@@ -1165,6 +1165,25 @@ def test_infobar_action_and_close(qtbot):
         bar.show_message("fatal", "?")
 
 
+def test_infobar_tells_closing_by_the_user_from_closing_by_the_program(qtbot):
+    bar = InfoBar()
+    qtbot.addWidget(bar)
+    bar.show_message("info", "Version 9.0.0 is available", actions=[("Skip", lambda: None)])
+    with qtbot.assertNotEmitted(bar.closedByUser), qtbot.waitSignal(bar.closed):
+        bar.dismiss()  # a new result, Process
+    for close in (
+        bar.close_button.click,
+        lambda: qtbot.keyClick(bar, Qt.Key.Key_Escape),
+        lambda: bar.row_buttons()[0].click(),
+        bar.dismiss_by_user,  # a window-wide Escape
+    ):
+        bar.show_message("info", "Version 9.0.0 is available", actions=[("Skip", lambda: None)])
+        with qtbot.waitSignals([bar.closed, bar.closedByUser], order="strict"):
+            close()
+    with qtbot.assertNotEmitted(bar.closedByUser):
+        bar.dismiss_by_user()  # already hidden
+
+
 def test_infobar_shows_several_actions_in_a_row(qtbot):
     bar = InfoBar()
     qtbot.addWidget(bar)

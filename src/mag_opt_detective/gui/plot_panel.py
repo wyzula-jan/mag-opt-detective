@@ -771,7 +771,7 @@ def _connect_clicks(window, view: str) -> None:
 def on_escape(window) -> None:
     """Escape closes the error bar, else goes back to the default tool."""
     if not window.infobar.isHidden():
-        window.infobar.dismiss()
+        window.infobar.dismiss_by_user()
     else:
         window.tools.set_active(window.tools.default())
 

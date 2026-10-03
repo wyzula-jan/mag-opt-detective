@@ -53,10 +53,13 @@ class InfoBar(QFrame):
 
     Hidden until :meth:`show_message`. Colours come from the theme stylesheet
     (``QFrame[kit="infobar"][level=...]``). ``closed`` fires whenever a shown bar is dismissed:
-    by its close button, Escape, an action button or :meth:`dismiss`.
+    by its close button, Escape, an action button or :meth:`dismiss`. ``closedByUser`` follows
+    it when the user closed the bar (all of these but :meth:`dismiss`, or
+    :meth:`dismiss_by_user`), not when the program did (a new result, Process).
     """
 
     closed = Signal()
+    closedByUser = Signal()
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
@@ -85,7 +88,7 @@ class InfoBar(QFrame):
         self.close_button.setAccessibleName("Dismiss")
         self.close_button.setToolTip("Dismiss")
         icons.set_icon(self.close_button, "x", "muted")
-        self.close_button.clicked.connect(self.dismiss)
+        self.close_button.clicked.connect(self.dismiss_by_user)
         self.action_row = QWidget()  # the buttons of a message with several actions
         row = QHBoxLayout(self.action_row)
         row.setContentsMargins(0, 4, 0, 0)
@@ -154,11 +157,19 @@ class InfoBar(QFrame):
         self.hide()
         self.closed.emit()
 
+    def dismiss_by_user(self) -> None:
+        """Close the bar for the user (e.g. a window-wide Escape): ``closed``, then
+        ``closedByUser``."""
+        if self.isHidden():
+            return
+        self.dismiss()
+        self.closedByUser.emit()
+
     def _on_action(self) -> None:
         self._run(self._action)
 
     def _run(self, action: Callable[[], object] | None) -> None:
-        self.dismiss()
+        self.dismiss_by_user()
         if action is not None:
             action()
 
@@ -188,7 +199,7 @@ class InfoBar(QFrame):
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
         if event.key() == Qt.Key.Key_Escape:
-            self.dismiss()
+            self.dismiss_by_user()
             event.accept()
             return
         super().keyPressEvent(event)
