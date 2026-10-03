@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 
 from PySide6.QtCore import QEvent, Qt, Signal
 from PySide6.QtGui import QIcon, QKeyEvent, QPainter
@@ -48,11 +48,12 @@ class _IconView(QWidget):
 
 
 class InfoBar(QFrame):
-    """Icon, bold title, text, an optional action button and a close button.
+    """Icon, bold title, text, an optional action button and a close button; a message with
+    several actions has a row of buttons under the text instead.
 
     Hidden until :meth:`show_message`. Colours come from the theme stylesheet
     (``QFrame[kit="infobar"][level=...]``). ``closed`` fires whenever a shown bar is dismissed:
-    by its close button, Escape, its action button or :meth:`dismiss`.
+    by its close button, Escape, an action button or :meth:`dismiss`.
     """
 
     closed = Signal()
@@ -85,12 +86,20 @@ class InfoBar(QFrame):
         self.close_button.setToolTip("Dismiss")
         icons.set_icon(self.close_button, "x", "muted")
         self.close_button.clicked.connect(self.dismiss)
+        self.action_row = QWidget()  # the buttons of a message with several actions
+        row = QHBoxLayout(self.action_row)
+        row.setContentsMargins(0, 4, 0, 0)
+        row.setSpacing(6)
+        row.addStretch(1)
+        self.action_row.setVisible(False)
+        self._row_buttons: list[QPushButton] = []
 
         texts = QVBoxLayout()
         texts.setContentsMargins(0, 0, 0, 0)
         texts.setSpacing(2)
         texts.addWidget(self.title_label)
         texts.addWidget(self.text_label)
+        texts.addWidget(self.action_row)
         layout = QHBoxLayout(self)
         layout.setContentsMargins(10, 8, 8, 8)
         layout.setSpacing(10)
@@ -109,8 +118,13 @@ class InfoBar(QFrame):
         text: str = "",
         action_text: str | None = None,
         action: Callable[[], object] | None = None,
+        actions: Sequence[tuple[str, Callable[[], object]]] = (),
     ) -> None:
-        """Show a message; *action* runs (after the bar closes) when its button is clicked."""
+        """Show a message; *action* runs (after the bar closes) when its button is clicked.
+
+        *actions*: ``(text, callable)`` pairs for a message with several actions, shown as a
+        row of buttons under the text; each one also runs after the bar closes.
+        """
         if level not in LEVELS:
             raise ValueError(f"level must be one of {tuple(LEVELS)}")
         self._level = level
@@ -122,12 +136,17 @@ class InfoBar(QFrame):
         self.action_button.setText(action_text or "")
         self.action_button.setVisible(bool(action_text))
         self._action = action
+        self._set_row(actions)
         self.setAccessibleName(title)
         self.setAccessibleDescription(text)
         self.show()
 
     def level(self) -> str:
         return self._level
+
+    def row_buttons(self) -> list[QPushButton]:
+        """The buttons of the message's *actions*, in order."""
+        return list(self._row_buttons)
 
     def dismiss(self) -> None:
         if self.isHidden():
@@ -136,10 +155,27 @@ class InfoBar(QFrame):
         self.closed.emit()
 
     def _on_action(self) -> None:
-        action = self._action
+        self._run(self._action)
+
+    def _run(self, action: Callable[[], object] | None) -> None:
         self.dismiss()
         if action is not None:
             action()
+
+    def _set_row(self, actions: Sequence[tuple[str, Callable[[], object]]]) -> None:
+        row = self.action_row.layout()
+        for button in self._row_buttons:  # one may be running its action now: delete later
+            row.removeWidget(button)
+            button.hide()
+            button.deleteLater()
+        self._row_buttons = []
+        for text, action in actions:
+            button = QPushButton(text)
+            button.setProperty("kit", "button")
+            button.clicked.connect(lambda _checked=False, a=action: self._run(a))
+            row.insertWidget(row.count() - 1, button)  # before the stretch
+            self._row_buttons.append(button)
+        self.action_row.setVisible(bool(self._row_buttons))
 
     def _update_icon(self) -> None:
         name, token = LEVELS[self._level]

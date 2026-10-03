@@ -1165,6 +1165,31 @@ def test_infobar_action_and_close(qtbot):
         bar.show_message("fatal", "?")
 
 
+def test_infobar_shows_several_actions_in_a_row(qtbot):
+    bar = InfoBar()
+    qtbot.addWidget(bar)
+    calls = []
+    actions = [(text, lambda t=text: calls.append(t)) for text in ("Download", "Skip")]
+    bar.show_message("info", "Version 9.0.0 is available", "Notes.", actions=actions)
+    assert not bar.action_button.isVisible() and bar.action_row.isVisible()
+    assert [b.text() for b in bar.row_buttons()] == ["Download", "Skip"]
+    with qtbot.waitSignal(bar.closed):
+        bar.row_buttons()[1].click()
+    assert calls == ["Skip"] and bar.isHidden()
+
+    def again() -> None:  # an action that shows the next message (and its buttons)
+        calls.append("again")
+        bar.show_message("info", "Next", actions=[("Download", lambda: None)])
+
+    bar.show_message("info", "Version 9.0.0 is available", actions=[("Retry", again)])
+    bar.row_buttons()[0].click()
+    assert calls == ["Skip", "again"] and bar.isVisible()
+    assert [b.text() for b in bar.row_buttons()] == ["Download"]
+    bar.show_message("error", "Can't process", "No files.", "Open Sample", lambda: None)
+    assert bar.row_buttons() == [] and not bar.action_row.isVisible()
+    assert bar.action_button.isVisible()
+
+
 def test_infobar_icon_is_crisp_at_any_pixel_ratio(qtbot):
     bar = InfoBar()
     qtbot.addWidget(bar)
