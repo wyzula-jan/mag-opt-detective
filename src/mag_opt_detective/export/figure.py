@@ -73,6 +73,7 @@ _PAD_IN = 1.0 / 72.0  # constrained-layout padding around the axes and labels
 _COLORBAR_PAD = 0.02  # gap between the axes and the colour bar (share of the axes)
 _COLORBAR_ASPECT = 25  # length / thickness of a colour bar beside the axes
 _FIT_TOLERANCE_IN = 0.5 / 72.0  # how far a drawn figure may reach past its edges
+_OVERPRINT_PT = 1.0  # tick labels overlapping by more than this overprint
 
 _EDITABLE_TEXT = {"pdf.fonttype": 42, "ps.fonttype": 42, "svg.fonttype": "none"}
 # rcParams each figure was made with; save and rasterize draw with the same ones
@@ -483,29 +484,61 @@ def rasterize(fig: Figure, dpi: float) -> np.ndarray:
         fig.set_canvas(old_canvas)
 
 
+def _tick_labels_overlap(axis, renderer, dpi: float) -> bool:
+    """Whether two tick labels drawn on *axis* (those in view) overprint each other by more
+    than ``_OVERPRINT_PT`` (labels that only touch depend on the resolution drawn at)."""
+    lo, hi = sorted(axis.get_view_interval())
+    slack = 1e-9 * (hi - lo)
+    inset = -0.5 * _OVERPRINT_PT * dpi / 72.0
+    boxes = []
+    for tick, loc in zip(axis.get_major_ticks(), axis.get_majorticklocs(), strict=False):
+        if lo - slack <= loc <= hi + slack:
+            for label in (tick.label1, tick.label2):
+                if label.get_visible() and label.get_text():
+                    boxes.append(label.get_window_extent(renderer).padded(inset))
+    return any(a.overlaps(b) for i, a in enumerate(boxes) for b in boxes[i + 1 :])
+
+
 def layout_problem(fig: Figure) -> str:
     """What does not fit into *fig* once drawn (by :func:`rasterize` or :func:`save`), as a
     sentence for people; "" when everything fits.
 
     In a figure too small for its text, matplotlib's layout gives up (with a warning) or
-    pushes labels past the edges: then labels or the colour bar are cut off, or the plot and
-    its colour bar overlap.
+    squeezes the plot: then labels or the colour bar are cut off, the plot and its colour bar
+    overlap, the plot (the first axes, as :func:`render` draws it) is less than twice the text
+    size tall or wide, or tick labels overprint each other.
     """
-    with mpl.rc_context(_rc(fig)):
-        box = fig.get_tightbbox(fig.canvas.get_renderer())
     width, height = fig.get_size_inches()
+    rc = _rc(fig)
+    text_in = float(rc.get("font.size", mpl.rcParams["font.size"])) / 72.0
+    needs: set[str] = set()  # "taller", "wider" or "larger"
+    with mpl.rc_context(rc):
+        renderer = fig.canvas.get_renderer()
+        box = fig.get_tightbbox(renderer)
+        for ax in fig.axes:
+            if _tick_labels_overlap(ax.yaxis, renderer, fig.dpi):
+                needs.add("taller")
+            if _tick_labels_overlap(ax.xaxis, renderer, fig.dpi):
+                needs.add("wider")
     across = max(0.0, -box.x0) + max(0.0, box.x1 - width)  # how far it reaches past the edges
     down = max(0.0, -box.y0) + max(0.0, box.y1 - height)
+    if max(across, down) > _FIT_TOLERANCE_IN:
+        needs.add("taller" if down >= across else "wider")
     places = [ax.get_position() for ax in fig.axes]
-    squeezed = any(p.width <= 0 or p.height <= 0 for p in places)
-    squeezed |= any(a.overlaps(b) for i, a in enumerate(places) for b in places[i + 1 :])
-    if max(across, down) <= _FIT_TOLERANCE_IN and not squeezed:
+    if any(p.width <= 0 or p.height <= 0 for p in places) or any(
+        a.overlaps(b) for i, a in enumerate(places) for b in places[i + 1 :]
+    ):
+        needs.add("larger")
+    if places:
+        plot = places[0]
+        if plot.height * height < 2 * text_in:
+            needs.add("taller")
+        if plot.width * width < 2 * text_in:
+            needs.add("wider")
+    if not needs:
         return ""
     what = "the labels and the colour bar" if len(places) > 1 else "the labels"
-    if max(across, down) <= _FIT_TOLERANCE_IN:
-        bigger = "larger"
-    else:
-        bigger = "taller" if down >= across else "wider"
+    bigger = needs.pop() if len(needs) == 1 else "larger"
     return f"Too small for {what}: make the figure {bigger}."
 
 

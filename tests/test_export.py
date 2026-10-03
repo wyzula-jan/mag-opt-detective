@@ -886,11 +886,74 @@ def test_stored_presets_skip_the_bad_ones():
 def test_a_figure_too_small_for_its_labels_is_reported(map_state):
     assert layout_problem(_drawn(nature_single(map_state))) == ""
     top = FigureStyle("top")
-    fig = _drawn(nature_single(map_state, height_mm=12.0, style=top))
-    assert layout_problem(fig) == (
-        "Too small for the labels and the colour bar: make the figure taller."
-    )
+    taller = "Too small for the labels and the colour bar: make the figure taller."
+    assert layout_problem(_drawn(nature_single(map_state, height_mm=12.0, style=top))) == taller
     plain = dataclasses.replace(map_state, colorbar=False)
     fig = _drawn(render(plain, preset=NATURE, width_mm=10.0, height_mm=70.0))
     assert layout_problem(fig) == "Too small for the labels: make the figure wider."
-    assert layout_problem(_drawn(nature_single(map_state, height_mm=25.0, style=top))) == ""
+    assert layout_problem(_drawn(nature_single(map_state, height_mm=26.0, style=top))) == ""
+
+
+@pytest.mark.filterwarnings("ignore:constrained_layout not applied")
+@pytest.mark.parametrize(
+    ("preset", "width_mm", "height_mm"),
+    [(NATURE, 89, 20), (NATURE, 89, 24), (NATURE, 60, 19), (APS, 86, 22), (APS, 86, 26)],
+)
+def test_a_squeezed_plot_is_reported(map_state, preset, width_mm, height_mm):
+    """Just above the height where matplotlib gives up, the plot is a sliver whose tick labels
+    overprint: less than twice the text size tall."""
+    fig = render(
+        map_state,
+        preset=preset,
+        width_mm=width_mm,
+        height_mm=height_mm,
+        panel_label="a",
+        style=FigureStyle("top"),
+    )
+    assert "make the figure" in layout_problem(_drawn(fig))
+
+
+def test_tick_labels_that_overprint_are_reported(map_state):
+    fig = _drawn(nature_single(map_state, height_mm=60.0, style=FigureStyle("top")))
+    assert layout_problem(fig) == ""
+    fig.axes[0].set_yticks(np.linspace(10.0, 120.0, 40))  # far too many labels
+    rasterize(fig, 100)
+    assert layout_problem(fig).endswith("make the figure taller.")
+
+
+JOURNAL_SIZES = [(NATURE, 89), (NATURE, 120), (NATURE, 136), (NATURE, 183), (APS, 86), (APS, 178)]
+
+
+@pytest.mark.parametrize(("preset", "width_mm"), JOURNAL_SIZES)
+def test_journal_sizes_raise_no_false_alarm(fmap, preset, width_mm):
+    """Default heights of the journals' columns: both colour bar places, with and without a
+    panel label, inward mirrored minor ticks, long labels, maps and stacked spectra (a sample
+    that goes through the combinations)."""
+    wide_numbers = FieldMap(
+        np.linspace(8000.0, 12000.0, 81),
+        fmap.field,
+        np.random.default_rng(1).normal(0.0, 1e-4, (81, fmap.field.size)),
+        unit="cm-1",
+    )
+    inward = TickStyle("in", mirror=True, minor=True, minor_intervals=5)
+    size = JOURNAL_SIZES.index((preset, width_mm))
+    for i in range(4):  # each bar place and kind; the other choices vary with the size
+        location, kind = ("right", "top")[i // 2], ("map", "stacked")[i % 2]
+        long, panel, ticks = (i + size) % 2, (i // 2 + size) % 2, (i + i // 2 + size) % 2
+        state = FigureState(
+            kind,
+            wide_numbers if long else fmap,
+            colorbar_label="ΔT/T normalised to zero field" if long else "R(B)/R(0)",
+            x_label="Magnetic field B (T), swept up" if long else None,
+            stacked=StackedOptions(2e-4 if long else 0.1, every=2),
+        )
+        fig = render(
+            state,
+            preset=preset,
+            width_mm=width_mm,
+            height_mm=preset.default_height_mm,
+            panel_label="a" if panel else None,
+            style=FigureStyle(location, inward if ticks else TickStyle()),
+            dpi=100,
+        )
+        assert layout_problem(_drawn(fig)) == "", (location, kind, long)
