@@ -13,6 +13,7 @@ from PySide6.QtWidgets import QApplication
 from mag_opt_detective import __version__
 from mag_opt_detective.gui.main_window import MainWindow
 from mag_opt_detective.gui.settings import default_settings
+from mag_opt_detective.gui.teardown import delete_widget
 from mag_opt_detective.gui.theme import Theme
 
 
@@ -60,13 +61,19 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         finally:
             window.close()
+            delete_widget(window)  # now, not at the interpreter's exit (see gui.teardown)
         return 0
 
     window = MainWindow(settings=default_settings(), theme=theme)
-    window.show()
-    if not window.geometry_restored:
-        window.center_on_screen()
-    return app.exec()
+    try:
+        window.show()
+        if not window.geometry_restored:
+            window.center_on_screen()
+        return app.exec()
+    finally:
+        if window.isVisible():  # the event loop ended another way: save as a close does
+            window.close()
+        delete_widget(window)
 
 
 if __name__ == "__main__":
