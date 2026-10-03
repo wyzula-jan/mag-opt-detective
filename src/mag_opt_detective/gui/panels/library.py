@@ -195,6 +195,7 @@ class EntryRow(QWidget):
         }
         for edit in self.fields:
             edit.setPlaceholderText("all")
+            edit.setAcceptDrops(False)  # dropped tables go to the list
         self.cut_box = QWidget()
         grid = QGridLayout(self.cut_box)
         grid.setContentsMargins(31, 0, 8, 9)

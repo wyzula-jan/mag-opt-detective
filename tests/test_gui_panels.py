@@ -413,6 +413,7 @@ def test_library_cut_limits_are_in_the_display_unit(window, sweep):
     assert row.cut_box.isHidden()
     row.expand_button.click()
     assert not row.cut_box.isHidden()
+    assert not any(edit.acceptDrops() for edit in row.fields)  # drops go to the list
     set_unit(window, "meV")
     assert row.fields[row.e_min].unit_label.text() == "meV"
     row.e_min.setText("20")
