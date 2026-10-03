@@ -54,6 +54,8 @@ KINDS = ("map", "stacked")
 POINTS_ALL, POINTS_CURRENT, POINTS_NONE = "all", "current", "none"
 RANGE_WINDOW, RANGE_AUTO, RANGE_FIXED = COLOUR_RANGES
 FORMAT_LABELS = {"pdf": "PDF", "svg": "SVG", "eps": "EPS", "png": "PNG", "tif": "TIFF"}
+PRESET_NAMES = {"nature": "Nature", "aps": "APS", "custom": "Custom"}  # short journal names
+RANGE_NAMES = {RANGE_WINDOW: "Window", RANGE_AUTO: "Auto", RANGE_FIXED: "Fixed"}
 SUFFIXES = {"pdf": ".pdf", "svg": ".svg", "eps": ".eps", "png": ".png", "tif": ".tif"}
 RASTER_FORMATS = ("png", "tif")
 

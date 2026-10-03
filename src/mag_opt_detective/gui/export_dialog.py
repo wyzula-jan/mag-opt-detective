@@ -2,22 +2,21 @@
 
 Left, the figure at its true proportions, drawn by matplotlib at screen resolution again about
 150 ms after any change, with its print size under it; right, the journal preset (or one of the
-user's own presets), the size, text and lines, the file format, what the figure includes, its
-colour range and colour bar, the ticks and the labels. Problems show inline under the preview,
-never as dialogs. While it is open the window follows the main window (unit, plot, ranges,
-colours, models, points), and it remembers its choices (``export/figure``) and the user's
-presets (``export/presets``).
+user's own presets, :mod:`~mag_opt_detective.gui.export_presets`), the size, text and lines, the
+file format, what the figure includes, its colour range and colour bar, the ticks and the
+labels. Problems show inline under the preview, never as dialogs. While it is open the window
+follows the main window (unit, plot, ranges, colours, models, points), and it remembers its
+choices (``export/figure``).
 """
 
 from __future__ import annotations
 
-import dataclasses
 import logging
 import math
 from contextlib import contextmanager
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, QRect, QRectF, QSignalBlocker, QSize, Qt, QTimer, Signal
+from PySide6.QtCore import QEvent, QRectF, QSignalBlocker, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QImage, QKeySequence, QPainter, QPen, QShortcut
 from PySide6.QtWidgets import (
     QDialog,
@@ -25,15 +24,10 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QMenu,
     QPushButton,
     QScrollArea,
     QSizePolicy,
     QStackedWidget,
-    QStyle,
-    QStyleOptionToolButton,
-    QStylePainter,
-    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -41,29 +35,22 @@ from PySide6.QtWidgets import (
 from mag_opt_detective.core.units import Unit
 from mag_opt_detective.export import PRESETS, FigureStyle, JournalPreset, get_preset
 from mag_opt_detective.export.style import COLORBAR_LOCATIONS, MINOR_INTERVALS, TICK_DIRECTIONS
-from mag_opt_detective.export.user_presets import (
-    COLOUR_RANGES,
-    MAX_NAME,
-    PresetError,
-    UserPreset,
-    clean_name,
-    presets_from_json,
-    presets_to_json,
-    same_name,
-    stored_presets,
-)
+from mag_opt_detective.export.user_presets import COLOUR_RANGES, UserPreset
 from mag_opt_detective.gui import icons
 from mag_opt_detective.gui.controller import level_label, parse_level_key
 from mag_opt_detective.gui.export_menu import ExportSettings, PresetStore
-from mag_opt_detective.gui.export_render import FigureJob, FigureRenderer, error_text
+from mag_opt_detective.gui.export_presets import MyPresets
+from mag_opt_detective.gui.export_render import FigureJob, FigureRenderer
 from mag_opt_detective.gui.export_state import (
     FORMAT_LABELS,
     KINDS,
     POINTS_ALL,
     POINTS_CURRENT,
     POINTS_NONE,
+    PRESET_NAMES,
     RANGE_AUTO,
     RANGE_FIXED,
+    RANGE_NAMES,
     RANGE_WINDOW,
     RASTER_FORMATS,
     FigureContent,
@@ -83,8 +70,7 @@ from mag_opt_detective.gui.export_state import (
     print_size,
     with_format,
 )
-from mag_opt_detective.gui.kit import SegmentedControl, SmallButton
-from mag_opt_detective.gui.kit._common import TightToolButton
+from mag_opt_detective.gui.kit import SegmentedControl
 from mag_opt_detective.gui.panels.common import (
     Note,
     SpinBox,
@@ -97,21 +83,12 @@ from mag_opt_detective.gui.panels.common import (
     section_label,
 )
 from mag_opt_detective.gui.theme import current_tokens
-from mag_opt_detective.gui.widgets import (
-    FloatEdit,
-    Separator,
-    last_dir,
-    open_file,
-    parse_float,
-    save_file,
-    set_last_dir,
-)
+from mag_opt_detective.gui.widgets import FloatEdit, Separator, last_dir, parse_float, set_last_dir
 
 logger = logging.getLogger("mag_opt_detective")
 
 DEBOUNCE_MS = 150
 SETTINGS_WIDTH = 352
-PRESET_NAMES = {"nature": "Nature", "aps": "APS", "custom": "Custom"}
 PANEL_LETTERS = ("a", "b", "c", "d", "e", "f")
 NO_PANEL = "none"
 VIEW_NAMES = {"map": "Map", "stacked": "Stacked"}
@@ -129,10 +106,10 @@ COLUMN_NAMES = {
     "1.5 wide": "1.5 columns, wide",
 }
 MAX_PREVIEW_DPI = 600.0
-RANGE_OPTIONS = {
-    RANGE_WINDOW: ("Window", "The levels of the main window, as they change"),
-    RANGE_AUTO: ("Auto", "1st–99th percentile of the whole map, as the window's Auto"),
-    RANGE_FIXED: ("Fixed", "Levels typed here, remembered for each plot"),
+RANGE_TIPS = {
+    RANGE_WINDOW: "The levels of the main window, as they change",
+    RANGE_AUTO: "1st–99th percentile of the whole map, as the window's Auto",
+    RANGE_FIXED: "Levels typed here, remembered for each plot",
 }
 RANGE_NOTES = {
     RANGE_WINDOW: "The levels of the main window, as they change.",
@@ -143,9 +120,6 @@ LOCATION_OPTIONS = {
     "right": ("Right", "A vertical bar right of the plot"),
     "top": ("Top", "A horizontal bar above the plot, its label on top"),
 }
-MY_PRESETS = "My presets"
-PRESET_FILTER = "Figure presets (*.json);;All files (*)"
-PRESET_KEEPS = "Keeps the journal, size, text, lines, file, colour bar, ticks and colour range."
 
 
 def column_name(preset: JournalPreset, key: str) -> str:
@@ -162,15 +136,6 @@ def number_field(unit: str, name: str) -> UnitField:
 
 def number(field: UnitField) -> float | None:
     return parse_float(field.edit.text())
-
-
-def sentence(text: str) -> str:
-    """*text* as a sentence: a capital first letter and a full stop."""
-    text = text.strip()
-    if not text:
-        return text
-    text = text[0].upper() + text[1:]
-    return text if text.endswith((".", "!", "?")) else text + "."
 
 
 def _number_text(value: float | None, digits: int = 6) -> str:
@@ -374,60 +339,6 @@ class Messages(QWidget):
         self.setVisible(bool(items))
 
 
-class MenuButton(TightToolButton):
-    """A kit button that opens a menu: its text, shortened to fit, and a chevron."""
-
-    GAP = 6
-    CHEVRON = 12
-    PADDING = 9  # the stylesheet's padding and border, on each side
-    MAX_TEXT = 118
-
-    def __init__(self, text: str, menu: QMenu, tooltip: str = "", parent=None):
-        super().__init__(parent)
-        self.setProperty("kit", "button")
-        self.setText(text)
-        self.setToolTip(tooltip)
-        self.setAccessibleName(text)
-        self.setMenu(menu)
-        self.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
-        self.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
-        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-
-    def shown_text(self) -> str:
-        """The text as drawn (shortened with an ellipsis when long)."""
-        metrics = self.fontMetrics()
-        return metrics.elidedText(self.text(), Qt.TextElideMode.ElideRight, self.MAX_TEXT)
-
-    def sizeHint(self) -> QSize:
-        text = self.fontMetrics().horizontalAdvance(self.shown_text())
-        width = 2 * self.PADDING + text + self.GAP + self.CHEVRON
-        return QSize(width, max(super().sizeHint().height(), 26))
-
-    def minimumSizeHint(self) -> QSize:
-        return self.sizeHint()
-
-    def paintEvent(self, event) -> None:
-        option = QStyleOptionToolButton()
-        self.initStyleOption(option)
-        option.text = ""
-        option.features &= ~QStyleOptionToolButton.ToolButtonFeature.HasMenu
-        painter = QStylePainter(self)
-        painter.drawComplexControl(QStyle.ComplexControl.CC_ToolButton, option)
-        tokens = current_tokens()
-        color = tokens["fg"] if self.isEnabled() else tokens["faint"]
-        text = self.shown_text()
-        text_width = self.fontMetrics().horizontalAdvance(text)
-        x = (self.width() - (text_width + self.GAP + self.CHEVRON)) // 2
-        painter.setPen(color)
-        painter.drawText(
-            QRect(x, 0, text_width + 1, self.height()), Qt.AlignmentFlag.AlignVCenter, text
-        )
-        middle = self.height() // 2
-        chevron = QRect(x + text_width + self.GAP, middle - 6, self.CHEVRON, self.CHEVRON)
-        icons.icon("chevron-down", color).paint(painter, chevron)
-        painter.end()
-
-
 # ---------------------------------------------------------------------- the window
 class ExportDialog(QDialog):
     """Journal figure export of the main window's plot (non-modal; follows the window)."""
@@ -440,7 +351,7 @@ class ExportDialog(QDialog):
         self.main_window = window
         self.controller = window.controller
         self.settings = settings
-        self.presets = PresetStore() if presets is None else presets
+        self.preset_store = PresetStore() if presets is None else presets
         self._quiet = 0
         self._labels = {kind: {"x": "", "y": "", "colorbar": ""} for kind in KINDS}
         self._kind = "map"
@@ -449,9 +360,6 @@ class ExportDialog(QDialog):
         self._snapshot_counts = (0, 0, 0)  # model curves, point curves, points
         self._fixed: dict[str, tuple[float, float]] = {}  # level key -> levels (cm^-1 based)
         self._shown_levels: tuple | None = None  # (key, unit) of the fixed levels shown
-        self._user_presets: list[UserPreset] = []
-        self._active_preset: str | None = None
-        self._naming: tuple[str, str] | None = None  # ("save", "") or ("rename", old name)
 
         self.setWindowTitle("Journal figure")
         self.setWindowFlag(Qt.WindowType.WindowContextHelpButtonHint, False)
@@ -468,9 +376,9 @@ class ExportDialog(QDialog):
 
         self._build()
         self._wire()
-        self._load_user_presets()
+        self.my_presets.load()
         self._apply_stored()
-        listeners = ((settings, self._apply_stored), (self.presets, self._load_user_presets))
+        listeners = ((settings, self._apply_stored), (self.preset_store, self.my_presets.load))
         for holder, listener in listeners:
             holder.listeners.append(listener)
         self.destroyed.connect(lambda: [_forget(*pair) for pair in listeners])
@@ -482,33 +390,7 @@ class ExportDialog(QDialog):
         for key, preset in PRESETS.items():
             self.preset.add_option(key, PRESET_NAMES.get(key, preset.name), preset.name)
         self.preset.setAccessibleName("Journal")
-        self.user_presets_menu = QMenu(self)
-        self.user_presets_menu.setToolTipsVisible(True)
-        self.user_presets_button = MenuButton(
-            MY_PRESETS,
-            self.user_presets_menu,
-            "Your presets: choose one, save these settings, rename, delete, import or export",
-        )
-        self.preset_actions: dict[str, object] = {}
-        self.menu_actions: dict[str, object] = {}
-        self.preset_name = QLineEdit()
-        self.preset_name.setMaxLength(MAX_NAME)
-        self.preset_name.setPlaceholderText("Preset name")
-        self.preset_name.setAccessibleName("Preset name")
-        self.preset_name_save = SmallButton("Save", "save")
-        self.preset_name_cancel = SmallButton("Cancel")
-        self.preset_name_note = Note()
-        self.naming_box = block(
-            _row(
-                (self.preset_name, 1),
-                (self.preset_name_save, 0),
-                (self.preset_name_cancel, 0),
-                spacing=6,
-            ),
-            self.preset_name_note,
-            spacing=5,
-        )
-        self.naming_box.hide()
+        self.my_presets = MyPresets(self, self.preset_store)
         self.notes = hint()
         self.notes.setFont(scaled_font(self.notes, 0.9))
 
@@ -566,7 +448,7 @@ class ExportDialog(QDialog):
         # colour: the map's colour range and the colour bar
         self.levels_mode = SegmentedControl(size="sm", expand=True)
         for mode in COLOUR_RANGES:
-            self.levels_mode.add_option(mode, *RANGE_OPTIONS[mode])
+            self.levels_mode.add_option(mode, RANGE_NAMES[mode], RANGE_TIPS[mode])
         self.levels_mode.setAccessibleName("Colour range")
         self.level_lo = number_field("", "Colour range minimum")
         self.level_hi = number_field("", "Colour range maximum")
@@ -623,8 +505,10 @@ class ExportDialog(QDialog):
         title.setFont(scaled_font(title, 1.08, bold=True))
         subtitle = hint("The plot on screen at print size")
         layout.addWidget(block(title, subtitle, spacing=2))
-        journal = _row((self.preset, 1), (self.user_presets_button, 0))
-        layout.addWidget(block(section_label("Journal"), journal, self.naming_box, self.notes))
+        journal = _row((self.preset, 1), (self.my_presets.button, 0))
+        layout.addWidget(
+            block(section_label("Journal"), journal, self.my_presets.naming_box, self.notes)
+        )
         sizes = _row(
             (labelled("Height", self.height_field), 1),
             (labelled("Text", self.font_field), 1),
@@ -743,12 +627,6 @@ class ExportDialog(QDialog):
 
     def _wire(self) -> None:
         self.preset.valueChanged.connect(self._on_preset)
-        self.user_presets_menu.aboutToShow.connect(self.fill_user_preset_menu)
-        self.preset_name.textChanged.connect(self._update_naming)
-        self.preset_name.returnPressed.connect(self._finish_naming)
-        self.preset_name.installEventFilter(self)  # Escape cancels the name, not the window
-        self.preset_name_save.clicked.connect(self._finish_naming)
-        self.preset_name_cancel.clicked.connect(self.cancel_naming)
         for control in self.widths.values():
             control.valueChanged.connect(self._changed)
         for field in self._number_fields().values():
@@ -1000,20 +878,6 @@ class ExportDialog(QDialog):
         self._changed()
 
     # ------------------------------------------------------------------ user presets
-    def user_presets(self) -> list[UserPreset]:
-        """The user's presets, by name."""
-        return list(self._user_presets)
-
-    def user_preset(self, name: str | None) -> UserPreset | None:
-        """The user's preset called *name* (any case), if there is one."""
-        if not name:
-            return None
-        return next((p for p in self._user_presets if same_name(p.name, name)), None)
-
-    def active_user_preset(self) -> str | None:
-        """The user's preset whose settings the window shows, if any."""
-        return self._active_preset
-
     def current_user_preset(self, name: str) -> UserPreset:
         """The window's style settings as a preset called *name*; ValueError if they cannot be
         kept (a field with an error, or no name)."""
@@ -1036,23 +900,8 @@ class ExportDialog(QDialog):
             colour_range=self.levels_mode.value(),
         )
 
-    def save_user_preset(self, name: str) -> UserPreset:
-        """Keep the window's style settings as the preset *name* (replacing one so called)."""
-        preset = self.current_user_preset(name)
-        others = [p for p in self._user_presets if not same_name(p.name, preset.name)]
-        replaced = len(others) < len(self._user_presets)
-        self._set_user_presets([*others, preset])
-        self._active_preset = preset.name
-        logger.info("Saved the figure preset %r.", preset.name)
-        verb = "Replaced" if replaced else "Saved"
-        self._show_note("ok", f"{verb} the preset “{preset.name}”.")
-        return preset
-
-    def apply_user_preset(self, name: str) -> None:
-        """Show the settings of the user's preset *name*."""
-        preset = self.user_preset(name)
-        if preset is None:
-            raise ValueError(f"there is no preset called {name!r}")
+    def show_user_preset(self, preset: UserPreset) -> None:
+        """Show the settings of a user's preset (its content settings stay)."""
         with self._quietly():
             self.preset.set_value(preset.journal)
             self._set_preset_defaults(preset.journal)
@@ -1073,239 +922,10 @@ class ExportDialog(QDialog):
             self._show_style(preset.style)
             self.levels_mode.set_value(preset.colour_range)
         self._shown_levels = None
-        self._active_preset = preset.name
         self._changed()
 
-    def rename_user_preset(self, old: str, new: str) -> UserPreset:
-        """Give the user's preset *old* the name *new*."""
-        preset = self.user_preset(old)
-        if preset is None:
-            raise ValueError(f"there is no preset called {old!r}")
-        name = clean_name(new)
-        clash = self.user_preset(name)
-        if clash is not None and clash is not preset:
-            raise PresetError(f"a preset called “{clash.name}” exists already")
-        renamed = dataclasses.replace(preset, name=name)
-        self._set_user_presets([renamed if p is preset else p for p in self._user_presets])
-        if same_name(self._active_preset or "", preset.name):
-            self._active_preset = name
-        self._show_note("ok", f"Renamed “{preset.name}” to “{name}”.")
-        return renamed
-
-    def delete_user_preset(self, name: str) -> None:
-        """Forget the user's preset *name*."""
-        preset = self.user_preset(name)
-        if preset is None:
-            raise ValueError(f"there is no preset called {name!r}")
-        self._set_user_presets([p for p in self._user_presets if p is not preset])
-        if same_name(self._active_preset or "", preset.name):
-            self._active_preset = None
-        logger.info("Deleted the figure preset %r.", preset.name)
-        self._show_note("ok", f"Deleted the preset “{preset.name}”.")
-
-    def import_user_presets(self, path: str | Path | None = None) -> list[UserPreset]:
-        """Add the presets of a preset file (those with a name in use replace the old ones);
-        a file that cannot be read changes nothing and says why inline."""
-        path = path or open_file(self, "Import figure presets", PRESET_FILTER)
-        if not path:
-            return []
-        path = Path(path)
-        try:
-            presets = presets_from_json(path.read_bytes())
-        except (OSError, ValueError) as exc:
-            reason = error_text(exc) if isinstance(exc, OSError) else str(exc)
-            logger.warning("Could not import figure presets from %s: %s", path, reason)
-            self._show_note("err", f"Could not import presets from {path.name}: {reason}.")
-            return []
-        kept = [
-            p for p in self._user_presets if not any(same_name(p.name, n.name) for n in presets)
-        ]
-        replaced = len(self._user_presets) - len(kept)
-        self._set_user_presets([*kept, *presets])
-        logger.info("Imported %d figure presets from %s", len(presets), path)
-        text = f"Imported {len(presets)} preset{'s' if len(presets) != 1 else ''} from {path.name}"
-        if replaced:
-            text += f" ({replaced} replaced)"
-        self._show_note("ok", text + ".")
-        return presets
-
-    def export_user_presets(self, path: str | Path | None = None) -> Path | None:
-        """Write the user's presets to a preset file (.json); None if nothing was written."""
-        if not self._user_presets:
-            return None
-        path = path or save_file(self, "Export figure presets", PRESET_FILTER)
-        if not path:
-            return None
-        path = Path(path)
-        if path.suffix.lower() != ".json":
-            path = path.with_name(path.name + ".json")
-        try:
-            path.write_text(presets_to_json(self._user_presets), encoding="utf-8")
-        except OSError as exc:
-            logger.warning("Could not export figure presets: %s", error_text(exc))
-            self._show_note("err", f"Could not export the presets: {error_text(exc)}.")
-            return None
-        n = len(self._user_presets)
-        logger.info("Exported %d figure presets to %s", n, path)
-        self._show_note("ok", f"Exported {n} preset{'s' if n != 1 else ''} to {path.name}.")
-        return path
-
-    def _set_user_presets(self, presets: list[UserPreset]) -> None:
-        self._user_presets = sorted(presets, key=lambda p: p.name.casefold())
-        self.presets.text = presets_to_json(self._user_presets) if self._user_presets else ""
-
-    def _load_user_presets(self) -> None:
-        """Read the stored presets (after a restore or reset too); bad ones are skipped."""
-        presets, problems = stored_presets(self.presets.text) if self.presets.text else ([], [])
-        for problem in problems:
-            logger.warning("Skipped a stored figure preset: %s", problem)
-        self._user_presets = sorted(presets, key=lambda p: p.name.casefold())
-        if self.user_preset(self._active_preset) is None:
-            self._active_preset = None
-        self._update_preset_button()
-
-    def _update_preset_button(self) -> None:
-        """The button names the user's preset the window shows (it stops when one changes)."""
-        try:
-            current = self.current_user_preset("current")
-        except ValueError:
-            current = None
-        active = self.user_preset(self._active_preset)
-        if current is None or (active is not None and not active.same_settings(current)):
-            active = None
-        if active is None and current is not None:
-            active = next((p for p in self._user_presets if p.same_settings(current)), None)
-        self._active_preset = active.name if active is not None else None
-        button = self.user_presets_button
-        button.setText(self._active_preset or MY_PRESETS)
-        button.setAccessibleName(f"My presets: {self._active_preset or 'none chosen'}")
-        button.updateGeometry()
-        button.update()
-
-    def _describe(self, preset: UserPreset) -> str:
-        journal = PRESETS[preset.journal]
-        width = preset.width_mm if preset.width_mm is not None else journal.widths_mm[preset.width]
-        bar = f"colour bar {preset.style.colorbar_location}" if preset.colorbar else "no bar"
-        return (
-            f"{journal.name} · {width:g} × {preset.height_mm:g} mm · {preset.font_pt:g} pt · "
-            f"{FORMAT_LABELS[preset.format]} · {bar} · ticks {preset.style.ticks.direction} · "
-            f"colour range {RANGE_OPTIONS[preset.colour_range][0]}"
-        )
-
-    def fill_user_preset_menu(self) -> None:
-        """The user's presets (the one shown ticked), then save, rename, delete, import and
-        export (built each time the menu opens)."""
-        menu = self.user_presets_menu
-        menu.clear()
-        self.preset_actions = {}
-        if not self._user_presets:
-            empty = menu.addAction("No presets saved yet")
-            empty.setEnabled(False)
-        for preset in self._user_presets:
-            action = menu.addAction(f"{preset.name}\t{PRESET_NAMES[preset.journal]}")
-            action.setCheckable(True)
-            action.setChecked(same_name(preset.name, self._active_preset or ""))
-            action.setToolTip(self._describe(preset))
-            action.triggered.connect(lambda _c=False, n=preset.name: self.apply_user_preset(n))
-            self.preset_actions[preset.name] = action
-        menu.addSeparator()
-        active = self._active_preset
-        choose_first = "Choose one of your presets first"
-        save = menu.addAction("Save as preset…")
-        save.setToolTip("Keep these settings under a name")
-        icons.set_icon(save, "save", "muted")
-        save.triggered.connect(lambda: self.start_naming("save"))
-        rename = menu.addAction(f"Rename “{active}”…" if active else "Rename…")
-        rename.setEnabled(active is not None)
-        rename.setToolTip("" if active else choose_first)
-        rename.triggered.connect(lambda: self.start_naming("rename"))
-        delete = menu.addAction(f"Delete “{active}”" if active else "Delete")
-        delete.setEnabled(active is not None)
-        delete.setToolTip("" if active else choose_first)
-        icons.set_icon(delete, "trash-2", "muted")
-        delete.triggered.connect(lambda: active and self.delete_user_preset(active))
-        menu.addSeparator()
-        load = menu.addAction("Import presets…")
-        load.setToolTip("Add the presets of a file (.json)")
-        icons.set_icon(load, "upload", "muted")
-        load.triggered.connect(lambda: self.import_user_presets())
-        write = menu.addAction("Export presets…")
-        write.setToolTip("Save your presets to a file (.json)")
-        write.setEnabled(bool(self._user_presets))
-        icons.set_icon(write, "download", "muted")
-        write.triggered.connect(lambda: self.export_user_presets())
-        self.menu_actions = {
-            "save": save,
-            "rename": rename,
-            "delete": delete,
-            "import": load,
-            "export": write,
-        }
-
-    def start_naming(self, mode: str) -> None:
-        """Ask for a name inline: to save the settings ("save") or rename ("rename") the
-        preset shown."""
-        old = self._active_preset or ""
-        if mode == "rename" and not old:
-            return
-        self._naming = (mode, old if mode == "rename" else "")
-        self.preset_name_save.setText("Rename" if mode == "rename" else "Save")
-        self.preset_name.setText(old)
-        self.naming_box.show()
-        self.preset_name.setFocus(Qt.FocusReason.OtherFocusReason)
-        self.preset_name.selectAll()
-        self._update_naming()
-
-    def naming(self) -> str | None:
-        """ "save" or "rename" while a name is asked for, else None."""
-        return None if self._naming is None else self._naming[0]
-
-    def cancel_naming(self) -> None:
-        self._naming = None
-        self.naming_box.hide()
-
-    def _update_naming(self) -> None:
-        if self._naming is None:
-            return
-        mode, old = self._naming
-        try:
-            name = clean_name(self.preset_name.text())
-        except PresetError:
-            name = ""
-        clash = self.user_preset(name)
-        level, text = "muted", PRESET_KEEPS if mode == "save" else f"A new name for “{old}”."
-        if clash is not None and mode == "save":
-            level, text = "warn", f"Replaces your preset “{clash.name}”."
-        elif clash is not None and not same_name(clash.name, old):
-            level, text = "err", f"A preset “{clash.name}” exists already."
-        self.preset_name_note.set_text(text, level)
-        self.preset_name_save.setEnabled(bool(name) and level != "err")
-
-    def _finish_naming(self) -> None:
-        if self._naming is None or not self.preset_name_save.isEnabled():
-            return
-        mode, old = self._naming
-        try:
-            if mode == "rename":
-                self.rename_user_preset(old, self.preset_name.text())
-            else:
-                self.save_user_preset(self.preset_name.text())
-        except ValueError as exc:
-            self.preset_name_note.set_text(sentence(str(exc)), "err")
-            return
-        self.cancel_naming()
-
-    def eventFilter(self, watched, event) -> bool:
-        if (
-            watched is self.preset_name
-            and event.type() == QEvent.Type.KeyPress
-            and event.key() == Qt.Key.Key_Escape
-        ):
-            self.cancel_naming()
-            return True
-        return super().eventFilter(watched, event)
-
-    def _show_note(self, level: str, text: str) -> None:
+    def show_note(self, level: str, text: str) -> None:
+        """Show *text* (the last save or preset action) in the messages, until a change."""
         self._note = (level, text)
         self._update_form()
 
@@ -1489,7 +1109,7 @@ class ExportDialog(QDialog):
         self._update_content(kind)
         self._sync_level_fields()
         self._update_levels(kind)
-        self._update_preset_button()
+        self.my_presets.update_button()
 
         items = [("err", text) for text in self.problems()]
         if self._preview_error:
@@ -1658,14 +1278,14 @@ class ExportDialog(QDialog):
             self.preview.set_message(f"The preview could not be drawn: {message}")
             return
         logger.error("Export figure: could not save the figure: %s", message)
-        self._show_note("err", f"Could not save the figure: {message}")
+        self.show_note("err", f"Could not save the figure: {message}")
 
     def _on_saved(self, path: str) -> None:
         size = self.print_size()
         name = Path(path).name
         what = f"{size.width_mm:g} × {size.height_mm:g} mm" if size.ok else ""
         logger.info("Saved figure %s (%s, %s)", path, self.current_preset().name, what)
-        self._show_note("ok", f"Saved {name}")
+        self.show_note("ok", f"Saved {name}")
         status = self.main_window.statusBar()
         status.showMessage(f"Saved figure {name}", 6000)
         self.figureSaved.emit(path)
@@ -1688,7 +1308,7 @@ class ExportDialog(QDialog):
         try:
             job = self.job(size.dpi)
         except ValueError as exc:
-            self._show_note("err", f"Could not save the figure: {exc}")
+            self.show_note("err", f"Could not save the figure: {exc}")
             return
         self._note = None
         self.renderer.save(job, out)

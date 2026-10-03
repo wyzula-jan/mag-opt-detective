@@ -838,25 +838,25 @@ def test_style_and_colour_range_are_remembered(qtbot, tmp_path, sweep, errors):
 
 # ---------------------------------------------------------------------- user presets
 def menu_texts(dialog) -> list[str]:
-    dialog.fill_user_preset_menu()
-    return [a.text() for a in dialog.user_presets_menu.actions() if not a.isSeparator()]
+    dialog.my_presets.fill_menu()
+    return [a.text() for a in dialog.my_presets.menu.actions() if not a.isSeparator()]
 
 
 def name_preset(dialog, mode: str, name: str) -> None:
     """Choose Save as preset… or Rename… in the menu, type *name* and press Return."""
-    dialog.fill_user_preset_menu()
-    dialog.menu_actions[mode].trigger()
-    assert dialog.naming() == mode and dialog.naming_box.isVisibleTo(dialog)
-    dialog.preset_name.setText(name)
-    dialog.preset_name.returnPressed.emit()
+    dialog.my_presets.fill_menu()
+    dialog.my_presets.menu_actions[mode].trigger()
+    assert dialog.my_presets.naming() == mode and dialog.my_presets.naming_box.isVisibleTo(dialog)
+    dialog.my_presets.name_edit.setText(name)
+    dialog.my_presets.name_edit.returnPressed.emit()
 
 
 def test_user_presets_save_list_apply_rename_delete(processed, qtbot, no_dialogs):
     dialog = open_export(processed, qtbot)
-    assert dialog.user_presets_button.text() == "My presets"
+    assert dialog.my_presets.button.text() == "My presets"
     assert menu_texts(dialog)[0] == "No presets saved yet"
-    assert not dialog.menu_actions["rename"].isEnabled()
-    assert not dialog.menu_actions["export"].isEnabled()
+    assert not dialog.my_presets.menu_actions["rename"].isEnabled()
+    assert not dialog.my_presets.menu_actions["export"].isEnabled()
     dialog.preset.set_value("aps")
     dialog.widths["aps"].set_value("double")
     dialog.height_field.edit.setText("80")
@@ -865,46 +865,46 @@ def test_user_presets_save_list_apply_rename_delete(processed, qtbot, no_dialogs
     dialog.levels_mode.set_value("auto")
     dialog.x_label.setText("B")  # content: not part of a preset
     name_preset(dialog, "save", "  Thesis  ")
-    assert not dialog.naming_box.isVisibleTo(dialog)
+    assert not dialog.my_presets.naming_box.isVisibleTo(dialog)
     assert dialog.messages.texts("ok") == ["Saved the preset “Thesis”."]
-    assert dialog.user_presets_button.text() == "Thesis"
-    (preset,) = dialog.user_presets()
+    assert dialog.my_presets.button.text() == "Thesis"
+    (preset,) = dialog.my_presets.presets()
     assert (preset.journal, preset.width, preset.height_mm) == ("aps", "double", 80)
     assert preset.colour_range == "auto"
     assert preset.style == FigureStyle("top", TickStyle("in"))
     assert "x_label" not in preset.to_dict()
 
     dialog.preset.set_value("nature")  # another journal: no longer the preset
-    assert dialog.user_presets_button.text() == "My presets"
+    assert dialog.my_presets.button.text() == "My presets"
     assert menu_texts(dialog)[0] == "Thesis\tAPS"
-    dialog.preset_actions["Thesis"].trigger()  # choose it again
+    dialog.my_presets.preset_actions["Thesis"].trigger()  # choose it again
     assert dialog.preset.value() == "aps" and dialog.widths["aps"].value() == "double"
     assert dialog.print_size().height_mm == 80 and dialog.levels_mode.value() == "auto"
     assert dialog.current_style() == FigureStyle("top", TickStyle("in"))
     assert dialog.x_label.text() == "B"
-    assert dialog.user_presets_button.text() == "Thesis"
-    assert dialog.preset_actions["Thesis"].isChecked()
+    assert dialog.my_presets.button.text() == "Thesis"
+    assert dialog.my_presets.preset_actions["Thesis"].isChecked()
 
     name_preset(dialog, "save", "thesis")  # the same name: replaces it
     assert dialog.messages.texts("ok") == ["Replaced the preset “thesis”."]
     dialog.height_field.edit.setText("90")
     name_preset(dialog, "save", "Second")
-    assert [p.name for p in dialog.user_presets()] == ["Second", "thesis"]
-    dialog.apply_user_preset("thesis")
+    assert [p.name for p in dialog.my_presets.presets()] == ["Second", "thesis"]
+    dialog.my_presets.apply("thesis")
     name_preset(dialog, "rename", "Second")  # taken: refused inline
-    assert dialog.naming() == "rename"
-    assert dialog.preset_name_note.level() == "err"
-    assert not dialog.preset_name_save.isEnabled()
-    dialog.preset_name.setText("PhD thesis")
-    dialog.preset_name_save.click()
-    assert dialog.naming() is None
-    assert [p.name for p in dialog.user_presets()] == ["PhD thesis", "Second"]
-    assert dialog.user_presets_button.text() == "PhD thesis"
-    dialog.fill_user_preset_menu()
-    assert dialog.menu_actions["delete"].text() == "Delete “PhD thesis”"
-    dialog.menu_actions["delete"].trigger()
-    assert [p.name for p in dialog.user_presets()] == ["Second"]
-    assert dialog.user_presets_button.text() == "My presets"
+    assert dialog.my_presets.naming() == "rename"
+    assert dialog.my_presets.name_note.level() == "err"
+    assert not dialog.my_presets.name_save.isEnabled()
+    dialog.my_presets.name_edit.setText("PhD thesis")
+    dialog.my_presets.name_save.click()
+    assert dialog.my_presets.naming() is None
+    assert [p.name for p in dialog.my_presets.presets()] == ["PhD thesis", "Second"]
+    assert dialog.my_presets.button.text() == "PhD thesis"
+    dialog.my_presets.fill_menu()
+    assert dialog.my_presets.menu_actions["delete"].text() == "Delete “PhD thesis”"
+    dialog.my_presets.menu_actions["delete"].trigger()
+    assert [p.name for p in dialog.my_presets.presets()] == ["Second"]
+    assert dialog.my_presets.button.text() == "My presets"
     assert dialog.messages.texts("ok") == ["Deleted the preset “PhD thesis”."]
 
 
@@ -912,21 +912,23 @@ def test_saving_a_preset_needs_valid_settings(processed, qtbot, no_dialogs):
     dialog = open_export(processed, qtbot)
     dialog.height_field.edit.setText("")
     name_preset(dialog, "save", "Broken")
-    assert dialog.naming() == "save" and dialog.user_presets() == []
-    assert dialog.preset_name_note.text().startswith("Fix the settings first: Enter the height")
-    dialog.preset_name.setText("   ")
-    assert not dialog.preset_name_save.isEnabled()
-    QTest.keyClick(dialog.preset_name, Qt.Key.Key_Escape)  # cancels the name, not the window
-    assert dialog.naming() is None and dialog.isVisible()
+    assert dialog.my_presets.naming() == "save" and dialog.my_presets.presets() == []
+    assert dialog.my_presets.name_note.text().startswith("Fix the settings first: Enter the height")
+    dialog.my_presets.name_edit.setText("   ")
+    assert not dialog.my_presets.name_save.isEnabled()
+    QTest.keyClick(
+        dialog.my_presets.name_edit, Qt.Key.Key_Escape
+    )  # cancels the name, not the window
+    assert dialog.my_presets.naming() is None and dialog.isVisible()
 
 
 def test_a_preset_based_on_a_journal_keeps_its_checks(processed, qtbot):
     dialog = open_export(processed, qtbot)
     dialog.font_field.edit.setText("9")
-    dialog.save_user_preset("Big text")
+    dialog.my_presets.save("Big text")
     dialog.preset.set_value("custom")
     assert not dialog.messages.texts("warn")
-    dialog.apply_user_preset("Big text")
+    dialog.my_presets.apply("Big text")
     assert dialog.preset.value() == "nature" and dialog.font_field.edit.text() == "9"
     assert any("5–7 pt; using 7 pt" in text for text in dialog.messages.texts("warn"))
 
@@ -934,24 +936,24 @@ def test_a_preset_based_on_a_journal_keeps_its_checks(processed, qtbot):
 def test_user_presets_export_and_import(processed, qtbot, tmp_path, monkeypatch, no_dialogs):
     dialog = open_export(processed, qtbot)
     dialog.tick_direction.set_value("in")
-    dialog.save_user_preset("Inward")
+    dialog.my_presets.save("Inward")
     dialog.preset.set_value("aps")
-    dialog.save_user_preset("APS plain")
+    dialog.my_presets.save("APS plain")
     save_to(monkeypatch, tmp_path / "presets")
-    dialog.fill_user_preset_menu()
-    dialog.menu_actions["export"].trigger()
+    dialog.my_presets.fill_menu()
+    dialog.my_presets.menu_actions["export"].trigger()
     path = tmp_path / "presets.json"
     assert [p.name for p in presets_from_json(path.read_text())] == ["APS plain", "Inward"]
     assert dialog.messages.texts("ok") == ["Exported 2 presets to presets.json."]
 
     for name in ("APS plain", "Inward"):
-        dialog.delete_user_preset(name)
-    dialog.save_user_preset("Inward")  # replaced by the imported one
+        dialog.my_presets.delete(name)
+    dialog.my_presets.save("Inward")  # replaced by the imported one
     open_from(monkeypatch, path)
-    dialog.fill_user_preset_menu()
-    dialog.menu_actions["import"].trigger()
-    assert [p.name for p in dialog.user_presets()] == ["APS plain", "Inward"]
-    assert dialog.user_preset("Inward").style.ticks.direction == "in"
+    dialog.my_presets.fill_menu()
+    dialog.my_presets.menu_actions["import"].trigger()
+    assert [p.name for p in dialog.my_presets.presets()] == ["APS plain", "Inward"]
+    assert dialog.my_presets.preset("Inward").style.ticks.direction == "in"
     assert dialog.messages.texts("ok") == ["Imported 2 presets from presets.json (1 replaced)."]
 
     newer = tmp_path / "newer.json"
@@ -959,12 +961,12 @@ def test_user_presets_export_and_import(processed, qtbot, tmp_path, monkeypatch,
     bad = tmp_path / "bad.json"
     bad.write_text(json.dumps({"version": 1, "presets": [{"name": "X", "journal": "cell"}]}))
     for file, reason in ((newer, "newer version of the app"), (bad, "unknown journal 'cell'")):
-        assert dialog.import_user_presets(file) == []
+        assert dialog.my_presets.import_file(file) == []
         (message,) = dialog.messages.texts("err")
         assert message.startswith(f"Could not import presets from {file.name}:")
         assert reason in message
-    assert dialog.import_user_presets(tmp_path / "missing.json") == []
-    assert [p.name for p in dialog.user_presets()] == ["APS plain", "Inward"]  # unchanged
+    assert dialog.my_presets.import_file(tmp_path / "missing.json") == []
+    assert [p.name for p in dialog.my_presets.presets()] == ["APS plain", "Inward"]  # unchanged
 
 
 def test_user_presets_are_remembered(qtbot, tmp_path, sweep, errors):
@@ -972,21 +974,21 @@ def test_user_presets_are_remembered(qtbot, tmp_path, sweep, errors):
     w = make_window(qtbot, ini, sweep)
     dialog = open_export(w, qtbot)
     dialog.colorbar_position.set_value("top")
-    dialog.save_user_preset("Top bar")
+    dialog.my_presets.save("Top bar")
     dialog.preset.set_value("custom")
-    dialog.save_user_preset("Free")
+    dialog.my_presets.save("Free")
     w.close()
     stored = QSettings(ini, QSettings.Format.IniFormat).value("v2/export/presets")
     assert [p.name for p in presets_from_json(stored)] == ["Free", "Top bar"]
 
     w2 = make_window(qtbot, ini, sweep)
     dialog = open_export(w2, qtbot)  # a new window and export window
-    assert [p.name for p in dialog.user_presets()] == ["Free", "Top bar"]
-    assert dialog.user_presets_button.text() == "Free"  # the settings shown are that preset
-    dialog.apply_user_preset("Top bar")
+    assert [p.name for p in dialog.my_presets.presets()] == ["Free", "Top bar"]
+    assert dialog.my_presets.button.text() == "Free"  # the settings shown are that preset
+    dialog.my_presets.apply("Top bar")
     assert dialog.colorbar_position.value() == "top" and dialog.preset.value() == "nature"
     w2.reset_settings()
-    assert dialog.user_presets() == [] and dialog.user_presets_button.text() == "My presets"
+    assert dialog.my_presets.presets() == [] and dialog.my_presets.button.text() == "My presets"
     assert not errors
 
 
