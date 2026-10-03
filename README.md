@@ -212,7 +212,7 @@ Ctrl is ⌘ and Alt is ⌥ on macOS. *Help › Shortcuts* lists them in the app.
 | Ctrl+1 / 2 / 3 / 4 | Plot R(B)/R(0) / Data / R(B)/R(B-AVR) / R(B)/R(B-ΔB) |
 | Alt+1 / 2 / 3 | No / 1st / 2nd derivative |
 | V / Z / P | Pan and zoom / box zoom / pick points |
-| W | Auto-pick: follow a clicked line, or find the lines in a dragged box |
+| W | Auto-pick: follow a clicked line, or find the lines in a drawn region |
 | Ctrl+Z / Ctrl+Shift+Z | Undo / redo a point edit (Alt-click removes a point) |
 | A | Fit the plot to the data |
 
