@@ -5,9 +5,11 @@ from mag_opt_detective.core.pipeline import ProcessResult
 from mag_opt_detective.core.processing import step_ratio
 from mag_opt_detective.core.spectra import (
     FieldMap,
+    cell_edges,
     energy_mask,
     field_label,
     load_tsv,
+    sample_at,
     save_tsv,
 )
 from mag_opt_detective.core.units import (
@@ -158,6 +160,17 @@ def test_load_tsv_sorts_the_field_columns(tmp_path):
     shown = ProcessResult.from_map(falling)
     np.testing.assert_array_equal(shown.ratio.field, field)
     assert (shown.step.values > 1).all()  # R(B)/R(B - dB), not R(B)/R(B + dB)
+
+
+def test_cells_of_a_sample_reach_the_midpoints():
+    axis = np.array([0.5, 1.0, 1.25, 1.5])
+    np.testing.assert_allclose(cell_edges(axis), [0.25, 0.75, 1.125, 1.375, 1.625])
+    np.testing.assert_allclose(cell_edges(np.array([2.0])), [1.5, 2.5])
+    assert [sample_at(axis, x) for x in (0.25, 0.74, 0.75, 1.2, 1.625)] == [0, 0, 1, 2, 3]
+    assert sample_at(axis, 0.2) is None and sample_at(axis, 1.7) is None
+    assert sample_at(axis[::-1], 0.6) == 3  # any order: the index in *axis*
+    assert sample_at(np.array([1.0, 2.0, 1.0]), 1.1) == 0  # a repeated value: its first
+    assert sample_at(axis, float("nan")) is None
 
 
 def make_cm1_map() -> FieldMap:

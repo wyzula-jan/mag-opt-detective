@@ -77,6 +77,33 @@ def energy_mask(energy: np.ndarray, lo: float | None, hi: float | None) -> np.nd
     return mask
 
 
+def cell_edges(axis: np.ndarray) -> np.ndarray:
+    """Edges of the cells around the samples of a rising *axis*: the midpoints between
+    neighbours and half a step beyond the ends (a single sample is 1 wide)."""
+    axis = np.asarray(axis, dtype=float)
+    if axis.size == 1:
+        return np.array([axis[0] - 0.5, axis[0] + 0.5])
+    mid = (axis[:-1] + axis[1:]) / 2
+    return np.concatenate([[2 * axis[0] - mid[0]], mid, [2 * axis[-1] - mid[-1]]])
+
+
+def sample_at(axis: np.ndarray, x: float) -> int | None:
+    """Index of the sample of *axis* (any order) whose cell (:func:`cell_edges`) holds *x*,
+    which is the nearest sample; None beyond the outer cells. A value that occurs twice is
+    its first sample."""
+    axis = np.asarray(axis, dtype=float)
+    if axis.size == 0 or not np.isfinite(x):
+        return None
+    values, first = np.unique(axis, return_index=True)
+    edges = cell_edges(values)
+    k = int(np.searchsorted(edges, x, side="right")) - 1
+    if k == values.size and x == edges[-1]:
+        k -= 1  # the outer edge belongs to the last cell
+    if not 0 <= k < values.size:
+        return None
+    return int(first[k])
+
+
 def field_label(b: float) -> str:
     """Column label used in exported files, e.g. ``0.25T``."""
     return f"{b:1.2f}T"

@@ -4,17 +4,18 @@ from __future__ import annotations
 
 import numpy as np
 import pyqtgraph as pg
-from PySide6.QtCore import QPointF, QRectF, Qt, Signal
+from PySide6.QtCore import QRectF, Qt, Signal
 from PySide6.QtGui import QPainter, QPalette
 from PySide6.QtWidgets import QVBoxLayout, QWidget
 
 from mag_opt_detective.core.spectra import FieldMap
 from mag_opt_detective.core.units import axis_label
 from mag_opt_detective.gui.plots.base import (
+    AxisCells,
     PartPainter,
     PlotView,
     Range,
-    pixel_rect,
+    map_cells,
     robust_levels,
     set_range,
 )
@@ -39,7 +40,7 @@ class ColorMapPlot(PlotView):
         self._unit = ""
         self._cmap = ""
         self._fmap: FieldMap | None = None
-        self._rect = QRectF()
+        self._cells: tuple[AxisCells, AxisCells] | None = None  # (field, energy) as drawn
         self._auto_levels = True
         self._margins = (0, 0)
         self.plot.setLabel("bottom", "Magnetic Field (T)")
@@ -176,13 +177,18 @@ class ColorMapPlot(PlotView):
 
     # ------------------------------------------------------------------ data
     def value_at(self, b: float, energy: float) -> float | None:
-        """Map value of the pixel under (b, energy), or None outside the image."""
-        fmap = self._fmap
-        if fmap is None or not self._rect.contains(QPointF(b, energy)):
+        """Map value drawn at (b, energy), or None outside the image."""
+        fmap, cells = self._fmap, self._cells
+        if fmap is None or cells is None:
             return None
-        row = int(np.abs(fmap.energy - energy).argmin())
-        col = int(np.abs(fmap.field - b).argmin())
+        col, row = cells[0].sample_at(b), cells[1].sample_at(energy)
+        if col is None or row is None:
+            return None
         return float(fmap.values[row, col])
+
+    def drawn_cells(self) -> tuple[AxisCells, AxisCells] | None:
+        """How the map is drawn: the (field, energy) cells, or None without a map."""
+        return self._cells
 
     def _cursor_value(self, x: float, y: float) -> float | None:
         return self.value_at(x, y)
@@ -215,14 +221,20 @@ class ColorMapPlot(PlotView):
             self._cmap = cmap
         self._auto_levels = levels is None
         lo, hi = robust_levels(fmap.values) if levels is None else levels
+        x, y = self._cells = map_cells(fmap.field, fmap.energy)
+        values = fmap.values  # an uneven axis is drawn on a finer, even one (see axis_cells)
+        if y.index is not None:
+            values = values[y.index]
+        if x.index is not None:
+            values = values[:, x.index]
         with scale.quiet():  # the histogram re-reads the levels from the new image
-            self.image.setImage(fmap.values, autoLevels=False, levels=(lo, hi))
-            self._rect = pixel_rect(fmap.field, fmap.energy)
-            self.image.setRect(self._rect)
+            self.image.setImage(values, autoLevels=False, levels=(lo, hi))
+            self.image.setRect(QRectF(x.start, y.start, x.span, y.span))
             scale.set_levels(lo, hi, auto_range=self._auto_levels)
 
     def clear_map(self) -> None:
         self._fmap = None
+        self._cells = None
         self.image.clear()
         self.set_points(None)
 

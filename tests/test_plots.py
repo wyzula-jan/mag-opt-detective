@@ -7,7 +7,7 @@ from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtTest import QTest
 
 from mag_opt_detective.core.colormaps import lut
-from mag_opt_detective.core.spectra import FieldMap
+from mag_opt_detective.core.spectra import FieldMap, cell_edges
 from mag_opt_detective.gui.plots import (
     IMAGE_SUFFIXES,
     SCALE_STYLES,
@@ -16,6 +16,7 @@ from mag_opt_detective.gui.plots import (
     HistogramScale,
     PlotColors,
     StackedPlot,
+    axis_cells,
     lookup_table,
     pixel_rect,
     robust_levels,
@@ -394,6 +395,88 @@ def test_cursor_moved(make_plot, qtbot):
     with qtbot.waitSignal(plot.cursorMoved) as blocker:
         plot._on_mouse_moved((pos,))
     assert blocker.args[2] is None
+
+
+GAP = np.array([b for b in np.arange(0.25, 16.001, 0.25) if not 7.2 < b < 7.6])  # 7.25, 7.5
+MERGED = np.concatenate([np.arange(0.5, 8.001, 0.5), np.arange(8.25, 16.001, 0.25)])
+
+
+def line_map(field, energy=None) -> FieldMap:
+    """A dip along E = 600 + 20 B, sampled at *field*."""
+    e = np.linspace(400.0, 1200.0, 801) if energy is None else energy
+    dip = np.exp(-(((e[:, None] - 600 - 20 * field[None, :]) / 6) ** 2))
+    return FieldMap(e, field, 1 - 0.1 * dip)
+
+
+def drawn_spans(plot: ColorMapPlot, axis: int) -> dict[int, tuple[float, float]]:
+    """Where each sample of the shown map is drawn along *axis* (1: field, 0: energy), read
+    back from the image item: sample -> (first edge, last edge)."""
+    image, fmap = plot.image.image, plot._fmap
+    rect = plot.image.mapRectToParent(plot.image.boundingRect())
+    n = image.shape[axis]
+    start, size = (rect.left(), rect.width()) if axis else (rect.top(), rect.height())
+    data = fmap.values if axis == 0 else fmap.values.T
+    lines = image if axis == 0 else image.T
+    spans: dict[int, tuple[float, float]] = {}
+    for k in range(n):
+        (j,) = np.flatnonzero((data == lines[k]).all(axis=1))[:1]
+        lo, hi = start + k * size / n, start + (k + 1) * size / n
+        spans[int(j)] = (min(lo, spans.get(int(j), (lo, hi))[0]), hi)
+    return spans
+
+
+@pytest.mark.parametrize("field", [GAP, MERGED], ids=["missing files", "merged by field"])
+def test_uneven_field_columns_are_drawn_on_their_field(make_plot, field):
+    """Every column covers its field, out to the midpoints to its neighbours (as the journal
+    figure draws it); the cursor value and the colour at any B are the same column."""
+    plot = make_plot()
+    fmap = line_map(field)
+    plot.set_map(fmap)
+    spans = drawn_spans(plot, axis=1)
+    edges = cell_edges(field)
+    assert sorted(spans) == list(range(field.size))
+    for j, (lo, hi) in spans.items():
+        assert (lo, hi) == pytest.approx((edges[j], edges[j + 1]), abs=1e-9)
+        if j and j < field.size - 1 and field[j] - field[j - 1] == field[j + 1] - field[j]:
+            assert (lo + hi) / 2 == pytest.approx(field[j], abs=1e-9)  # centred on it
+    k12 = int(np.flatnonzero(field == 12.0)[0])
+    assert np.mean(spans[k12]) == pytest.approx(12.0)
+    for b in (7.0, 7.3, 7.4, 7.75, 7.9, 8.0, 8.1, 8.2, 12.0, 15.9):
+        j = int(np.abs(field - b).argmin())
+        assert plot.value_at(b, 840.0) == fmap.values[np.abs(fmap.energy - 840).argmin(), j]
+    assert plot.value_at(12.0, 840.0) == pytest.approx(0.9)  # the dip of the 12 T column
+    assert plot.value_at(edges[0] - 0.01, 840.0) is None
+    assert plot.value_at(edges[-1] + 0.01, 840.0) is None
+
+
+def test_uneven_energy_rows_are_drawn_on_their_energy(make_plot):
+    energy = np.concatenate([np.arange(400.0, 600.0, 2.0), np.arange(600.0, 700.0, 1.0)])
+    field = np.arange(0.5, 4.01, 0.5)
+    plot = make_plot()
+    plot.set_map(FieldMap(energy, field, np.add.outer(energy / 1000, field)))  # rows differ
+    spans = drawn_spans(plot, axis=0)
+    edges = cell_edges(energy)
+    assert sorted(spans) == list(range(energy.size))
+    for i, (lo, hi) in spans.items():
+        assert (lo, hi) == pytest.approx((edges[i], edges[i + 1]), abs=1e-9)
+    assert plot.value_at(1.0, 650.0) == plot._fmap.values[np.searchsorted(energy, 650.0), 1]
+
+
+def test_axis_cells():
+    uniform = axis_cells(np.linspace(0.25, 16.0, 64))
+    assert (uniform.start, uniform.step, uniform.size, uniform.index) == (0.125, 0.25, 64, None)
+    assert uniform.sample_at(0.13) == 0 and uniform.sample_at(16.12) == 63
+    assert uniform.sample_at(0.12) is None and uniform.sample_at(16.13) is None
+    single = axis_cells(np.array([2.0]))
+    assert (single.start, single.span) == (1.5, 1.0)
+    falling = axis_cells(np.array([3.0, 2.0, 1.0]))  # drawn rising, each on its value
+    assert [falling.sample_at(x) for x in (1.0, 2.0, 3.0)] == [2, 1, 0]
+    capped = axis_cells(np.array([0.0, 1e-4, 16.0]), max_cells=100)
+    assert capped.size == 100 and capped.span == pytest.approx(24.0)
+    assert {capped.sample_at(x) for x in (0.0, 8.0, 16.0)} == {1, 2}  # the cap blurs 1e-4 T
+    # the rectangle of an even grid is the one drawn before: pixels centred on the samples
+    rect = pixel_rect(np.linspace(0.0, 2.2, 12), np.linspace(100.0, 500.0, 40))
+    assert (rect.left(), rect.width()) == pytest.approx((-0.1, 2.4))
 
 
 def stacked_with(qtbot, fmap, offset=1.0) -> StackedPlot:

@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import math
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
@@ -14,6 +16,7 @@ from PySide6.QtGui import QImage, QPainter, QPicture
 from PySide6.QtSvg import QSvgGenerator
 from PySide6.QtWidgets import QHBoxLayout, QWidget
 
+from mag_opt_detective.core.spectra import cell_edges
 from mag_opt_detective.gui.plots.colors import PlotColors
 from mag_opt_detective.gui.plots.overlays import OverlayMixin
 
@@ -22,6 +25,9 @@ Range = tuple[float, float] | None
 PartPainter = Callable[[QPainter, QRectF, float], None]
 
 IMAGE_SUFFIXES = (".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".svg")
+
+UNIFORM_TOL = 1e-3  # of a step: an axis this close to an even grid is drawn as one
+MAX_DRAWN_PIXELS = 8_000_000  # of a map on an uneven grid, which is drawn on a finer one
 
 
 def robust_levels(values: np.ndarray) -> tuple[float, float]:
@@ -35,16 +41,83 @@ def robust_levels(values: np.ndarray) -> tuple[float, float]:
     return float(lo), float(hi)
 
 
+@dataclass(frozen=True)
+class AxisCells:
+    """How one axis of a map is drawn: *size* equal cells of width *step* from *start*.
+
+    Cell k shows sample ``index[k]``; with *index* None the axis is uniform and cell k shows
+    sample k.
+    """
+
+    start: float
+    step: float
+    size: int
+    index: np.ndarray | None = None
+
+    @property
+    def span(self) -> float:
+        return self.size * self.step
+
+    def sample_at(self, x: float) -> int | None:
+        """The sample drawn at *x*, or None outside the cells."""
+        if not math.isfinite(x):
+            return None
+        k = math.floor((x - self.start) / self.step)
+        if not 0 <= k < self.size:
+            return None
+        return k if self.index is None else int(self.index[k])
+
+
+def _is_uniform(axis: np.ndarray) -> bool:
+    """Rising, and every sample within UNIFORM_TOL of a step of its place on an even grid."""
+    step = (axis[-1] - axis[0]) / (axis.size - 1)
+    if not step > 0:
+        return False
+    even = axis[0] + step * np.arange(axis.size)
+    return bool(np.abs(axis - even).max() <= UNIFORM_TOL * step)
+
+
+def axis_cells(axis: np.ndarray, max_cells: int = 1 << 30) -> AxisCells:
+    """Cells that draw the samples of *axis* where they are (any order and spacing).
+
+    A uniform axis gets one cell per sample, centred on it. Otherwise every sample covers
+    the span of its :func:`~mag_opt_detective.core.spectra.cell_edges` (midpoints between
+    neighbours, as in the journal figure), drawn with cells of half the smallest step, so
+    that edges on a regular lattice (missing files, maps merged by field) fall on cell edges.
+    The cells get wider when there would be more than *max_cells* (at least one per sample).
+    """
+    axis = np.asarray(axis, dtype=float)
+    if axis.size == 1:
+        return AxisCells(float(axis[0]) - 0.5, 1.0, 1)
+    if _is_uniform(axis):
+        step = float(axis[-1] - axis[0]) / (axis.size - 1)
+        return AxisCells(float(axis[0]) - step / 2, step, axis.size)
+    values, first = np.unique(axis, return_index=True)
+    if values.size == 1:
+        return AxisCells(float(values[0]) - 0.5, 1.0, 1, first[:1])
+    edges = cell_edges(values)
+    width = float(edges[-1] - edges[0])
+    step = float(np.diff(values).min()) / 2
+    size = math.ceil(width / step - 1e-6)
+    limit = max(max_cells, 2 * values.size)
+    if size > limit:
+        size, step = limit, width / limit
+    centres = edges[0] + (np.arange(size) + 0.5) * step
+    k = np.clip(np.searchsorted(edges, centres, side="right") - 1, 0, values.size - 1)
+    return AxisCells(float(edges[0]), step, size, first[k])
+
+
+def map_cells(field: np.ndarray, energy: np.ndarray) -> tuple[AxisCells, AxisCells]:
+    """(field, energy) cells of a drawn map, at most about MAX_DRAWN_PIXELS in all."""
+    y = axis_cells(energy, MAX_DRAWN_PIXELS // (2 * max(field.size, 1)))
+    x = axis_cells(field, MAX_DRAWN_PIXELS // y.size)
+    return x, y
+
+
 def pixel_rect(field: np.ndarray, energy: np.ndarray) -> QRectF:
-    """Image rectangle with pixel centres placed on the field/energy grid."""
-
-    def span(axis: np.ndarray) -> tuple[float, float]:
-        step = (axis[-1] - axis[0]) / (axis.size - 1) if axis.size > 1 else 1.0
-        return axis[0] - step / 2, (axis[-1] - axis[0]) + step
-
-    x0, width = span(field)
-    y0, height = span(energy)
-    return QRectF(x0, y0, width, height)
+    """Rectangle of the image of a map with the samples on their field and energy."""
+    x, y = map_cells(np.asarray(field, dtype=float), np.asarray(energy, dtype=float))
+    return QRectF(x.start, y.start, x.span, y.span)
 
 
 def set_range(plot: pg.PlotItem, x_range: Range, y_range: Range) -> None:

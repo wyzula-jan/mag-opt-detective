@@ -2,8 +2,11 @@
 
 from mag_opt_detective.gui.plots.base import (
     IMAGE_SUFFIXES,
+    AxisCells,
     PlotView,
     Range,
+    axis_cells,
+    map_cells,
     pixel_rect,
     robust_levels,
     set_range,
@@ -25,6 +28,7 @@ from mag_opt_detective.gui.plots.stacked_view import StackedPlot
 __all__ = [
     "IMAGE_SUFFIXES",
     "SCALE_STYLES",
+    "AxisCells",
     "BarScale",
     "ColorBar",
     "ColorMapPlot",
@@ -35,9 +39,11 @@ __all__ = [
     "PlotView",
     "Range",
     "StackedPlot",
+    "axis_cells",
     "colormap",
     "lookup_table",
     "make_scale",
+    "map_cells",
     "pixel_rect",
     "robust_levels",
     "set_range",
