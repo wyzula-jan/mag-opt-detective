@@ -299,6 +299,7 @@ class ZeemanEditor(QWidget):
                 self.table.rows.addWidget(Divider())
             self.table.rows.addWidget(row)
             row.label.edit.textChanged.connect(lambda text, k=i: self._on_label(k, text))
+            row.label.edit.editingFinished.connect(lambda r=row, k=i: self._tidy_label(r, k))
             row.e0.valueEdited.connect(lambda v, k=i: self._on_e0(k, v))
             row.g.valueEdited.connect(lambda v, k=i: self._on_param(f"g_{k}", v))
             row.m.valueEdited.connect(lambda v, k=i: self._on_m(k, v))
@@ -350,6 +351,15 @@ class ZeemanEditor(QWidget):
     def _on_label(self, index: int, text: str) -> None:
         ms.set_branch(self.entry, index, label=text.strip() or f"Branch {index + 1}")
         self.owner.edited(self.entry)
+
+    def _tidy_label(self, row: BranchRow, index: int) -> None:
+        """A label left empty shows the name it fell back to ("Branch n")."""
+        branches = self.entry.model.branches
+        if index < min(len(branches), len(self.rows)) and self.rows[index] is row:
+            label = branches[index].label
+            if row.label.edit.text() != label:
+                with QSignalBlocker(row.label.edit):
+                    row.label.edit.setText(label)
 
     def _on_e0(self, index: int, value) -> None:
         p = ms.params(self.entry)[f"e0_{index}"]

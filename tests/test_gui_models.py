@@ -229,6 +229,10 @@ def test_zeeman_branches_and_couplings(window, errors):
     assert couplings[(0, 2)] == couplings[(1, 2)] == 1.0
     assert sorted(editor.couplings) == [(0, 1), (0, 2), (1, 2)]
 
+    editor.rows[1].label.edit.setText("")
+    assert zeeman.model.branches[1].label == "Branch 2"
+    editor.rows[1].label.edit.editingFinished.emit()  # the field shows the name it fell back to
+    assert editor.rows[1].label.edit.text() == "Branch 2"
     editor.rows[1].label.edit.setText("magnon")
     editor.rows[1].m.edit.setText("0")
     assert ms.params(zeeman)["g_1"].fixed  # g of an m = 0 line does not matter
