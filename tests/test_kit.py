@@ -239,6 +239,9 @@ def test_range_slider_cursor_and_hover_over_the_range(qtbot, slider):
     qtbot.waitExposed(slider)
     y = slider.height() // 2
     middle = QPoint(round(slider.x_for(50.0)), y)
+    # a move without buttons sets the cursor position, which is ignored when unchanged:
+    # coming from the groove makes sure that the move to the middle is seen
+    qtbot.mouseMove(slider, QPoint(round(slider.x_for(5.0)), y))
     assert slider.cursor().shape() == Qt.CursorShape.ArrowCursor
     qtbot.mouseMove(slider, middle)
     assert slider.cursor().shape() == Qt.CursorShape.OpenHandCursor
