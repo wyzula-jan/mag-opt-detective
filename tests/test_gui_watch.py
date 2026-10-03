@@ -499,7 +499,7 @@ def test_a_file_with_another_energy_axis_is_held_back(window, clock, tmp_path, e
     assert fields(window) == [0.5, 1.0] and errors == []
 
 
-def test_held_files_are_tried_again_when_the_sweep_is_complete(window, clock, tmp_path):
+def test_held_files_are_tried_again_when_the_sweep_is_complete(window, clock, tmp_path, errors):
     def text(y, rows=None) -> str:
         return "".join(f"{a:.8f}\t{b:.8f}\n" for a, b in list(zip(X, y, strict=True))[:rows])
 
@@ -510,20 +510,22 @@ def test_held_files_are_tried_again_when_the_sweep_is_complete(window, clock, tm
     watcher = window.folder_watch
     watcher.start(tmp_path)
     assert window.controller.result.ratio.energy.size == 40
-    spectrum(tmp_path, 1.0)  # complete: another axis than the (half) sweep
-    arrive(window, clock)
-    for _ in range(watch.MAX_FAILURES):
-        clock.now += 1.0
-        watcher.check_now()
-    assert c_files(window) == [sweep_name(0.5)]  # left out for now
+    for b in (1.0, 1.25, 1.5):  # complete, so another axis than the (half) sweep's
+        spectrum(tmp_path, b)
+        arrive(window, clock)
+        for _ in range(watch.MAX_FAILURES):
+            clock.now += 1.0
+            watcher.check_now()
+    assert c_files(window) == [sweep_name(0.5)]  # held back, though there are more of them
     for path, y in zip(first, (BASE, 1.05 * BASE), strict=True):
         path.write_text(text(y))  # the first files are finished
     arrive(window, clock)
     for _ in range(2):
         clock.now += watch.MIN_GAP_S
         watcher.check_now()
-    assert fields(window) == [0.5, 1.0]
+    assert fields(window) == [0.5, 1.0, 1.25, 1.5]
     assert window.controller.result.ratio.energy.size == X.size
+    assert errors == []  # never a sweep with two axes
 
 
 FINE = np.linspace(100.0, 1000.0, 181)  # another resolution
@@ -551,6 +553,49 @@ def test_new_files_held_back_for_their_axis_are_shown(window, clock, tmp_path):
     os.remove(tmp_path / sweep_name(2.5))
     watcher.check_now()
     assert state_text(window).startswith("Watching · 4 files")
+
+
+def axes(window) -> str:
+    """The axis of each listed in-field spectrum: A (X) or B (FINE)."""
+    c = window.controller
+    return "".join(
+        "A" if c.read_spectrum(p)[0].size == X.size else "B"
+        for p in c.processing.sample_files.field
+    )
+
+
+def test_the_listed_spectra_keep_their_axis(window, clock, tmp_path, errors):
+    zero(tmp_path, old=True)
+    for b in (0.25, 0.5, 0.75):
+        spectrum(tmp_path, b, old=True)
+    watcher = window.folder_watch
+    watcher.start(tmp_path)
+    for i in range(5):  # more spectra at the new resolution than at the old one
+        fine(tmp_path, sweep_name(1.0 + 0.25 * i))
+        arrive(window, clock)
+        for _ in range(watch.MAX_FAILURES):
+            clock.now += 1.0
+            watcher.check_now()
+    assert axes(window) == "AAA" and fields(window) == [0.25, 0.5, 0.75] and errors == []
+    assert state_text(window).startswith("5 new files have another energy axis: 181 points")
+
+
+def test_spectra_of_two_axes_never_share_the_lists(window, clock, tmp_path, errors):
+    zero(tmp_path, old=True)
+    watcher = window.folder_watch
+    watcher.start(tmp_path)
+    for i, axis in enumerate("ABBAABBBAA"):
+        name = sweep_name(0.25 * (i + 1))
+        if axis == "A":
+            write_text(tmp_path / name, X, BASE)
+        else:
+            fine(tmp_path, name)
+        arrive(window, clock)
+        for _ in range(watch.MAX_FAILURES):
+            clock.now += 1.0
+            watcher.check_now()
+        assert set(axes(window)) == {"A"}
+    assert axes(window) == "AAAAA" and errors == []
 
 
 def test_the_axis_most_files_share_wins(window, clock, tmp_path):

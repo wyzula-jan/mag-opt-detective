@@ -41,7 +41,7 @@ from mag_opt_detective.gui.controller import (
     AppController,
     SweepFiles,
 )
-from mag_opt_detective.gui.panels.files import merged, split_zero
+from mag_opt_detective.gui.panels.files import is_zero_field, merged, split_zero
 
 logger = logging.getLogger("mag_opt_detective")
 
@@ -400,10 +400,12 @@ class FolderWatcher(QObject):
             self._queue(new, gone, changed)
 
     def _sweep_axis(self, listing: Listing, listed: set[str], read: dict[str, np.ndarray]):
-        """The energy axis most spectra of the folder share: the listed ones, the complete new
-        ones (*read*: their axes) and those held back for their axis; a tie goes to the listed
-        ones, then to the axis before. None without spectra. Whenever the axis changes, the
-        files held back are checked again."""
+        """The sweep's energy axis. While in-field spectra of the folder are listed (and not
+        being read again), the axis most of them share: the lists keep one axis. Before, the
+        one most spectra share, the listed zero-field ones, the complete new ones (*read*:
+        their axes) and those held back for their axis; a tie goes to the listed ones, then to
+        the axis before. None without spectra. Whenever the axis changes, the files held back
+        are checked again."""
         votes: dict[tuple, list] = {}  # axis key -> [spectra, listed spectra, axis]
 
         def vote(x: np.ndarray, is_listed: bool) -> None:
@@ -412,15 +414,23 @@ class FolderWatcher(QObject):
             entry[0] += 1
             entry[1] += is_listed
 
+        field: list[np.ndarray] = []
+        zero: list[np.ndarray] = []
         for path, signature in self._accepted.items():
             if path not in read and listing.get(path) == signature and path_key(path) in listed:
                 with contextlib.suppress(*EXPECTED_ERRORS):
-                    vote(self.controller.read_spectrum(path)[0], True)
-        for x in read.values():
-            vote(x, False)
-        for path in self._held.keys() - read.keys():  # left out after their checks
-            with contextlib.suppress(*EXPECTED_ERRORS):
-                vote(self.controller.read_spectrum(path)[0], False)
+                    x = self.controller.read_spectrum(path)[0]
+                    (zero if is_zero_field(path) else field).append(x)
+        for x in field:  # the listed in-field spectra decide
+            vote(x, True)
+        if not field:
+            for x in zero:
+                vote(x, True)
+            for x in read.values():
+                vote(x, False)
+            for path in self._held.keys() - read.keys():  # left out after their checks
+                with contextlib.suppress(*EXPECTED_ERRORS):
+                    vote(self.controller.read_spectrum(path)[0], False)
         key = None
         if votes:
             key = max(votes, key=lambda k: (votes[k][0], votes[k][1], k == self._axis_key))
