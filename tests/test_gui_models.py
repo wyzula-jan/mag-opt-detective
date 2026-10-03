@@ -7,6 +7,7 @@ import threading
 import numpy as np
 import pytest
 from PySide6.QtCore import QEvent, QPoint, QSettings, Qt, QTimer
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QLineEdit, QMenu, QStyle, QWidget
 
 import gui_helpers
@@ -1256,4 +1257,27 @@ def test_expression_names_are_read_in_their_own_column(window, sweep, qtbot, err
         assert len({(f.mapTo(section, QPoint(0, 0)).x(), f.width()) for f in fields}) == 1
     scrollbar = window.style().pixelMetric(QStyle.PixelMetric.PM_ScrollBarExtent)
     assert section.minimumSizeHint().width() <= INSPECTOR_MIN_WIDTH - scrollbar
+    assert not errors
+
+
+def test_tab_follows_the_rows_in_the_window(window, sweep, qtbot, errors):
+    """Real Tab presses in the main window go caption by caption as drawn: a row's slider,
+    then its field, then the next row's slider; Backtab goes back."""
+    shown_window(window, qtbot, (1400, 900))
+    load_sweep(window, sweep)
+    process(window)
+    zeeman = add(window, "zeeman")
+    settle(qtbot)
+    rows = card_of(window, zeeman).editor.rows[0]
+    window.activateWindow()
+    rows.e0.slider.setFocus(Qt.FocusReason.TabFocusReason)
+    qtbot.waitUntil(lambda: QApplication.focusWidget() is rows.e0.slider)
+    expected = [rows.e0.field.edit, rows.g.slider, rows.g.field.edit]
+    reached = []
+    for _ in expected:
+        QTest.keyClick(QApplication.focusWidget(), Qt.Key.Key_Tab)
+        reached.append(QApplication.focusWidget())
+    assert reached == expected
+    QTest.keyClick(QApplication.focusWidget(), Qt.Key.Key_Backtab)
+    assert QApplication.focusWidget() is rows.g.slider
     assert not errors

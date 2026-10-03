@@ -550,11 +550,14 @@ class ParamRow(QWidget):
             self.updateGeometry()
 
     def _order_tabs(self) -> None:
-        """Tab follows what is drawn: slider then field on one line, field then slider on two."""
+        """Tab follows what is drawn: slider then field on one line, field then slider on two
+        (in Qt's chain and in the child order, which the main window's Tab walks)."""
         if self._wide:
             QWidget.setTabOrder(self.slider, self.field.edit)
+            self.field.raise_()
         else:
             QWidget.setTabOrder(self.field.edit, self.slider)
+            self.slider.raise_()
 
 
 class CodeBox(QWidget):
