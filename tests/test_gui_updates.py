@@ -332,6 +332,14 @@ def test_the_notice_waits_for_the_message_on_the_bar(qtbot, stored):
     stored.infobar.close_button.click()
     assert stored.infobar.isHidden()  # shown once
 
+    stored.updates.clock = lambda: NOW + timedelta(days=1)
+    stored.report_error("Process", "the reference sweep has no files", panel="reference")
+    check(qtbot, stored, manual=False)  # waits for the bar
+    check(qtbot, stored)  # asked for meanwhile: shown at once, and only then
+    assert stored.infobar.title_label.text().startswith("Version 0.3.0 is available")
+    stored.infobar.close_button.click()
+    assert stored.infobar.isHidden()
+
 
 def test_a_check_still_running_when_the_window_closes_is_dropped(qtbot, ini):
     w = MainWindow(settings=QSettings(ini, QSettings.Format.IniFormat))

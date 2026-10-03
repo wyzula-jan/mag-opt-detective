@@ -23,7 +23,7 @@ from concurrent.futures import Future
 from datetime import datetime
 from functools import partial
 
-from PySide6.QtCore import QObject, Qt, QTimer, QUrl, Signal
+from PySide6.QtCore import QObject, QTimer, QUrl, Signal
 from PySide6.QtGui import QAction, QDesktopServices
 
 from mag_opt_detective import __version__
@@ -96,6 +96,8 @@ class UpdateChecker(QObject):
         self.startup_action: QAction = window.commands["check_updates_at_startup"]
         self._future: Future | None = None
         self._manual = False  # the check running was asked for: say how it ended
+        self._waiting: feed.Release | None = None  # a notice waiting for the bar to be free
+        window.infobar.closed.connect(self._show_waiting)
         self._startup = QTimer(self)
         self._startup.setSingleShot(True)
         self._startup.timeout.connect(self._check_automatically)
@@ -217,6 +219,7 @@ class UpdateChecker(QObject):
 
     def _show_result(self, releases: list[feed.Release], manual: bool) -> None:
         release = feed.update_for(releases, self.current(), self.channel())
+        self._waiting = None
         bar = self.window.infobar
         if release is None:
             logger.info("Checked for updates: %s is the newest version.", self.version)
@@ -229,8 +232,12 @@ class UpdateChecker(QObject):
         if manual or bar.isHidden():
             self.show_notice(release)
         else:  # never over another message: after it
-            single = Qt.ConnectionType.SingleShotConnection
-            bar.closed.connect(lambda: self.show_notice(release), single)
+            self._waiting = release
+
+    def _show_waiting(self) -> None:
+        release, self._waiting = self._waiting, None
+        if release is not None:
+            self.show_notice(release)
 
     def _is_skipped(self, release: feed.Release) -> bool:
         try:
