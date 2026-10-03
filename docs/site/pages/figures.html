@@ -52,7 +52,7 @@ description: Export the map or the stacked plot at print size with the Nature, A
   <li>the colour bar (on or off, right or top), the ticks and the colour range (Window, Auto or Fixed).</li>
 </ul>
 <p>It does not keep what one figure shows: the view, the model curves and points, the panel letter, the axis and colour bar labels and the fixed colour range values. Saving under a name in use replaces that preset.</p>
-<p>Choose a preset in the menu to use it; the button shows its name until you change one of its settings. <b>Rename…</b> and <b>Delete</b> act on the preset shown. <b>Export presets…</b> writes all of them to a JSON file, and <b>Import presets…</b> adds those of a file, replacing presets with the same name. A file that is not a preset file, holds values no figure can have (such as a height above 1000 mm), or comes from a newer version of the app, is refused with a message and changes nothing. Your presets are saved as soon as you change them, and <b>View › Reset settings</b> keeps them.</p>
+<p>Choose a preset in the menu to use it; the button shows its name until you change one of its settings. <b>Rename…</b> and <b>Delete</b> act on the preset shown. <b>Export presets…</b> writes all of them to a JSON file, and <b>Import presets…</b> adds those of a file, replacing presets with the same name. A file that is not a preset file, holds values no figure can have (such as a height above 1000 mm), or comes from a newer version of the app, is refused with a message and changes nothing. Your presets are saved as soon as you change them, and <b>View › Reset settings</b> keeps them. Presets this version cannot read (saved by a newer version of the app) are kept unchanged; if they are in a newer format, this version leaves them alone and does not save new presets over them.</p>
 
 <h2 id="presets">The presets</h2>
 <div class="table-wrap"><table>
@@ -88,7 +88,7 @@ description: Export the map or the stacked plot at print size with the Nature, A
     <tr><td class="wrap-ok"><i>APS (Physical Review): images need at least 600 dpi; using 600 dpi.</i></td><td class="wrap-ok">The resolution was raised to the journal's minimum.</td></tr>
     <tr><td class="wrap-ok"><i>Nature: lines should be at most 1 pt, not 1.5 pt.</i></td><td class="wrap-ok">A value outside the journal's rules that is drawn as typed.</td></tr>
     <tr><td class="wrap-ok"><i>Nature asks for PDF, EPS, TIFF or PNG files.</i></td><td class="wrap-ok">The chosen format is not one the journal asks for; it is saved anyway.</td></tr>
-    <tr><td class="wrap-ok"><i>Too small for the labels and the colour bar: make the figure taller.</i></td><td class="wrap-ok">The text and the colour bar do not fit into the figure, so parts of them would be cut off or overlap the plot. Make the figure taller (or wider, as the message says), or the text smaller.</td></tr>
+    <tr><td class="wrap-ok"><i>Too small for the labels and the colour bar: make the figure taller.</i></td><td class="wrap-ok">The text and the colour bar do not fit into the figure: parts of them would be cut off or overlap the plot, or the plot would be squeezed so that its numbers overprint. Make the figure taller (or wider, as the message says), or the text smaller.</td></tr>
   </tbody>
 </table></div>
 <p>Errors, in red, mark the field and disable Save until it is fixed: an empty field, or a value outside what can be drawn at all (sizes 5 – 1000 mm, text 1 – 72 pt, lines 0.05 – 10 pt, resolution 50 – 2400 dpi, at most 120 million pixels).</p>
