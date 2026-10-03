@@ -1,6 +1,7 @@
-"""The bundle's helpers in packaging/."""
+"""Project metadata and the bundle's build-time helpers in packaging/."""
 
 import importlib.util
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -16,6 +17,11 @@ def load(name: str):
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def test_the_version_is_the_same_in_pyproject_and_the_package():
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]
+    assert project["version"] == mag_opt_detective.__version__
 
 
 # ---------------------------------------------------------------------- launcher
