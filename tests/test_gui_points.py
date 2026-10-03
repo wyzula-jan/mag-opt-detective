@@ -518,6 +518,7 @@ def test_typed_renames_merge_into_one_step(ctl):
     for name in ("C", "CR", "CR1"):
         c.rename_curve(name, merge=("rename", 1))
     assert stack.count() == 1 and c.curve == "CR1"
+    assert stack.undoText() == "Rename curve LL 1"  # the name the step brings back
     c.rename_curve("CR", merge=("rename", 2))  # another editing session
     assert stack.count() == 2
     c.rename_curve("CR1", merge=("rename", 2))  # typed back: the step goes away
