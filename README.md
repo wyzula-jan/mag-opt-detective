@@ -45,8 +45,8 @@ spectra (measured before and after the sweep) correct the drift.
 - Colour scales as the classic histogram or a slim bar (a switch in the plot toolbar);
   each one collapses with its handle, or all at once.
 - Stacked spectra: offset, every n-th field and colours by field.
-- A legend in the map and the stacked plot (a button in the plot toolbar) lists the picked
-  curves and the models drawn; drag it anywhere.
+- A legend in the map and the stacked plot (a button in the plot toolbar) lists the
+  picked curves and the models drawn; drag it anywhere.
 - Appearance: light, dark or following the system.
 
 **Pick points** (P). A click on the map records the energy of the current curve at that
