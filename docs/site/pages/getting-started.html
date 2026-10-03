@@ -34,6 +34,11 @@ Demo_4p2K_Sam1_a16p000T.txt             16 T
 Demo_4p2K_Sam1_a00p000T_a16p000T.txt    zero field, after the sweep up to 16 T</code></pre>
 <p><b>Load sample zero field…</b> (<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>L</kbd>) adds zero-field files by hand. A reference sweep, for example of the bare substrate, goes into the <b>Reference</b> panel the same way (<kbd>Ctrl</kbd>+<kbd>R</kbd> and <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>R</kbd>); see <a href="processing.html#reference">Processing</a>.</p>
 
+<h3 id="watch">Watch a running measurement</h3>
+<p>While a sweep is being measured, the app can follow its folder and add each new spectrum as it appears. After opening a sweep folder, turn on <b>Watch for new files</b> under <b>Watch folder</b> at the bottom of the Sample panel. For a folder that may still be empty, choose <b>Watch a folder…</b> there or in the File menu: it replaces the files the panel had, and the first files that arrive start the sweep. New files go into the lists as when the folder is dropped.</p>
+<p>A file counts once its size has not changed for about 2 seconds and it reads as a spectrum. A file that keeps failing to read, or that has no field in its name (with <b>From file names</b>), is left out and reported once. Each update reads only the new files and processes the sweep with the current processing settings, as Process does. Picked points, ranges and colour levels stay, and the point table gets rows for the new fields. Nothing is processed until a zero-field spectrum is there. With only the one measured before the sweep, that spectrum is used for the whole sweep; drift correction starts when the one after the sweep arrives. With a custom field range, the sweep is processed once the number of files matches the range, and while a library map is shown new files are only listed.</p>
+<p>The Sample panel and the status bar show the folder, the number of files and the time of the last update. The switch, or <b>×</b> in the status bar, stops watching; the files and the map stay. The reference sweep is not watched, and watching never resumes after a restart.</p>
+
 <h2 id="process">Process</h2>
 <p>Press <b>Process</b> in the toolbar (<kbd>Ctrl</kbd>+<kbd>Return</kbd> or <kbd>Ctrl</kbd>+<kbd>F</kbd>). The map of the sweep appears, and the status bar reads <i>Processed</i> with the time.</p>
 <p>Processing settings take effect the next time you process. When one has changed since the last run, a dot appears on the Process button and on the Process rail button, and the status bar says <i>Settings changed · process again</i>. The choices of what to show (plot, derivative, unit, ranges, colours) apply at once and need no processing.</p>
@@ -60,7 +65,7 @@ Demo_4p2K_Sam1_a00p000T_a16p000T.txt    zero field, after the sweep up to 16 T</
   <dt>Inspector</dt>
   <dd>Settings for the plot on screen: <b>View</b> (field, energy and intensity ranges), <b>Colour</b> (colour map and levels), <b>Traces</b> (stacked plot) and <b>Models</b> (map). Its sections follow the plot tab and fold away.</dd>
   <dt>Status bar</dt>
-  <dd>Whether the map is processed, changed since the last run or a library map; its baseline region, if it has one (a click opens it in the Processing panel); a summary such as <i>64 spectra · B 0.25 – 16 T · E 350 – 3200 cm⁻¹</i>; the field and energy under the cursor; and the <b>Log</b> button, with the number of new errors.</dd>
+  <dd>Whether the map is processed, changed since the last run or a library map; its baseline region, if it has one (a click opens it in the Processing panel); the folder being watched, if any; a summary such as <i>64 spectra · B 0.25 – 16 T · E 350 – 3200 cm⁻¹</i>; the field and energy under the cursor; and the <b>Log</b> button, with the number of new errors.</dd>
   <dt>Log</dt>
   <dd>A drawer below the plot with what the app did: files loaded, processing, fits, exports and errors.</dd>
 </dl>

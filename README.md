@@ -27,7 +27,8 @@ log drawer at the bottom. Every side area slides open and closed.
 **Load.** Drop a sweep folder or files on the Sample panel (and optionally a reference sweep
 on the Reference panel). The fields are read from the file names or set as a custom range;
 the panel lists the files by field and reports missing fields. One or two zero-field
-spectra (measured before and after the sweep) correct the drift.
+spectra (measured before and after the sweep) correct the drift. While a sweep is measured,
+**Watch folder** adds the new spectra of its folder as they appear and processes them.
 
 **Process** (Ctrl+Return).
 - Plots: R(B)/R(0), the data, R(B)/R(B-AVR) (the field average) and R(B)/R(B-ΔB)
