@@ -1,6 +1,8 @@
 import numpy as np
 import pytest
 
+from mag_opt_detective.core.pipeline import ProcessResult
+from mag_opt_detective.core.processing import step_ratio
 from mag_opt_detective.core.spectra import (
     FieldMap,
     energy_mask,
@@ -138,6 +140,24 @@ def test_load_tsv_errors_name_the_file(tmp_path, text, message):
     path.write_bytes(text)
     with pytest.raises(ValueError, match=message):
         load_tsv(path, default_unit=Unit.MEV)
+
+
+def test_load_tsv_sorts_the_field_columns(tmp_path):
+    """A table with falling field columns gives the same map, step ratio and d/dB."""
+    energy = np.linspace(100.0, 200.0, 11)
+    field = np.array([1.0, 2.0, 3.0, 4.0])
+    rising = FieldMap(energy, field, 1 + 0.005 * field[None, :] + 0 * energy[:, None])
+    falling = FieldMap(energy, field[::-1], rising.values[:, ::-1])
+    save_tsv(rising, tmp_path / "up.csv")
+    save_tsv(falling, tmp_path / "down.csv")
+    up, down = load_tsv(tmp_path / "up.csv"), load_tsv(tmp_path / "down.csv")
+    np.testing.assert_array_equal(down.field, field)
+    np.testing.assert_allclose(down.values, up.values)
+    np.testing.assert_allclose(step_ratio(down).values, step_ratio(up).values)
+    # a map added in falling order (not from a file) is sorted when it is shown
+    shown = ProcessResult.from_map(falling)
+    np.testing.assert_array_equal(shown.ratio.field, field)
+    assert (shown.step.values > 1).all()  # R(B)/R(B - dB), not R(B)/R(B + dB)
 
 
 def make_cm1_map() -> FieldMap:

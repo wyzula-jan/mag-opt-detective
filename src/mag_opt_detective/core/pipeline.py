@@ -9,6 +9,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum, StrEnum
 
+import numpy as np
+
 from mag_opt_detective.core import processing as proc
 from mag_opt_detective.core.processing import Axis
 from mag_opt_detective.core.readers import Measurement
@@ -88,13 +90,21 @@ class ProcessResult:
         """Wrap an already processed map (Processed tab).
 
         Data, R(B)/R(0) and R(B)/R(B-average) all show the loaded map; the field-step
-        ratio is computed from it. The map is converted to cm^-1 (if needed), the unit
-        of *baseline_region*.
+        ratio is computed from it, with the field columns sorted first. The map is converted
+        to cm^-1 (if needed), the unit of *baseline_region*.
         """
-        fmap = fmap.to_unit(Unit.CM1)
+        fmap = _field_sorted(fmap.to_unit(Unit.CM1))
         corrected = _baseline(fmap, baseline_region)
         step = _baseline(_step_or_none(fmap), baseline_region)
         return cls(data=fmap, ratio=corrected, average=corrected, step=step)
+
+
+def _field_sorted(fmap: FieldMap) -> FieldMap:
+    """*fmap* with its field columns in rising order (the map itself if they are)."""
+    if np.all(np.diff(fmap.field) >= 0):
+        return fmap
+    order = np.argsort(fmap.field, kind="stable")
+    return fmap.replace(field=fmap.field[order], values=fmap.values[:, order])
 
 
 def _step_or_none(fmap: FieldMap) -> FieldMap | None:

@@ -123,7 +123,8 @@ def load_tsv(path: str | Path, default_unit: Unit | str = Unit.CM1) -> FieldMap:
     """Read a table written by :func:`save_tsv` or by the legacy pandas exports.
 
     The first header cell may be empty (merged legacy exports); then *default_unit*
-    is assumed. Field values are parsed from column labels such as ``0.25T``.
+    is assumed. Field values are parsed from column labels such as ``0.25T``; the columns
+    are sorted by field and the rows by energy.
     """
     name = Path(path).name
     with file_errors(path):
@@ -146,6 +147,7 @@ def load_tsv(path: str | Path, default_unit: Unit | str = Unit.CM1) -> FieldMap:
         raise ValueError(
             f"{name}: {table.shape[1] - 1} data columns but {field.size} header labels"
         )
-    order = np.argsort(table[:, 0], kind="stable")
-    table = table[order]
-    return FieldMap(energy=table[:, 0], field=field, values=table[:, 1:], unit=unit)
+    rows = np.argsort(table[:, 0], kind="stable")
+    columns = np.argsort(field, kind="stable")
+    values = table[np.ix_(rows, columns + 1)]
+    return FieldMap(energy=table[rows, 0], field=field[columns], values=values, unit=unit)
