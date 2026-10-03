@@ -351,7 +351,7 @@ def test_tool_registry_routes_clicks_with_modifiers(processed):
         on_click=clicks.append,
         views=("map", "stacked"),
     )
-    assert tools.names()[:4] == ["navigate", "zoom", "pick", "probe"]
+    assert tools.names()[:3] == ["navigate", "zoom", "pick"] and tools.names()[-1] == "probe"
     assert tools.active() == "navigate"
     assert not tools.click("map", 1.0, 2.0)  # navigate takes no clicks
     tools.set_active("probe")

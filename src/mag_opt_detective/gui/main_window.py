@@ -47,6 +47,7 @@ from mag_opt_detective.gui.kit import CollapsibleSection, InfoBar, SegmentedCont
 from mag_opt_detective.gui.panels import PanelPage, library, points, processing, reference, sample
 from mag_opt_detective.gui.settings import Persistence
 from mag_opt_detective.gui.theme import SCHEMES, Theme, current_theme, current_tokens
+from mag_opt_detective.gui.tools import autopick
 from mag_opt_detective.gui.widgets import FlowLayout, Separator, last_dir, set_last_dir
 
 logger = logging.getLogger("mag_opt_detective")
@@ -62,6 +63,7 @@ SHORTCUTS = [
     ("Ctrl+1 / 2 / 3 / 4", "Plot R(B)/R(0) / Data / R(B)/R(B-AVR) / R(B)/R(B-ΔB)"),
     ("Alt+1 / 2 / 3", "No / 1st / 2nd derivative"),
     ("V / Z / P", "Pan and zoom / box zoom / pick points"),
+    ("W", "Auto-pick: follow a clicked line, or find the lines in a dragged box"),
     ("Ctrl+Z / Ctrl+Shift+Z", "Undo / redo a point edit (Alt-click removes a point)"),
     ("A", "Fit the plot to the data"),
 ]
@@ -337,6 +339,7 @@ class MainWindow(QMainWindow):
             module.install(self)
         for module in (view, colour, traces, overlays):
             module.install(self)
+        autopick.install(self)
         self._wire_frame()
         self.show_panel(next(iter(self.panels)), open=None)
         if self.persistence is not None:

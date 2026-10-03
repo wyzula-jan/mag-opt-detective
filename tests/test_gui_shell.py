@@ -40,7 +40,7 @@ def test_window_exposes_its_areas(window):
         assert isinstance(panel, SlidePanel)
     assert window.side_panel.is_open() and window.inspector_panel.is_open()
     assert not window.log_panel.is_open()  # the log drawer starts closed
-    assert window.tools.names() == ["navigate", "zoom", "pick"]
+    assert window.tools.names() == ["navigate", "zoom", "pick", "autopick"]
 
 
 def test_rail_switches_and_closes_the_side_panel(shown):
