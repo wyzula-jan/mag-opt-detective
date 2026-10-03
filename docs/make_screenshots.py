@@ -1,6 +1,8 @@
-"""Screenshots of the app for the README, drawn offscreen from a synthetic measurement.
+"""Screenshots of the app for the README and the docs site, drawn offscreen from a synthetic
+measurement.
 
     python docs/make_screenshots.py              # the README images, into docs/images/
+    python docs/make_screenshots.py --site       # the docs site's images, into docs/site/images/
     python docs/make_screenshots.py OUT --all    # every scene in light and dark, into OUT
 
 The sweep is a made-up Landau fan (no measurement data), the random numbers are seeded and
@@ -34,6 +36,7 @@ from mag_opt_detective.gui.main_window import MainWindow
 from mag_opt_detective.gui.theme import Theme
 
 IMAGES = Path(__file__).resolve().parent / "images"
+SITE_IMAGES = Path(__file__).resolve().parent / "site" / "images"
 SIZE = (1400, 900)
 MAX_BYTES = 400_000
 CM1_PER_MEV = 8.0656
@@ -148,8 +151,18 @@ def stacked_scene(window: MainWindow) -> QWidget:
 
 
 def library_scene(window: MainWindow) -> QWidget:
-    step("library map", lambda: window.controller.save_current_map())
+    """Two library maps ready to merge by field, the limits of the first one open."""
+    c = window.controller
+
+    def two_halves() -> None:
+        low = c.save_current_map("Demo_Sam1_0-8T")
+        c.update_entry(low, field_cut=(None, 8.0))
+        high = c.save_current_map("Demo_Sam1_8-16T")
+        c.update_entry(high, field_cut=(8.25, None))
+        window.panels["library"].rows[low.key].expand_button.click()
+
     window.show_panel("library")
+    step("library maps", two_halves)
     return window
 
 
@@ -163,6 +176,66 @@ def models_scene(window: MainWindow) -> QWidget:
     window.show_panel("points")
     for name, section in window.inspector.items():
         section.set_expanded(name == "models", animate=False)
+    return window
+
+
+def processing_scene(window: MainWindow) -> QWidget:
+    """An energy window and a baseline region, processed, with their guides on the map."""
+    c = window.controller
+    c.set_processing(energy_cut=(420.0, 3100.0), baseline=(2650.0, 2950.0))
+    window.commands["process"].trigger()
+    window.show_panel("processing")
+    return window
+
+
+def derivative_scene(window: MainWindow) -> QWidget:
+    """The 1st derivative along the field per tesla in meV, bipolar with symmetric levels,
+    slim colour scales, the side panel closed and the Colour section open."""
+    from mag_opt_detective.core.processing import Axis
+
+    step("unit", lambda: window.toolbar.unit.set_value("meV"))
+    window.controller.set_selection(order=1, axis=Axis.FIELD, physical=True)
+    window.controller.set_view(colormap="bipolar")
+    step("slim colour scale", lambda: window.plot_area.scale_style_button.setChecked(True))
+    window.side_panel.set_open(False, animate=False)
+    for name, section in window.inspector.items():
+        section.set_expanded(name in ("view", "colour"), animate=False)
+    return window
+
+
+def autopick_scene(window: MainWindow) -> QWidget:
+    """Auto-pick in Detect mode: the lines found in a box, LL 2's line chosen."""
+    window.show_panel("points")
+    tool = window.autopick
+    window.tools.set_active("autopick")
+    tool.bar.mode.set_value("detect")
+    tool.bar.feature.set_value("min")
+    tool.detect_in((3.0, 12.0), (800.0, 1700.0))
+    return window
+
+
+def fit_scene(window: MainWindow) -> QWidget:
+    """The Dirac model fitted to the three picked curves: the results with their errors."""
+    from PySide6.QtWidgets import QScrollArea
+
+    from mag_opt_detective.gui.inspector import model_state as ms
+
+    window.show_panel("points")
+    for name, section in window.inspector.items():
+        section.set_expanded(name == "models", animate=False)
+    models = window.inspector["models"].body_layout().itemAt(0).widget().models
+    dirac = next(e for e in models.entries if e.kind == ms.DIRAC)
+    p = ms.params(dirac)
+    p["velocity"].value, p["delta"].value = 5.0, 9.0  # a start away from the made-up material
+    models.cards[dirac].refresh()
+    models.draw()
+    card = models.cards[dirac]
+    card.fit_button.click()
+    card.fit_area.fit_button.click()
+    wait(lambda: models.result(dirac) is not None)
+    settle(QApplication.instance())
+    scroll = window.inspector_panel.findChild(QScrollArea)
+    scroll.ensureWidgetVisible(card.fit_area, 0, 0)
     return window
 
 
@@ -185,6 +258,24 @@ EXTRA_SCENES = {
     "stacked": stacked_scene,
     "library": library_scene,
     "models": models_scene,
+    "processing": processing_scene,
+    "derivative": derivative_scene,
+    "autopick": autopick_scene,
+    "fit": fit_scene,
+}
+# the docs site's images (--site): file name -> (scene, colour scheme)
+SITE_SHOTS: dict[str, tuple[Callable[[MainWindow], QWidget], str]] = {
+    "main-window-light": (main_window_scene, "light"),
+    "main-window-dark": (main_window_scene, "dark"),
+    "processing-light": (processing_scene, "light"),
+    "stacked-light": (stacked_scene, "light"),
+    "derivative-dark": (derivative_scene, "dark"),
+    "points-dark": (points_scene, "dark"),
+    "autopick-light": (autopick_scene, "light"),
+    "models-light": (models_scene, "light"),
+    "fit-light": (fit_scene, "light"),
+    "library-light": (library_scene, "light"),
+    "export-window-light": (export_scene, "light"),
 }
 
 
@@ -225,10 +316,13 @@ def save_png(widget: QWidget, path: Path) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("out", nargs="?", type=Path, default=IMAGES)
-    parser.add_argument("--all", action="store_true", help="every scene, light and dark")
+    parser.add_argument("out", nargs="?", type=Path, help="folder (default: see --site)")
+    choice = parser.add_mutually_exclusive_group()
+    choice.add_argument("--all", action="store_true", help="every scene, light and dark")
+    choice.add_argument("--site", action="store_true", help="the docs site's images")
     args = parser.parse_args(argv)
-    args.out.mkdir(parents=True, exist_ok=True)
+    out = args.out or (SITE_IMAGES if args.site else IMAGES)
+    out.mkdir(parents=True, exist_ok=True)
     controller_module.datetime = FixedClock  # "Processed 09:30"
     app = QApplication.instance() or QApplication(sys.argv[:1])
     app.setApplicationName("Magneto-Optical Detective")
@@ -241,10 +335,11 @@ def main(argv: list[str] | None = None) -> int:
             for name, scene in {**scenes, **EXTRA_SCENES}.items():
                 base = name.removesuffix("-dark")
                 for scheme in ("light", "dark"):
-                    render(app, theme, sweep, scene, scheme, args.out / f"{base}-{scheme}.png")
+                    render(app, theme, sweep, scene, scheme, out / f"{base}-{scheme}.png")
         else:
-            for name, (scene, scheme) in SCENES.items():
-                render(app, theme, sweep, scene, scheme, args.out / f"{name}.png")
+            shots = SITE_SHOTS if args.site else SCENES
+            for name, (scene, scheme) in shots.items():
+                render(app, theme, sweep, scene, scheme, out / f"{name}.png")
     return 0
 
 
