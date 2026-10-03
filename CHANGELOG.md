@@ -3,3 +3,28 @@
 All notable changes to Magneto-Optical Detective, newest first. The format is based on Keep a
 Changelog, and the versions follow Semantic Versioning. `tools/release.py` writes each section
 from the commit messages when a version is released (see Releases in CONTRIBUTING.md).
+
+## 0.1.0 - 2026-10-03
+
+The first release. Magneto-Optical Detective plots, picks, fits and exports magneto-optical FTIR field sweeps recorded with Bruker OPUS, as OPUS binary files or as two-column text files.
+
+### Added
+
+- **Workbench:** a rail of panels (Sample, Reference, Processing, Library, Points), the Map, Stacked and Reference plots, an inspector (View, Colour, Traces, Models) and a log drawer, each sliding open and closed; light, dark or following the system.
+- **Loading:** drop a sweep folder or files; the fields come from the file names or a custom range, the files are sorted by field and missing fields are reported. One zero-field spectrum is used as it is; two, measured before and after the sweep, correct the drift linearly.
+- **Processing:** R(B)/R(0), the data, R(B)/R(B-AVR) and R(B)/R(B-ΔB); first or second derivatives along energy or field, per data point or per unit; reference correction with a separate sweep or the sample itself, optionally Savitzky–Golay smoothed; an energy window, and a baseline band to drag on the plot, which can apply live.
+- **Viewing:** a live switch between cm⁻¹, meV and THz that converts maps, axes, ranges, points, models and exports without processing again; an energy range shared by all three plots, a field range for the map and the reference plot and an intensity range for the stacked plot, each Auto or Fixed; colour maps with Auto, Fixed or Symmetric levels and a histogram; stacked spectra with an offset, every n-th field and colours by field; a legend of the picked curves and the models drawn.
+- **Picking:** on the map a click records the current curve's energy at the nearest field and Alt-click removes the nearest point; on the stacked plot a click near a trace records at its field. Curves with a table of their points, import and export of point tables, and undo and redo for every edit.
+- **Auto-pick:** follow a line field by field, or find every line in a box, rotated box, ellipse or freehand region; maxima, minima or rising or falling inflection points, with a preview to accept or discard.
+- **Models and fitting:** massive Dirac transitions, Zeeman and magnon branches (linear or hyperbolic, optionally coupled to give avoided crossings) and custom expressions in B, drawn live; fits to the picked points with value ± σ for every fitted parameter and χ², copied or saved as a table.
+- **Library:** keep processed maps and exported tables, cut each to an energy and field range, merge spectral or field ranges and average repeated sweeps.
+- **Export:** data tables, quick PNG or SVG images of the plot, and journal figures with a live preview: Nature, APS, Custom and your own presets, PDF, SVG and EPS with editable text, PNG and TIFF.
+- **Settings:** units, ranges, colours and layout are remembered between sessions; View › Reset settings restores the defaults.
+- **Standalone apps** for Windows, macOS on Apple silicon and Linux, which need no Python.
+
+### Known limitations
+
+- The apps are not code-signed: macOS and Windows ask once before the first launch.
+- There is no build for Intel Macs; run from source there.
+- In the standalone apps, the first journal figure after installing takes about 20 s while matplotlib builds its font cache.
+- The two-column width of the APS preset (17.8 cm) is not confirmed by an official APS page.
