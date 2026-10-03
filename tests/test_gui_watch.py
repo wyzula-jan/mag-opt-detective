@@ -2,6 +2,7 @@
 
 import logging
 import os
+import shutil
 import time
 from pathlib import Path
 
@@ -709,6 +710,19 @@ def test_files_left_out_are_reported_after_a_waiting_update(window, clock, tmp_p
     watcher.check_now()  # the update runs, then the report (its map would close it)
     assert fields(window) == [0.5, 1.0]
     assert gui_helpers.infobar_text(window).startswith(f"Left out {sweep_name(9.0)}")
+
+
+def test_the_file_menu_follows_a_failed_start(window, tmp_path, errors):
+    folder = tmp_path / "share"
+    folder.mkdir()
+    files = SweepFiles((zero(folder),), (spectrum(folder, 0.5),))
+    window.controller.set_processing(sample_files=files)
+    shutil.rmtree(folder)  # the sweep's folder is gone
+    action = window.commands["watch_folder"]
+    action.trigger()
+    assert not window.folder_watch.watching() and errors
+    assert not action.isChecked()
+    assert not window.panels["sample"].watch.switch.isChecked()
 
 
 # ---------------------------------------------------------------------- stopping

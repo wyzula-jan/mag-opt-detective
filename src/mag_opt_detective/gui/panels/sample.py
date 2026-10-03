@@ -511,10 +511,10 @@ def add_watch_actions(window, box: WatchBox, watcher: FolderWatcher) -> None:
     window.add_file_action(toggle)
     window.commands["watch_folder"] = toggle
 
-    def show() -> None:
+    def show(*_args) -> None:
         toggle.setChecked(watcher.watching())
         toggle.setEnabled(box.switch.isEnabled())
 
-    for signal in (watcher.changed, window.controller.processingChanged):
-        signal.connect(show)
+    for signal in (watcher.changed, window.controller.processingChanged, box.switch.toggled):
+        signal.connect(show)  # the switch: also when watching could not start
     show()
