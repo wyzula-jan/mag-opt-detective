@@ -382,6 +382,29 @@ def test_a_library_map_shown_holds_the_processing(window, clock, tmp_path):
     assert fields(window) == [0.5, 1.0]
 
 
+def test_a_spectrum_written_again_comes_back(window, clock, tmp_path):
+    zero(tmp_path, old=True)
+    for b in (0.5, 1.0):
+        spectrum(tmp_path, b, old=True)
+    watcher = window.folder_watch
+    watcher.start(tmp_path)
+    c = window.controller
+    target = tmp_path / sweep_name(1.0)
+    os.remove(target)  # measured again: the old file goes first
+    watcher.check_now()
+    assert fields(window) == [0.5] and c_files(window) == [sweep_name(0.5)]
+    write_text(target, X, 1.3 * BASE)
+    arrive(window, clock)
+    assert fields(window) == [0.5, 1.0]
+    np.testing.assert_allclose(c.result.data.values[:, -1], 1.3 * BASE)
+
+    # a file removed from the list but still in the folder stays out
+    c.set_processing(sample_files=SweepFiles(c.processing.sample_files.zero, (str(target),)))
+    spectrum(tmp_path, 1.5)
+    arrive(window, clock)
+    assert c_files(window) == [sweep_name(1.0), sweep_name(1.5)]
+
+
 # ---------------------------------------------------------------------- stopping
 def test_stop_watching_keeps_the_files_and_the_map(window, clock, tmp_path):
     zero(tmp_path, old=True)

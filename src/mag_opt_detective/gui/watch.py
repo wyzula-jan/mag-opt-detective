@@ -5,7 +5,8 @@
 :data:`POLL_MS` (network drives may not send notices). A file counts once it is complete
 (:class:`Arrivals`): its size and modification time stayed the same for :data:`SETTLE_S` and
 it reads as a spectrum. A file that does not read is tried again; one that keeps failing is
-reported once and left out until it changes.
+reported once and left out until it changes. A file deleted from the folder leaves the lists,
+and comes back when it is written again.
 
 Complete files go to the sample's lists as the files of a dropped folder do (names whose
 first field is 0 T to the zero-field list), and the sweep is processed again with the current
@@ -171,7 +172,7 @@ class FolderWatcher(QObject):
         self._folder: str | None = None
         self._arrivals = Arrivals()
         self._accepted: Listing = {}  # files read as spectra, with their signature then
-        self._handled: set[str] = set()  # keys of files listed once: removed ones stay out
+        self._handled: set[str] = set()  # keys of files listed once and still in the folder
         self._queued: tuple[list[str], list[str], bool] = ([], [], False)  # new, gone, changed
         self._busy = False  # an update runs
         self._runs = 0  # updates run
@@ -277,6 +278,7 @@ class FolderWatcher(QObject):
             return
         arrivals = self._arrivals
         arrivals.observe(listing, self.clock(), wall)
+        self._handled &= {path_key(p) for p in listing}  # written again: a new file
         new: list[str] = []
         changed = False
         skips: list[tuple[str, str]] = []
