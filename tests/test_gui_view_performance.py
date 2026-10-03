@@ -8,8 +8,8 @@ import time
 import numpy as np
 import pyqtgraph as pg
 import pytest
-from PySide6.QtCore import QPoint, QPointF, QSettings, Qt
-from PySide6.QtGui import QWheelEvent
+from PySide6.QtCore import QEvent, QPoint, QPointF, QSettings, Qt
+from PySide6.QtGui import QFocusEvent, QWheelEvent
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
@@ -270,6 +270,39 @@ def test_a_unit_switch_converts_a_zoom_in_progress(shown):
     set_unit(w, "meV")
     assert c.view.stacked_range == pytest.approx((lo * MEV, hi * MEV))
     assert plot_range(w, "stacked")[1] == pytest.approx((lo * MEV, hi * MEV))
+
+
+def test_a_lost_release_does_not_keep_a_gesture_open(shown, qtbot):
+    w, c = shown, shown.controller
+    plot = w.plots.map
+    viewport = plot.view.viewport()
+    centre = plot.view.mapFromScene(plot.plot.vb.sceneBoundingRect().center())
+    QTest.mouseDClick(viewport, LEFT, PLAIN, centre)  # Qt's button state stays pressed
+    assert QApplication.mouseButtons() == LEFT
+    wheel(w, "map")
+    qtbot.waitUntil(lambda: not w.view_ranges.in_gesture())  # GESTURE_MS after the wheel
+    assert c.view.energy_range == pytest.approx(plot_range(w)[1])
+
+    app = QApplication.instance()
+    ends = {
+        "focus": lambda: QApplication.sendEvent(plot.view, QFocusEvent(QEvent.Type.FocusOut)),
+        "leave": lambda: QApplication.sendEvent(viewport, QEvent(QEvent.Type.Leave)),
+        "inactive": lambda: app.applicationStateChanged.emit(
+            Qt.ApplicationState.ApplicationInactive
+        ),
+    }
+    for end in ends.values():
+        QTest.mousePress(viewport, LEFT, PLAIN, centre)  # its release gets lost
+        step(w, "map", dy=10.0)
+        qtbot.wait(2 * GESTURE_MS)
+        assert w.view_ranges.in_gesture()  # held: the drag goes on
+        end()
+        assert not w.view_ranges.in_gesture()
+        assert c.view.energy_range == pytest.approx(plot_range(w)[1])
+        wheel(w, "map")  # the next wheel ends after a pause, the button counts as released
+        qtbot.waitUntil(lambda: not w.view_ranges.in_gesture())
+    app.applicationStateChanged.emit(Qt.ApplicationState.ApplicationActive)
+    QTest.mouseRelease(w.statusBar(), LEFT, PLAIN, QPoint(1, 1))  # Qt's button state
 
 
 def test_a_drag_in_progress_is_saved(qtbot, tmp_path, sweep):

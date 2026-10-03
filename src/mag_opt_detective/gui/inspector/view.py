@@ -253,7 +253,9 @@ class ViewRanges(QObject):
     step) is kept here while it lasts: only that plot moves, the View fields follow at most
     every :data:`GESTURE_MS`, and :meth:`finish` puts it into the view state once (which draws
     the shared ranges on the other plots): on the release of the mouse button, or
-    :data:`GESTURE_MS` after the last step without a button held (the wheel).
+    :data:`GESTURE_MS` after the last step without a button held (the wheel). Should the
+    release get lost, the gesture ends when the mouse leaves the plot, the plot loses the focus
+    or the application is no longer active.
     """
 
     def __init__(self, window, page: ViewPage):
@@ -267,11 +269,13 @@ class ViewRanges(QObject):
         self._pending: dict[str, Pair] | None = None  # ranges of a pan or zoom in progress
         self._follow = self._timer(self.sync_controls)  # the fields follow the gesture
         self._idle = self._timer(self._on_idle)  # restarted on every step: the gesture ended
-        self._viewports: set[QObject] = set()  # of the plots: their mouse releases end gestures
+        self._plots: set[QObject] = set()  # the plot views and view ports: they end gestures
+        self._held = False  # a mouse button is down on a plot (a drag)
         self._sliders: dict[QObject, RangeControl] = {}
         self._fields: set[QObject] = set()  # the number fields of the controls
         self._sliding: set[RangeControl] = set()  # controls whose slider is dragged or keyed
         self._last: dict[RangeControl, Pair] = {}  # the range each control was given last
+        QApplication.instance().applicationStateChanged.connect(self._on_app_state)
 
     def _timer(self, slot) -> QTimer:
         timer = QTimer(self)
@@ -437,19 +441,26 @@ class ViewRanges(QObject):
         return self._pending is not None
 
     def _on_idle(self) -> None:
-        if QApplication.mouseButtons() != Qt.MouseButton.NoButton:
+        if self._held:
             self._idle.start()  # a drag held still: it ends on the release
             return
         self.finish()
 
     def _on_release(self) -> None:
-        if QApplication.mouseButtons() == Qt.MouseButton.NoButton:
+        if not self._held:
             self.finish()
 
-    def watch_plot(self, viewport: QObject) -> None:
-        """End gestures on mouse releases in *viewport* (a plot's view port)."""
-        self._viewports.add(viewport)
-        viewport.installEventFilter(self)
+    def _on_app_state(self, state: Qt.ApplicationState) -> None:
+        if state != Qt.ApplicationState.ApplicationActive:  # a release may not come back
+            self._held = False
+            self.finish()
+
+    def watch_plot(self, view: QWidget) -> None:
+        """End gestures on the mouse releases in plot *view* (a GraphicsView), or when the
+        mouse leaves it or it loses the focus (the release went elsewhere)."""
+        for widget in (view, view.viewport()):
+            self._plots.add(widget)
+            widget.installEventFilter(self)
 
     def watch_control(self, control: RangeControl) -> None:
         """Keep the extent of *control*'s slider while it is dragged or moved with keys; a
@@ -464,9 +475,15 @@ class ViewRanges(QObject):
 
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:
         kind = event.type()
-        if watched in self._viewports:
-            if kind == QEvent.Type.MouseButtonRelease:  # after pyqtgraph's last drag step
-                QTimer.singleShot(0, self, self._on_release)
+        if watched in self._plots:
+            if kind == QEvent.Type.MouseButtonPress:
+                self._held = True
+            elif kind == QEvent.Type.MouseButtonRelease:
+                self._held = False
+                QTimer.singleShot(0, self, self._on_release)  # after pyqtgraph's last step
+            elif kind in (QEvent.Type.Leave, QEvent.Type.FocusOut):  # no drag goes on
+                self._held = False
+                self.finish()
         elif watched in self._sliders:
             control = self._sliders[watched]
             if kind in (QEvent.Type.MouseButtonPress, QEvent.Type.KeyPress):
@@ -626,7 +643,7 @@ def install(window) -> None:
 
     for view, plot in window.plots.items():
         plot.plot.vb.sigRangeChangedManually.connect(lambda _mask, v=view: ranges.on_manual(v))
-        ranges.watch_plot(plot.view.viewport())
+        ranges.watch_plot(plot.view)
         plot.plot.scene().sigMouseClicked.connect(lambda event, v=view: ranges.on_click(v, event))
         plot.plot.autoBtn.clicked.connect(lambda *_args, v=view: c.fit_ranges(v))
         plot.plot.vb.menu.viewAll.triggered.connect(lambda *_args, v=view: c.fit_ranges(v))
