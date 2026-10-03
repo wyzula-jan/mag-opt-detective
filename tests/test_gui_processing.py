@@ -153,6 +153,16 @@ def test_missing_reference_offers_the_reference_panel(window, sweep):
     process(window)
     assert "no field files" in infobar_text(window).lower()
     assert window.infobar.action_button.text() == "Open Reference"
+    bar = window.infobar  # the mockup's wording: what failed, then what fixes it
+    assert bar.title_label.text() == "Can't process: no field files loaded."
+    assert bar.text_label.text() == (
+        "Check the reference sweep in the Reference panel, or set Reference to None."
+    )
+    window.report_error("Colour range", "invalid colour range 2 – 1")  # no panel: no remedy
+    assert (bar.title_label.text(), bar.text_label.text()) == (
+        "Can't set the colour range",
+        "Invalid colour range 2 – 1",
+    )
 
 
 def test_golden_exports_through_the_window(window, tmp_path, monkeypatch, errors):

@@ -246,3 +246,13 @@ def test_user_action_reports_errors():
     assert reports[0] == ("Thing", "bad value", "library", True)
     assert reports[1][0] == "Thing" and "RuntimeError('bug')" in reports[1][1]
     assert reports[1][3] is False
+    hinted = []
+
+    class HintedWindow:
+        def report_error(self, title, message, panel=None, expected=True, hint=None):
+            hinted.append((message, hint))
+
+    error = ValueError("no field files loaded")
+    error.hint = "Add them in the Reference panel."  # a remedy for the error bar
+    fails(HintedWindow(), error)
+    assert hinted == [("no field files loaded", "Add them in the Reference panel.")]

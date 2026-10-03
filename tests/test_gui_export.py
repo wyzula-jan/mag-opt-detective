@@ -182,13 +182,22 @@ def test_file_names():
 # ---------------------------------------------------------------------- menus
 def test_export_menu_entries(window):
     figure, quick = window.commands["export_figure"], window.commands["export_image"]
-    assert figure.text() == "Image…"
+    assert figure.text() == "Journal figure…"  # one name for the window, its menu and Help
+    assert figure.icon().cacheKey() != quick.icon().cacheKey()
     assert figure.shortcut() == QKeySequence("Ctrl+Shift+E")
     assert quick.text() == "Quick image (PNG/SVG)…" and quick.shortcut().isEmpty()
-    file_menu = window.menuBar().actions()[0].menu()
-    for actions in (window.toolbar.export_menu.actions(), file_menu.actions()):
-        assert actions.index(window.commands["export_table"]) < actions.index(figure)
-        assert actions.index(figure) + 1 == actions.index(quick)
+    actions = window.toolbar.export_menu.actions()
+    assert actions.index(window.commands["export_table"]) < actions.index(figure)
+    assert actions.index(figure) + 1 == actions.index(quick)
+    file_menu = window.menuBar().actions()[0].menu()  # File > Export is the same menu
+    assert window.toolbar.export_menu.menuAction() in file_menu.actions()
+    texts = [a.text() for a in file_menu.actions() if a.text()]
+    assert texts[:4] == [  # sentence case, as the toolbar
+        "Open sample sweep…",
+        "Load sample zero field…",
+        "Open reference sweep…",
+        "Load reference zero field…",
+    ]
 
 
 def test_the_export_package_is_loaded_only_for_the_export_window():

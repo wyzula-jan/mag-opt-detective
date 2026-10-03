@@ -41,7 +41,7 @@ HINTS = {
     ReferenceMode.SELF: "Divides the sweep by itself, smoothed, to remove slow spectral features.",
 }
 SUBTITLES = {
-    ReferenceMode.NONE: "Not used: the sample ratio is shown as measured.",
+    ReferenceMode.NONE: "Corrects the sample ratio with a second sweep.",
     ReferenceMode.SEPARATE: "Corrects the sample ratio with a second sweep.",
     ReferenceMode.SELF: "Corrects the sample with its own smoothed sweep.",
 }
@@ -183,8 +183,8 @@ def install(window) -> None:
 
     box = panel.measurement
     for text, slot, shortcut in (
-        ("Open Reference Sweep…", box.open_sweep_dialog, "Ctrl+R"),
-        ("Load Reference Zero Field…", box.load_zero_dialog, "Ctrl+Shift+R"),
+        ("Open reference sweep…", box.open_sweep_dialog, "Ctrl+R"),
+        ("Load reference zero field…", box.load_zero_dialog, "Ctrl+Shift+R"),
     ):
         action = QAction(text, window)
         action.setShortcut(QKeySequence(shortcut))

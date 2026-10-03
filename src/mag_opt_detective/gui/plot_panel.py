@@ -616,7 +616,7 @@ def _store_levels(window, view: str, key: str, lo: float, hi: float) -> None:
 def export_table(window) -> None:
     c = window.controller
     if c.result is None:
-        raise ValueError("nothing to export - process data first")
+        raise ValueError("nothing to export – process data first")
     fmap = c.current_map()
     name = c.selection.export_name()
     path = save_file(window, "Export current plot")
@@ -634,7 +634,7 @@ def export_table(window) -> None:
 @user_action("Save image")
 def save_image(window) -> None:
     if window.controller.result is None:
-        raise ValueError("nothing to save - process data first")
+        raise ValueError("nothing to save – process data first")
     view = window.plots[window.plot_area.current_view()]
     path = save_file(window, "Save plot image", IMAGE_FILTER)
     if not path:

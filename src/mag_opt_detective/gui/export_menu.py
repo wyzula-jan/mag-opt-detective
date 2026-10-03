@@ -1,4 +1,4 @@
-"""Export > Image…: the journal figure window, next to the quick PNG/SVG save.
+"""Export > Journal figure…: the journal figure window, next to the quick PNG/SVG save.
 
 The window (:mod:`~mag_opt_detective.gui.export_dialog`) is built the first time it opens, so
 matplotlib is only imported then. What it remembers (:class:`ExportSettings`) is bound to the
@@ -19,6 +19,7 @@ from mag_opt_detective.gui.controller import user_action
 
 SETTINGS_KEY = "export/figure"
 SHORTCUT = "Ctrl+Shift+E"
+MENU_TEXT = "Journal figure…"  # also the window's title and header
 
 # what the export window remembers; None numbers take the preset's default
 DEFAULTS: dict[str, object] = {
@@ -100,7 +101,7 @@ class _CloseWatcher(QObject):
 def open_dialog(window) -> None:
     """Show the export window for the plot on screen (built the first time)."""
     if window.controller.result is None:
-        raise ValueError("nothing to export - process data first")
+        raise ValueError("nothing to export – process data first")
     dialog = window.export_dialog
     if dialog is None:
         QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)  # imports matplotlib
@@ -115,13 +116,13 @@ def open_dialog(window) -> None:
 
 
 def install(window) -> None:
-    """Add Export > Image… (Ctrl+Shift+E) before the quick image save in the menus."""
+    """Add Export > Journal figure… (Ctrl+Shift+E) before the quick image save in the menus."""
     window.export_settings = ExportSettings()
     window.export_dialog = None
-    action = QAction("Image…", window)
+    action = QAction(MENU_TEXT, window)
     action.setShortcut(QKeySequence(SHORTCUT))
-    action.setToolTip("Export a journal figure (PDF, SVG, EPS, PNG, TIFF) at print size")
-    icons.set_icon(action, "image")
+    action.setToolTip("A journal figure (PDF, SVG, EPS, PNG, TIFF) at print size")
+    icons.set_icon(action, "file-chart-line")
     action.triggered.connect(lambda _checked=False: open_dialog(window))
     window.addAction(action)
     window.commands["export_figure"] = action

@@ -174,7 +174,7 @@ def test_a_new_result_closes_the_error_bar(window, sweep, errors):
     row0, _row1 = rows(window)
     row0.use.setChecked(False)
     library.average(window)
-    assert "Tick at least two maps" in infobar_text(window)
+    assert "tick at least two maps" in infobar_text(window).lower()
     row0.use.setChecked(True)
     library.average(window)
     assert window.infobar.isHidden()

@@ -20,9 +20,9 @@ def errors(monkeypatch):
     messages: list[str] = []
     original = MainWindow.report_error
 
-    def spy(self, title, message, panel=None, expected=True):
+    def spy(self, title, message, panel=None, expected=True, hint=None):
         messages.append(message)
-        original(self, title, message, panel=panel, expected=expected)
+        original(self, title, message, panel=panel, expected=expected, hint=hint)
 
     monkeypatch.setattr(MainWindow, "report_error", spy)
     monkeypatch.setattr(QMessageBox, "warning", lambda *_args, **_kwargs: None)

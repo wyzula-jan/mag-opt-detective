@@ -298,7 +298,7 @@ class ExportDialog(QDialog):
         self._saved_note: tuple[str, str] | None = None
         self._snapshot_counts = (0, 0, 0)  # model curves, point curves, points
 
-        self.setWindowTitle("Export figure")
+        self.setWindowTitle("Journal figure")
         self.setWindowFlag(Qt.WindowType.WindowContextHelpButtonHint, False)
         self.setSizeGripEnabled(True)
         self.setModal(False)

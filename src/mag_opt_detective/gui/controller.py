@@ -138,7 +138,8 @@ def user_action(title: str):
             try:
                 return func(window, *args, **kwargs)
             except EXPECTED_ERRORS as exc:
-                window.report_error(title, str(exc), panel=getattr(exc, "panel", None))
+                hint = {"hint": exc.hint} if getattr(exc, "hint", None) else {}  # a remedy
+                window.report_error(title, str(exc), panel=getattr(exc, "panel", None), **hint)
             except Exception as exc:
                 logger.exception("%s failed", title)
                 window.report_error(title, f"Unexpected error: {exc!r}", expected=False)

@@ -78,7 +78,7 @@ INSPECTOR_SUBTITLE = "Settings for the plot on screen"
 SHORTCUTS = [
     ("Ctrl+Return (or Ctrl+F)", "Process"),
     ("Ctrl+E", "Export the shown data as a table"),
-    ("Ctrl+Shift+E", "Export a journal figure (PDF, SVG, EPS, PNG, TIFF)"),
+    ("Ctrl+Shift+E", "Journal figure (PDF, SVG, EPS, PNG, TIFF)"),
     ("Ctrl+L / Ctrl+Shift+L", "Open sample field / zero-field files"),
     ("Ctrl+R / Ctrl+Shift+R", "Load reference field / zero-field files"),
     ("Ctrl+1 / 2 / 3 / 4", "Plot R(B)/R(0) / Data / R(B)/R(B-AVR) / R(B)/R(B-ΔB)"),
@@ -97,6 +97,14 @@ KINDS = (
 ORDERS = (("0", "Off", "Alt+1"), ("1", "1st", "Alt+2"), ("2", "2nd", "Alt+3"))
 UNITS = tuple((unit, unit_text(unit)) for unit in (Unit.CM1, Unit.MEV, Unit.THZ))
 SCHEME_ICONS = {"system": "contrast", "light": "sun", "dark": "moon"}
+# how the error bar names a failed action ("Can't process: …"); others: the title, lowercased
+ACTIONS = {"Colour range": "set the colour range", "New curve": "add a curve"}
+# what usually fixes an error found in a panel (the bar's text; its button opens the panel)
+PANEL_HINTS = {
+    "sample": "Check the files and their fields in the Sample panel.",
+    "reference": "Check the reference sweep in the Reference panel, or set Reference to None.",
+    "processing": "Check the energy window and the baseline in the Processing panel.",
+}
 
 
 def _types_text(event) -> bool:
@@ -659,8 +667,9 @@ class MainWindow(QMainWindow):
         self._file_menu = file_menu
         self._file_anchor = file_menu.addSeparator()
         file_menu.addAction(self.commands["process"])
-        file_menu.addAction(self.commands["export_table"])
-        file_menu.addAction(self.commands["export_image"])
+        export = file_menu.addMenu(self.toolbar.export_menu)  # the toolbar's Export menu
+        export.setText("&Export")
+        icons.set_icon(export, "download")
         file_menu.addSeparator()
         file_menu.addAction(self.commands["quit"])
         self.edit_menu = self.menuBar().addMenu("&Edit")  # filled by the area modules
@@ -669,10 +678,10 @@ class MainWindow(QMainWindow):
         appearance = view_menu.addMenu("&Appearance")
         for action in self._scheme_actions.values():
             appearance.addAction(action)
-        center = QAction("&Center Window", self)
+        center = QAction("&Center window", self)
         center.triggered.connect(self.center_on_screen)
         view_menu.addAction(center)
-        reset = QAction("&Reset Settings", self)
+        reset = QAction("&Reset settings", self)
         reset.triggered.connect(self.reset_settings)
         reset.setEnabled(self.persistence is not None)
         view_menu.addAction(reset)
@@ -889,21 +898,35 @@ class MainWindow(QMainWindow):
 
     # ------------------------------------------------------------------ errors
     def report_error(
-        self, title: str, message: str, panel: str | None = None, expected: bool = True
+        self,
+        title: str,
+        message: str,
+        panel: str | None = None,
+        expected: bool = True,
+        hint: str | None = None,
     ) -> None:
-        """Log an error; expected ones show in the bar above the plot, others in a dialog."""
+        """Log an error; expected ones show in the bar above the plot, others in a dialog.
+
+        The bar reads "Can't <action>: <message>." with *hint* (or the usual remedy of
+        *panel*) below it, as in the mockup; without a remedy, the message goes below.
+        """
         logger.error("%s: %s", title, message)
         if not expected:
             QMessageBox.warning(self, title, message)
             return
-        text = message[:1].upper() + message[1:]
+        action = ACTIONS.get(title, title[:1].lower() + title[1:])
+        hint = hint or PANEL_HINTS.get(panel or "")
+        if hint:
+            head, text = f"Can't {action}: {message.rstrip('.')}.", hint
+        else:
+            head, text = f"Can't {action}", message[:1].upper() + message[1:]
         if panel in self.panels:
             title_of = self.panel_pages[panel].title.text()
             self.infobar.show_message(
-                "error", f"{title} failed", text, f"Open {title_of}", lambda: self.show_panel(panel)
+                "error", head, text, f"Open {title_of}", lambda: self.show_panel(panel)
             )
         else:
-            self.infobar.show_message("error", f"{title} failed", text)
+            self.infobar.show_message("error", head, text)
 
     # ------------------------------------------------------------------ settings
     def restore_settings(self) -> None:
