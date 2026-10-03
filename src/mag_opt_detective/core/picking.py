@@ -26,6 +26,14 @@ Direction = Literal["both", "up", "down"]
 #: default linking distance of :func:`detect`, in median energy steps
 JUMP_SAMPLES = 3.0
 
+#: :func:`auto_prominence`: extrema at least this dense (one per so many samples) are noise,
+AUTO_SPACING = 50
+#: and the threshold is this many times their median prominence; sparser extrema are
+#: features, and the threshold is this part of the largest prominence
+AUTO_NOISE, AUTO_LARGEST = 4.0, 0.1
+#: columns of the box sampled at most
+AUTO_COLUMNS = 32
+
 
 class Feature(StrEnum):
     """What marks a transition in a spectrum."""
@@ -213,6 +221,8 @@ def detect(
     prominence: float | None = None,
     max_jump: float | None = None,
     min_length: int = 3,
+    max_misses: int = 0,
+    history: int = 1,
 ) -> list[Track]:
     """All tracks of *feature* inside the box *b_range* x *e_range*, sorted by mean energy.
 
@@ -224,10 +234,18 @@ def detect(
     finite value inside the box are skipped: tracks link across them, with the jump limit
     multiplied by the number of field steps bridged. Tracks with fewer than *min_length*
     points are dropped.
+
+    *max_misses*: a track that finds no feature in a column with data stays open for up to
+    this many such columns in a row (the jump limit grows with the field steps bridged, as
+    across empty columns); 0 ends it at once. *history*: a track's end is predicted by a
+    straight line through its last *history* points (as in :func:`track`); 1 compares with
+    the last point.
     """
     feature = Feature(feature)
     if min_length < 1:
         raise ValueError("min_length must be >= 1")
+    if max_misses < 0 or history < 1:
+        raise ValueError("max_misses must be >= 0 and history >= 1")
     if max_jump is None:
         steps = np.diff(np.sort(fmap.energy[np.isfinite(fmap.energy)]))
         max_jump = JUMP_SAMPLES * float(np.median(steps)) if steps.size else 0.0
@@ -237,14 +255,11 @@ def detect(
     columns = columns[np.argsort(fmap.field[columns], kind="stable")]
     rows = _inside(fmap.energy, e_range)
 
-    done: list[list[tuple[float, Peak]]] = []
-    active: list[list[tuple[float, Peak]]] = []
-    previous = 0
+    done: list[_Open] = []
+    active: list[_Open] = []
     for n, j in enumerate(columns):
         if not np.isfinite(fmap.values[rows, j]).any():
             continue
-        limit = max_jump * max(n - previous, 1)
-        previous = n
         b_j = float(fmap.field[j])
         peaks = find_features(
             fmap.energy,
@@ -254,10 +269,11 @@ def detect(
             prominence=prominence,
             e_range=e_range,
         )
-        ends = np.array([t[-1][1].energy for t in active])
+        guess = np.array([t.predict(b_j, history) for t in active])
+        limit = np.array([max_jump * (n - t.column) for t in active])
         found = np.array([p.energy for p in peaks])
-        dist = np.abs(ends[:, None] - found[None, :])
-        t_idx, p_idx = np.nonzero(dist <= limit)
+        dist = np.abs(guess[:, None] - found[None, :])
+        t_idx, p_idx = np.nonzero(dist <= limit[:, None])
         by_distance = np.argsort(dist[t_idx, p_idx], kind="stable")
         used_t: set[int] = set()
         used_p: set[int] = set()
@@ -266,13 +282,80 @@ def detect(
                 continue
             used_t.add(int(t))
             used_p.add(int(p))
-            active[t].append((b_j, peaks[p]))
-        done += [tr for i, tr in enumerate(active) if i not in used_t]
-        active = [tr for i, tr in enumerate(active) if i in used_t]
-        active += [[(b_j, pk)] for i, pk in enumerate(peaks) if i not in used_p]
+            active[t].add(b_j, peaks[p], n)
+        still: list[_Open] = []
+        for i, tr in enumerate(active):
+            if i not in used_t:
+                tr.misses += 1
+            (still if tr.misses <= max_misses else done).append(tr)
+        active = still + [_Open([(b_j, pk)], n) for i, pk in enumerate(peaks) if i not in used_p]
     done += active
-    tracks = [_to_track(tr) for tr in done if len(tr) >= min_length]
+    tracks = [_to_track(tr.points) for tr in done if len(tr.points) >= min_length]
     return sorted(tracks, key=lambda tr: float(tr.energy.mean()))
+
+
+def auto_prominence(
+    fmap: FieldMap,
+    feature: Feature | str,
+    *,
+    b_range: Range | None = None,
+    e_range: Range | None = None,
+    columns: int = AUTO_COLUMNS,
+) -> float:
+    """A prominence threshold for *feature* above the noise of *fmap* in the box.
+
+    The extrema of the searched signal (the values, or the slope ``dV/dE`` for RISING and
+    FALLING), unsmoothed, are taken from up to *columns* columns of the box *b_range* x
+    *e_range*, sampled evenly. When they are dense (one in :data:`AUTO_SPACING` samples or
+    more), noise makes most of them and the threshold is :data:`AUTO_NOISE` times their median
+    prominence; smoothing lowers the noise below it but keeps lines wider than its window.
+    Sparse extrema are features of a map with little noise: the threshold is then
+    :data:`AUTO_LARGEST` of the largest prominence. 0.0 when the box holds no extremum.
+    """
+    feature = Feature(feature)
+    inside = np.flatnonzero(_inside(fmap.field, b_range))
+    if inside.size > columns:
+        inside = inside[np.linspace(0, inside.size - 1, columns).round().astype(int)]
+    found: list[np.ndarray] = []
+    samples = 0
+    for j in inside:
+        keep = np.flatnonzero(np.isfinite(fmap.energy) & np.isfinite(fmap.values[:, j]))
+        keep = keep[np.argsort(fmap.energy[keep], kind="stable")]
+        x, y = fmap.energy[keep], fmap.values[keep, j]
+        if e_range is not None:
+            cut = _inside(x, e_range)
+            x, y = x[cut], y[cut]
+        if x.size < 3 or np.any(np.diff(x) == 0):
+            continue
+        sign = 1.0 if feature in (Feature.MAX, Feature.RISING) else -1.0
+        signal = sign * (y if feature in (Feature.MAX, Feature.MIN) else np.gradient(y, x))
+        found.append(find_peaks(signal, prominence=0.0)[1]["prominences"])
+        samples += x.size
+    prominences = np.concatenate(found) if found else np.array([])
+    prominences = prominences[np.isfinite(prominences) & (prominences > 0)]
+    if prominences.size == 0:
+        return 0.0
+    if prominences.size * AUTO_SPACING >= samples:
+        return float(AUTO_NOISE * np.median(prominences))
+    return float(AUTO_LARGEST * prominences.max())
+
+
+class _Open:
+    """A track while :func:`detect` builds it: its points, last column and misses since."""
+
+    def __init__(self, points: list[tuple[float, Peak]], column: int):
+        self.points = points
+        self.column = column
+        self.misses = 0
+
+    def add(self, field: float, peak: Peak, column: int) -> None:
+        self.points.append((field, peak))
+        self.column = column
+        self.misses = 0
+
+    def predict(self, field: float, history: int) -> float:
+        recent = self.points[-history:]
+        return _predict([b for b, _ in recent], [p.energy for _, p in recent], field)
 
 
 def _check_smoothing(smooth: Smoothing | None) -> None:

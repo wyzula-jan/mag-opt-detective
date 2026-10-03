@@ -339,3 +339,67 @@ def test_picking_does_not_import_qt():
         "sys.exit(any(m.startswith(('PySide6', 'pyqtgraph')) for m in sys.modules))"
     )
     assert subprocess.run([sys.executable, "-c", code], check=False).returncode == 0
+
+
+# ---- detect: gaps and prediction, auto prominence ----------------------------------------
+
+
+def test_detect_bridges_up_to_max_misses_columns_with_data():
+    gap = FIELD[[12]]
+    fmap = line_map([lambda b: np.nan if b in gap else linear(b)], noise=0.01, seed=10)
+    split = pk.detect(fmap, feature="max", prominence=0.2)
+    assert [len(t) for t in split] == [12, 23]
+    bridged = pk.detect(fmap, feature="max", prominence=0.2, max_misses=1)
+    assert len(bridged) == 1
+    np.testing.assert_array_equal(bridged[0].field, np.delete(FIELD, 12))
+    two = FIELD[[12, 13]]
+    fmap = line_map([lambda b: np.nan if b in two else linear(b)], noise=0.01, seed=10)
+    assert len(pk.detect(fmap, feature="max", prominence=0.2, max_misses=1)) == 2
+    assert len(pk.detect(fmap, feature="max", prominence=0.2, max_misses=2)) == 1
+
+
+def test_detect_predicts_from_history():
+    def curved(b):
+        return 120.0 + 0.9 * b**2  # the step per column grows to 4 meV
+
+    fmap = line_map([curved], width=2.0)
+    assert len(pk.detect(fmap, feature="max", max_jump=1.0, min_length=1)) > 1
+    tracks = pk.detect(fmap, feature="max", max_jump=1.0, history=3)
+    assert len(tracks) == 1
+    np.testing.assert_array_equal(tracks[0].field, FIELD)
+    assert np.max(np.abs(tracks[0].energy - curved(FIELD))) < STEP / 4
+    with pytest.raises(ValueError, match="history"):
+        pk.detect(fmap, feature="max", history=0)
+    with pytest.raises(ValueError, match="max_misses"):
+        pk.detect(fmap, feature="max", max_misses=-1)
+
+
+def test_auto_prominence_sits_between_noise_and_lines():
+    fmap = line_map([linear, falling_line], noise=0.01, seed=11)
+    auto = pk.auto_prominence(fmap, "max")
+    assert 0.03 < auto < 0.3
+    tracks = pk.detect(fmap, feature="max", prominence=auto)
+    assert len(tracks) == 2
+    assert [len(t) for t in tracks] == [FIELD.size] * 2
+    slope = pk.auto_prominence(fmap, "rising")
+    rising = pk.detect(fmap, feature="rising", prominence=slope, max_jump=1.5)
+    assert [len(t) for t in rising] == [FIELD.size] * 2
+
+
+def test_auto_prominence_of_a_map_without_noise_keeps_weak_lines():
+    fmap = line_map([linear])
+    weak = line_map([falling_line])
+    fmap = fmap.with_values(fmap.values + 0.3 * weak.values)
+    auto = pk.auto_prominence(fmap, "max")
+    assert auto == pytest.approx(0.1, rel=0.05)  # a tenth of the strongest line
+    assert len(pk.detect(fmap, feature="max", prominence=auto)) == 2
+
+
+def test_auto_prominence_box_and_empty_cases():
+    fmap = line_map([linear], noise=0.01, seed=12)
+    quiet = fmap.with_values(np.where(fmap.energy[:, None] > 160.0, 0.0, fmap.values))
+    assert pk.auto_prominence(quiet, "max", e_range=(165.0, None)) == 0.0
+    assert pk.auto_prominence(quiet, "max", b_range=(20.0, 30.0)) == 0.0
+    boxed = pk.auto_prominence(fmap, "max", b_range=(2.0, 4.0), e_range=(100.0, 125.0))
+    assert 0.0 < boxed < 0.3  # noise only
+    assert pk.auto_prominence(fmap, "min", columns=4) > 0.0
