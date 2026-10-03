@@ -230,6 +230,22 @@ def test_detect_finds_the_lines_in_a_box_and_a_click_chooses_one(picked):
     assert status(w).startswith("No minima found in the box.")
 
 
+def test_detect_chooses_the_line_that_continues_the_curve(picked):
+    w, c, tool = picked, picked.controller, picked.autopick
+    c.record_points([7.5, 8.0], line2(np.array([7.5, 8.0])), unit="cm-1")
+    tool.bar.mode.set_value("detect")
+    tool.detect_in((1.0, 8.0), (300.0, 1100.0))
+    assert len(tool.candidates) == 2 and tool.chosen == 1  # line2, though line1 is deeper
+    assert status(w).endswith("Replaces 2 of its points.")
+    c.add_curve("LL 2")  # a curve without points: the longest (and deepest) line
+    tool.detect_in((1.0, 8.0), (300.0, 1100.0))
+    assert tool.chosen == 0
+    c.set_curve("LL 1")  # points far from every line found count for nothing
+    c.record_points([7.5, 8.0], [1150.0, 1150.0], unit="cm-1")
+    tool.detect_in((1.0, 8.0), (300.0, 1100.0))
+    assert tool.chosen == 0
+
+
 def _viewport_pos(window, b: float, energy: float) -> QPoint:
     plot = window.plots.map
     scene = plot.plot.vb.mapViewToScene(QPointF(b, energy))
@@ -422,6 +438,7 @@ def test_default_choice_and_window():
     assert default_choice([short, long_weak, long_strong]) == 2
     previous = candidate([2, 3], 205.0, 1.0)
     assert default_choice([short, long_weak, long_strong], previous) == 1
+    assert default_choice([short, long_weak, long_strong], previous, reach=1.0) == 2
     elsewhere = candidate([7, 8], 205.0, 1.0)
     assert default_choice([short, long_weak], elsewhere) == 1
     x, y = autopick._joined([short, long_weak], "meV")  # drawn as one curve with a gap

@@ -2,9 +2,10 @@
 
 *Track*: a click on a line follows it field by field in both directions
 (:func:`~mag_opt_detective.core.picking.track`). *Detect*: a box dragged on the map finds every
-line inside it (:func:`~mag_opt_detective.core.picking.detect`); the longest is chosen, and a
-click on another line chooses that one. The points found are a preview in the map's "preview"
-layer (hollow diamonds), not yet in the point table. Accept records the chosen line into the
+line inside it (:func:`~mag_opt_detective.core.picking.detect`); the one that continues the
+current curve's points is chosen, else the longest, and a click on another line chooses that
+one. The lines found are a preview in the map's "preview" layer (the chosen one with hollow
+diamonds), not yet in the point table. Accept records the chosen line into the
 current curve as one undo step, replacing the curve's points at the same fields; Discard, Esc or
 another tool drop it. Changing an option searches again from the same click or box, on the map
 as shown (plot kind, derivative and display unit). Energies are kept in cm^-1 and shown in the
@@ -166,18 +167,21 @@ def _clip(value: float, axis: np.ndarray) -> float:
     return float(np.clip(value, finite.min(), finite.max())) if finite.size else value
 
 
-def default_choice(candidates: list[Candidate], previous: Candidate | None = None) -> int:
-    """The line to preselect: the one closest to *previous* (the line chosen before the
-    search ran again), else the longest (the strongest of equally long ones); -1 if none."""
+def default_choice(
+    candidates: list[Candidate], previous: Candidate | None = None, reach: float = math.inf
+) -> int:
+    """The line to preselect: the one closest to *previous* (the line chosen before the search
+    ran again, or the current curve's points) on their common fields, if within *reach*
+    (cm^-1) on average; else the longest (the strongest of equally long ones); -1 if none."""
     if not candidates:
         return -1
     if previous is not None:
-        best, best_distance = -1, math.inf
+        best, best_distance = -1, reach
         for i, candidate in enumerate(candidates):
             _common, a, b = np.intersect1d(candidate.field, previous.field, return_indices=True)
             if a.size:
                 distance = float(np.mean(np.abs(candidate.energy[a] - previous.energy[b])))
-                if distance < best_distance:
+                if distance <= best_distance:
                     best, best_distance = i, distance
         if best >= 0:
             return best
@@ -315,7 +319,8 @@ class AutoPick(QObject):
         self.prominence_used = used
         unit = Unit(fmap.unit)
         self.candidates = [Candidate.from_track(t, unit) for t in tracks if len(t)]
-        self.chosen = default_choice(self.candidates, previous)
+        reach = float(to_cm1(options.window, unit))
+        self.chosen = default_choice(self.candidates, previous or self.curve_points(), reach)
         if not self.candidates:
             what = PLURAL[options.feature]
             self._message = (
@@ -330,6 +335,15 @@ class AutoPick(QObject):
         self.candidates, self.chosen = [], -1
         self._message = ("warn", text[:1].upper() + text[1:])
         self.refresh()
+
+    def curve_points(self) -> Candidate | None:
+        """The current curve's points, as a line found (a Detect box preselects the line that
+        continues them)."""
+        c = self.c
+        if c.points is None or c.curve not in c.points.names:
+            return None
+        field, energy = c.points.points(c.curve)
+        return Candidate(field, energy, np.ones(field.size)) if field.size else None
 
     def chosen_candidate(self) -> Candidate | None:
         return self.candidates[self.chosen] if 0 <= self.chosen < len(self.candidates) else None
