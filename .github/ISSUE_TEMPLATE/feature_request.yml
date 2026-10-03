@@ -1,0 +1,29 @@
+# Opened by the app's Help > Request a feature... (gui/links.py).
+name: Feature request
+description: Suggest a new feature or an improvement.
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the idea. Please check the [documentation](https://wyzula-jan.github.io/mag-opt-detective/) and the open issues first: it may be there already.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What are you trying to do, and what makes it hard today?
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: What the app could do, e.g. a new control, plot or export.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives
+      description: Other ways you considered, or how you work around it now.

@@ -1,0 +1,105 @@
+# The app's Help > Report a bug... fills in the Environment fields: GitHub sets a field from the
+# query parameter named after its id (gui/links.py, ENVIRONMENT_FIELDS). Keep the ids in step;
+# tests/test_gui_links.py checks them.
+name: Bug report
+description: Something does not work as it should.
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a problem. **Help › Report a bug…** in the app opens this form with the environment below filled in.
+
+        Never attach measurement data you cannot share publicly: a few lines of a file, or a screenshot, usually show the problem.
+  - type: textarea
+    id: description
+    attributes:
+      label: What went wrong
+      description: A short description of the problem.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: What you did, step by step, from loading the files.
+      placeholder: |
+        1. Load a sweep in the Sample panel
+        2. Choose the 2nd derivative
+        3. Process
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behaviour
+      description: What you expected to happen.
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behaviour
+      description: What happened instead, with the error message if there was one.
+    validations:
+      required: true
+  - type: textarea
+    id: log
+    attributes:
+      label: Log
+      description: The lines of the log around the problem (the Log button in the status bar).
+      render: text
+  - type: markdown
+    attributes:
+      value: |
+        ### Environment
+        Filled in by **Help › Report a bug…**; otherwise **Help › About** shows the versions.
+  - type: input
+    id: version
+    attributes:
+      label: App version
+      description: Help › About shows it.
+      placeholder: x.y.z
+    validations:
+      required: true
+  - type: input
+    id: install
+    attributes:
+      label: How it runs
+      description: Standalone app, or from source.
+      placeholder: Standalone app
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      placeholder: macOS 15.6 (arm64)
+    validations:
+      required: true
+  - type: input
+    id: python
+    attributes:
+      label: Python
+  - type: input
+    id: qt
+    attributes:
+      label: Qt and PySide6
+  - type: input
+    id: libraries
+    attributes:
+      label: Libraries
+      description: numpy, scipy and pyqtgraph.
+  - type: input
+    id: plot
+    attributes:
+      label: Plot shown
+      description: The tab, the plot and the energy unit.
+  - type: checkboxes
+    id: data
+    attributes:
+      label: Measurement data
+      options:
+        - label: I attached no measurement data, or only data I mean to share publicly.
+          required: true

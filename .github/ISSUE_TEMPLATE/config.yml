@@ -1,0 +1,6 @@
+# The issue chooser: the bug and feature forms, blank issues for anything else, and the docs.
+blank_issues_enabled: true
+contact_links:
+  - name: Documentation
+    url: https://wyzula-jan.github.io/mag-opt-detective/
+    about: How to load, process, pick, fit and export, and the keyboard shortcuts.
