@@ -880,22 +880,6 @@ class AppController(QObject):
             raise ValueError("the fit gave values that are not finite")
         return result
 
-    def fit_model(
-        self,
-        model: Model,
-        mapping: Mapping[str, int | None],
-        assignment: Assignment | str = Assignment.BRANCH,
-    ) -> FitResult:
-        """Fit *model* (not changed) to the picked curves of *mapping*; see :func:`fit`.
-
-        Raises ValueError with a readable message for missing points, too few points for the
-        free parameters, a model that cannot be evaluated or a fit that does not converge.
-        """
-        observations = self.prepare_fit(model, mapping)
-        result = self.run_fit(model, observations, assignment)
-        self.log_fit(result, assignment, model.unit)
-        return result
-
     @staticmethod
     def log_fit(result: FitResult, assignment: Assignment | str, unit: Unit | str) -> None:
         n_points = sum(r.size for r in result.residuals)
