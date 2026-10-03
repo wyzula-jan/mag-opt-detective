@@ -608,6 +608,37 @@ def test_a_click_after_esc_over_the_dropped_region(shown, qtbot, monkeypatch):
     assert reported == []
 
 
+def test_a_right_click_removes_a_corner_of_the_polygon(shown, qtbot, monkeypatch):
+    w, tool = shown, shown.autopick
+    view, viewport = w.plots.map.view, w.plots.map.view.viewport()
+    reported = pg_errors(monkeypatch)
+    tool.bar.mode.set_value("detect")
+    tool.bar.shape.set_value("polygon")
+    tool.draw_region([(1.0, 900.0), (8.0, 1010.0), (8.0, 1100.0), (4.5, 1120.0), (1.0, 1000.0)])
+    roi = tool.region.roi
+    assert len(roi.getHandles()) == 5
+    calls = counting(monkeypatch)
+    for left in (4, 3):
+        corner = roi.getHandles()[3 if left == 4 else 0]
+        at = view.mapFromScene(corner.scenePos())
+        QTest.mouseMove(viewport, at - QPoint(2, 0))
+        qtbot.wait(_move_pause_ms())
+        QTest.mouseMove(viewport, at)
+        qtbot.wait(_move_pause_ms())
+        QTest.mouseClick(viewport, Qt.MouseButton.RightButton, PLAIN, at)
+        qtbot.waitUntil(lambda left=left: len(roi.getHandles()) == left, timeout=5000)
+        qtbot.waitUntil(lambda corner=corner: not shiboken6.isValid(corner), timeout=5000)
+    assert len(calls) == 2  # searched again each time
+    assert len(tool.target.region) == 3 and len(roi.segments) == 3
+    corner = roi.getHandles()[0]
+    QTest.mouseClick(
+        viewport, Qt.MouseButton.RightButton, PLAIN, view.mapFromScene(corner.scenePos())
+    )
+    qtbot.wait(4 * _move_pause_ms())
+    assert len(roi.getHandles()) == 3 and shiboken6.isValid(corner)  # a triangle stays
+    assert reported == [] and QApplication.activePopupWidget() is None  # no menu
+
+
 def test_the_mask_is_made_once_per_search(picked, monkeypatch):
     tool = picked.autopick
     tool.bar.mode.set_value("detect")

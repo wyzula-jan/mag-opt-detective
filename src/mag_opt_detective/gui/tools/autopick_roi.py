@@ -43,7 +43,7 @@ SHAPES = (  # value, label, tooltip
         POLYGON,
         "Polygon",
         "Draw a loop around the lines with the mouse held down; it becomes a polygon whose "
-        "corners you can drag (a click on an edge adds a corner, a right-click on one "
+        "corners you can drag (a click on an edge adds a corner, a right-click on a corner "
         "removes it)",
     ),
 )
@@ -193,6 +193,20 @@ class RegionHandle(Handle):
         super().__init__(HANDLE_RADIUS, typ=typ, parent=parent)
         self.colors = colors
         self.setCursor(Qt.CursorShape.PointingHandCursor)
+
+    def mouseClickEvent(self, ev) -> None:
+        """A right-click removes a polygon's corner at once (if three are left after it)."""
+        right = ev.button() == Qt.MouseButton.RightButton
+        if not (right and self.deletable and not self.isMoving):
+            super().mouseClickEvent(ev)
+            return
+        ev.accept()
+        if all(roi.checkRemoveHandle(self) for roi in self.rois):
+            QTimer.singleShot(0, self._remove)  # once this click is handled
+
+    def _remove(self) -> None:
+        if shiboken6.isValid(self) and self.rois:
+            self.sigRemoveRequested.emit(self)
 
     def paint(self, p: QPainter, opt, widget) -> None:
         accent, halo = self.colors()
