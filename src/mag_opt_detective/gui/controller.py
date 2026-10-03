@@ -99,6 +99,8 @@ VIEW_RANGES = {
 CURVE_NAME = re.compile(r"[A-Za-z0-9_ .+-]{1,32}")  # names of picked-point curves
 MAX_FIELD_VALUES = 100_000  # of a custom field range
 
+NO_REFERENCE_FILES = "Reference sweep has no files – shown without reference."
+
 Curve = tuple[np.ndarray, np.ndarray]
 
 
@@ -396,21 +398,30 @@ class ProcessingState:
     energy_cut: Range | None = None  # None: keep every energy
     baseline: Range | None = None  # None: no baseline correction
 
+    def reference_used(self) -> ReferenceMode:
+        """The reference Process applies: a separate sweep without files is none (Process
+        shows the sample alone, see :meth:`AppController.process`)."""
+        if self.reference_mode is ReferenceMode.SEPARATE and self.reference_files == SweepFiles():
+            return ReferenceMode.NONE
+        return self.reference_mode
+
     def effective(self) -> ProcessingState:
         """The same state with the options that cannot change the result reset (smoothing
-        without a reference, the reference sweep in another mode, an unused field range)."""
+        without a reference, the reference sweep in another mode, an unused field range);
+        a separate sweep without files counts as no reference."""
         default = ProcessingState()
-        separate = self.reference_mode is ReferenceMode.SEPARATE
-        changes: dict[str, object] = {}
+        mode = self.reference_used()
+        separate = mode is ReferenceMode.SEPARATE
+        changes: dict[str, object] = {"reference_mode": mode}
         if not self.custom_field:
             changes["sample_field"] = default.sample_field
         if not separate:
             changes["reference_files"] = default.reference_files
         if not (separate and self.custom_field):
             changes["reference_field"] = default.reference_field
-        if self.reference_mode is ReferenceMode.NONE:
+        if mode is ReferenceMode.NONE:
             changes["smooth"] = default.smooth
-        if self.reference_mode is ReferenceMode.NONE or not self.smooth:
+        if mode is ReferenceMode.NONE or not self.smooth:
             changes["sg_window"], changes["sg_poly"] = default.sg_window, default.sg_poly
         return dataclasses.replace(self, **changes)
 
@@ -462,6 +473,9 @@ class AppController(QObject):
     selectionChanged = Signal()
     processingChanged = Signal()
     changedSinceProcess = Signal(bool)
+    # Process found no reference files in Separate mode and showed the sample without a
+    # reference (a note, not an error; the log has it as a warning): the note
+    referenceMissing = Signal(str)
     pointsChanged = Signal()
     libraryChanged = Signal()  # library entries added or removed
     entryChanged = Signal(int)  # key of a library entry whose tick or limits changed
@@ -740,7 +754,11 @@ class AppController(QObject):
         return Measurement(spectra=crop_energy(spectra, *cut), zero=measurement.zero[mask])
 
     def process(self) -> ProcessResult:
-        """Load the sweep(s), process them and show the result."""
+        """Load the sweep(s), process them and show the result.
+
+        A separate reference sweep without files is left out: the sample is processed as
+        without a reference, and :attr:`referenceMissing` says so after the result is shown.
+        """
         p = self._processing
         unit = self._unit
         baseline = self._baseline()
@@ -761,7 +779,10 @@ class AppController(QObject):
             unit,
         )
         reference = None
-        mode = p.reference_mode
+        mode = p.reference_used()
+        missing = mode is not p.reference_mode  # a separate sweep without files
+        if missing:
+            logger.warning(NO_REFERENCE_FILES)
         if mode is ReferenceMode.SEPARATE:
             reference = self._cut(self._load(p.reference_files, p.reference_field, "reference"))
             logger.info(
@@ -785,6 +806,8 @@ class AppController(QObject):
             lo, hi = from_cm1(np.array(baseline), unit)
             logger.info("Baseline corrected in range %.6g – %.6g %s.", lo, hi, unit)
         self.set_result(result)
+        if missing:  # after resultChanged, whose listeners close the bar a note shows in
+            self.referenceMissing.emit(NO_REFERENCE_FILES)
         return result
 
     def set_result(self, result: ProcessResult, processed: bool = True) -> None:

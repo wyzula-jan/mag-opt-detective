@@ -192,7 +192,11 @@ def test_effective_processing_state_drops_unused_options():
         reference_files=SweepFiles(("zero",), ("field",)),
     )
     assert dataclasses.replace(plain, **unused).effective() == plain.effective()
-    separate = ProcessingState(reference_mode=ReferenceMode.SEPARATE, custom_field=True)
+    separate = ProcessingState(
+        reference_mode=ReferenceMode.SEPARATE,
+        custom_field=True,
+        reference_files=SweepFiles(("ref zero",), ("ref field",)),
+    )
     for name, value in unused.items():
         if name != "sg_window":  # used only with smoothing
             changed = dataclasses.replace(separate, **{name: value})

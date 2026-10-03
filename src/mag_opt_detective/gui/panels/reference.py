@@ -1,7 +1,8 @@
 """Reference panel: the reference mode, the reference sweep's files and the smoothing.
 
 The sweep's files show only for a separate sweep; the custom field range only when the
-Sample panel uses one too. Smoothing is disabled without a reference.
+Sample panel uses one too. Smoothing is disabled without a reference. A Process in Separate
+mode without files says in a note that it showed the sample without a reference.
 """
 
 from __future__ import annotations
@@ -40,6 +41,7 @@ HINTS = {
     ),
     ReferenceMode.SELF: "Divides the sweep by itself, smoothed, to remove slow spectral features.",
 }
+MISSING_HINT = "Add them in the Reference panel, or set Reference to None."  # the mockup's
 SUBTITLES = {
     ReferenceMode.NONE: "Corrects the sample ratio with a second sweep.",
     ReferenceMode.SEPARATE: "Corrects the sample ratio with a second sweep.",
@@ -180,6 +182,14 @@ def install(window) -> None:
     push()
     c.processingChanged.connect(pull)
     pull()
+
+    def note_missing(note: str) -> None:
+        """Process went on without the reference sweep: say so (not an error)."""
+        window.infobar.show_message(
+            "warning", note, MISSING_HINT, "Open Reference", lambda: window.show_panel("reference")
+        )
+
+    c.referenceMissing.connect(note_missing)
 
     box = panel.measurement
     for text, slot, shortcut in (

@@ -151,6 +151,7 @@ def test_custom_field_and_reference(window, sweep, errors):
 def test_missing_reference_offers_the_reference_panel(window, sweep):
     load_sweep(window, sweep)
     window.panels["reference"].set_reference_mode(ReferenceMode.SEPARATE)
+    window.panels["reference"].zero_list.set_paths(sweep["zero"])  # a sweep without field files
     process(window)
     assert "no field files" in infobar_text(window).lower()
     assert window.infobar.action_button.text() == "Open Reference"
