@@ -1,10 +1,10 @@
 """View section: field, energy and stacked ranges of the plots (temporary), and the shared
 parts of the inspector sections.
 
-The range page is the old Tools > Plot dimensions page without the energy cut and the colour
-levels (now in the Colour section), plus the stacked offset. It edits ``controller.view``
-(:class:`ViewState`); the energy range is typed in the display unit and kept in cm^-1. This
-module also shows the inspector sections that belong to the plot on screen
+The range page is the old Tools > Plot dimensions page without the energy cut, the colour
+levels (now in the Colour section) and the stacked offset (in the Traces section). It edits
+``controller.view`` (:class:`ViewState`); the energy range is typed in the display unit and
+kept in cm^-1. This module also shows the inspector sections that belong to the plot on screen
 (``window.inspector_views``) and holds the number field and map cache the sections use.
 """
 
@@ -167,7 +167,7 @@ def _radio_group(parent, *labels: str, checked: int = 0) -> tuple[QButtonGroup, 
 
 
 class PlotDimensionsPage(QWidget):
-    """Field, energy and intensity ranges of the plots and the stacked offset."""
+    """Field, energy and intensity ranges of the plots."""
 
     changed = Signal()
 
@@ -200,11 +200,6 @@ class PlotDimensionsPage(QWidget):
         row = self._section(grid, row, "Stacked plot", self.stacked_auto, self.stacked_custom)
         self.stacked_min, self.stacked_max = FloatEdit(0.9, "Y min"), FloatEdit(3, "Y max")
         row = self._range_row(grid, row, "Y", self.stacked_min, self.stacked_max)
-        self.offset = FloatEdit(0.01, "Offset")
-        self.offset.setMinimumWidth(40)
-        grid.addWidget(QLabel("Offset"), row, 0)
-        grid.addWidget(self.offset, row, 1)
-        self.offset.editingFinished.connect(self.changed)
         grid.setColumnStretch(1, 1)
         grid.setColumnStretch(2, 1)
 
@@ -255,10 +250,7 @@ class PlotDimensionsPage(QWidget):
         return a, b
 
     def view_state(self, current: ViewState) -> ViewState:
-        """The view as typed (the colour levels and map are kept)."""
-        offset = self.offset.value()
-        if not math.isfinite(offset):
-            raise ValueError("the stacked offset must be a number")
+        """The view as typed (colour levels and trace options are kept)."""
         return dataclasses.replace(
             current,
             field_range=(
@@ -272,7 +264,6 @@ class PlotDimensionsPage(QWidget):
                 if self.stacked_custom.isChecked()
                 else None
             ),
-            stacked_offset=offset,
         )
 
     def show_view(self, view: ViewState) -> None:
@@ -296,7 +287,6 @@ class PlotDimensionsPage(QWidget):
                         edit.set_value(value)
             else:
                 self.energy_auto.setChecked(True)
-            _set(self.offset, view.stacked_offset)
         finally:
             self.blockSignals(False)
 
@@ -362,6 +352,6 @@ def install(window) -> None:
         for attr in (
             "field_auto", "field_custom", "field_min", "field_max",
             "energy_auto", "energy_custom", "energy_min", "energy_max",
-            "stacked_auto", "stacked_custom", "stacked_min", "stacked_max", "offset",
+            "stacked_auto", "stacked_custom", "stacked_min", "stacked_max",
         ):  # fmt: skip
             p.bind(f"view/{attr}", getattr(page, attr))

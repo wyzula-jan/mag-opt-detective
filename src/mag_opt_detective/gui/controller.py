@@ -48,6 +48,7 @@ from mag_opt_detective.core.units import (
     Unit,
     convert_levels,
     convert_range,
+    derivative_scale,
     from_cm1,
     to_cm1,
 )
@@ -73,6 +74,7 @@ ORDER_SUFFIX = {0: "", 1: "_1stDer", 2: "_2ndDer"}
 PER_UNIT_SUFFIX = "_perUnit"
 ORDINALS = {1: "1st", 2: "2nd"}
 AUTO_COLOURS = "Auto"
+AUTO_TRACE_COLOURS = "viridis"  # traces coloured by field with the Auto colour map
 
 # colour level modes: 1-99 % of the map, fixed levels, or symmetric about the centre of a kind
 AUTO_LEVELS, FIXED_LEVELS, SYMMETRIC_LEVELS = "auto", "fixed", "sym"
@@ -253,16 +255,19 @@ class PlotSelection:
 
 @dataclass(frozen=True)
 class ViewState:
-    """How the maps are shown. Energies and the levels of per-unit E-derivatives are in the
-    display unit; everything else does not depend on it. Each colour level key
-    (:func:`level_key`) has a mode (``LEVEL_MODES``) and, when fixed or symmetric, its levels."""
+    """How the maps are shown. Energies and the intensities of per-unit E-derivatives (their
+    levels, the stacked range and offset) are in the display unit; the rest does not depend on
+    it. Each colour level key (:func:`level_key`) has a mode (``LEVEL_MODES``) and, when fixed
+    or symmetric, its levels."""
 
     field_range: Range | None = None  # T; None: fit the data
     energy_range: Range | None = None  # display unit; None: fit the data
     levels: Mapping[str, tuple[float, float]] = field(default_factory=lambda: dict(DEFAULT_LEVELS))
     level_modes: Mapping[str, str] = field(default_factory=dict)  # missing: default_level_mode
-    stacked_range: Range | None = None
+    stacked_range: Range | None = None  # intensity of the stacked plot; None: fit the data
     stacked_offset: float = 0.01
+    stacked_every: int = 1  # show every n-th spectrum
+    stacked_by_field: bool = True  # colour the spectra by field (else one hue each)
     colormap: str = AUTO_COLOURS
 
     def level_mode(self, key: str) -> str:
@@ -291,14 +296,28 @@ class ViewState:
             return "magma" if order == 0 else "grey"
         return self.colormap
 
-    def converted(self, src: Unit, dst: Unit) -> ViewState:
-        """The same view in unit *dst*: energy range and per-unit E-derivative levels."""
+    def trace_colormap(self) -> str:
+        """Colour map of the spectra coloured by field (Auto: viridis)."""
+        return AUTO_TRACE_COLOURS if self.colormap == AUTO_COLOURS else self.colormap
+
+    def converted(self, src: Unit, dst: Unit, selection: PlotSelection | None = None) -> ViewState:
+        """The same view in unit *dst*: energy range and per-unit E-derivative levels, and with
+        the *selection* shown, the stacked intensity range and offset of such a derivative."""
         levels = {}
         for key, value in self.levels.items():
             k = parse_level_key(key)
             levels[key] = convert_levels(value, src, dst, k.order, k.axis_is_energy, k.physical)
+        changes: dict[str, object] = {}
+        if selection is not None:
+            s = selection
+            factor = derivative_scale(dst, s.order, s.axis == Axis.ENERGY, s.physical)
+            factor /= derivative_scale(src, s.order, s.axis == Axis.ENERGY, s.physical)
+            if self.stacked_range is not None and None not in self.stacked_range:
+                lo, hi = self.stacked_range
+                changes["stacked_range"] = (lo * factor, hi * factor)
+            changes["stacked_offset"] = self.stacked_offset * factor
         return dataclasses.replace(
-            self, energy_range=convert_range(self.energy_range, src, dst), levels=levels
+            self, energy_range=convert_range(self.energy_range, src, dst), levels=levels, **changes
         )
 
 
@@ -433,7 +452,7 @@ class AppController(QObject):
             return
         self._unit = unit
         if not self._restoring:
-            self._view = self._view.converted(old, unit)
+            self._view = self._view.converted(old, unit, self._selection)
         logger.debug("Energy unit %s -> %s", old, unit)
         self.unitChanged.emit(old, unit)
 
@@ -461,6 +480,12 @@ class AppController(QObject):
         if new != self._view:
             self._view = new
             self.viewChanged.emit()
+
+    def derivative_scale(self) -> float:
+        """Factor of the shown map's intensities over the same map per cm^-1 (a per-unit energy
+        derivative scales with the unit; anything else is 1)."""
+        s = self._selection
+        return derivative_scale(self._unit, s.order, s.axis == Axis.ENERGY, s.physical)
 
     def set_levels(self, key: str, lo: float, hi: float, mode: str | None = None) -> None:
         """Keep the colour levels of *key* (display unit).

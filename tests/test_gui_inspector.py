@@ -6,6 +6,7 @@ from PySide6.QtCore import Qt
 
 import gui_helpers
 from gui_helpers import inspector_page, load_sweep, process, select, set_unit
+from mag_opt_detective.core.colormaps import lut
 from mag_opt_detective.core.pipeline import PlotKind, ReferenceMode
 from mag_opt_detective.core.processing import Axis
 from mag_opt_detective.gui.controller import level_key
@@ -25,6 +26,10 @@ def processed(window, sweep):
 
 def colour_page(window):
     return inspector_page(window, "colour")
+
+
+def traces_page(window):
+    return inspector_page(window, "traces")
 
 
 def map_values(window) -> np.ndarray:
@@ -239,9 +244,39 @@ def test_typed_levels_are_checked(processed, qtbot):
 def test_sections_follow_the_plot_on_screen(window):
     visible = {
         "map": ["view", "colour", "overlays"],
-        "stacked": ["view"],
+        "stacked": ["view", "traces"],
         "reference": ["view", "colour"],
     }
     for view, names in visible.items():
         window.plot_area.set_current_view(view)
         assert [n for n, s in window.inspector.items() if not s.isHidden()] == names
+
+
+# ---------------------------------------------------------------------- traces
+def test_traces_options(processed, sweep, qtbot):
+    w, c = processed, processed.controller
+    page = traces_page(w)
+    stacked = w.plots.stacked
+    page.offset.spin.setValue(0.05)
+    assert c.view.stacked_offset == 0.05
+    first, second = stacked.trace_y(0, 500.0), stacked.trace_y(1, 500.0)
+    values = map_values(w)
+    row = int(np.argmin(np.abs(sweep["x"] - 500.0)))
+    assert second - first == pytest.approx(values[row, 1] - values[row, 0] + 0.05)
+    page.offset.slider.setValue(page.offset.slider.maximum())  # live, merged
+    qtbot.waitUntil(lambda: c.view.stacked_offset == pytest.approx(page.offset.maximum()))
+    assert page.offset.spin.value() == pytest.approx(page.offset.maximum())
+
+    page.every.button("2").click()
+    assert c.view.stacked_every == 2
+    assert list(stacked.shown_fields()) == [0, 2]
+    assert c.view.stacked_by_field and page.by_field.isChecked()  # coloured by field
+    pen = stacked._curves[0].opts["pen"]
+    expected = lut("viridis")[round(0.1 * 255)]  # Auto colours the fields with viridis
+    assert pen.color().getRgb()[:3] == tuple(int(v) for v in expected)
+    assert page.legend.labels() == ("0.5 T", "2 T") and not page.legend.isHidden()
+    colour_page(w).picker.swatches["plasma"].click()  # the selected map colours the traces
+    pen = stacked._curves[0].opts["pen"]
+    assert pen.color().getRgb()[:3] == tuple(int(v) for v in lut("plasma")[round(0.1 * 255)])
+    page.by_field.click()
+    assert not c.view.stacked_by_field and page.legend.isHidden()

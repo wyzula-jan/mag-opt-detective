@@ -64,6 +64,14 @@ def test_view_state_converts_only_unit_dependent_values():
     back = mev.converted(Unit.MEV, Unit.CM1)
     assert back.energy_range == pytest.approx(view.energy_range)
     assert back.levels["Data_der2_E_unit"] == pytest.approx((-1.0, 2.0))
+    # the stacked intensities follow the selection shown: only per-unit energy derivatives
+    per_unit = PlotSelection(order=2, axis=Axis.ENERGY, physical=True)
+    shown = view.converted(Unit.CM1, Unit.MEV, per_unit)
+    assert shown.stacked_range == pytest.approx((0.5 * MEV**2, 2 * MEV**2))
+    assert shown.stacked_offset == pytest.approx(0.01 * MEV**2)
+    for selection in (PlotSelection(order=2), PlotSelection(order=1, axis=Axis.FIELD)):
+        same = view.converted(Unit.CM1, Unit.THZ, selection)
+        assert same.stacked_range == (0.5, 2.0) and same.stacked_offset == 0.01
 
 
 def test_view_state_levels_and_colours():
@@ -76,6 +84,8 @@ def test_view_state_levels_and_colours():
     assert ViewState().levels["Ratio_Step"] == (0.98, 1.02)
     assert view.colormap_for(0) == "magma" and view.colormap_for(1) == "grey"
     assert ViewState(colormap="viridis").colormap_for(2) == "viridis"
+    assert view.trace_colormap() == "viridis"  # Auto colours the stacked fields with viridis
+    assert ViewState(colormap="grey").trace_colormap() == "grey"
 
 
 def test_selection_names():
