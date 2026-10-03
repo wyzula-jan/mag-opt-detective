@@ -22,7 +22,11 @@ from mag_opt_detective.gui.kit import SegmentedControl, Switch
 from mag_opt_detective.gui.plots.base import robust_levels
 from mag_opt_detective.gui.theme import current_tokens
 
-EVERY = (("1", "Every field"), ("2", "Every 2nd"), ("4", "Every 4th"))
+EVERY = (
+    ("1", "All", "Every spectrum"),
+    ("2", "Every 2nd", "Every second spectrum"),
+    ("4", "Every 4th", "Every fourth spectrum"),
+)
 FIELD_PART = (0.1, 0.82)  # the part of the colour map the stacked plot uses for the fields
 
 
@@ -155,14 +159,15 @@ class TracesPage(QWidget):
         show_label = QLabel("Show")
         show_label.setProperty("kit", "muted")
         self.every = SegmentedControl(size="sm", expand=True)
-        for value, text in EVERY:
-            self.every.add_option(value, text)
+        for value, text, tip in EVERY:
+            self.every.add_option(value, text, tip)
         self.every.setAccessibleName("Spectra shown")
         self.by_field = Switch()
         self.by_field.setAccessibleName("Colour by field")
         title = QLabel("<b>Colour by field</b>")
         detail = QLabel("Uses the colour map; Auto uses viridis")
         detail.setProperty("kit", "muted")
+        detail.setWordWrap(True)
         title.setBuddy(self.by_field)
         text = QVBoxLayout()
         text.setSpacing(1)
