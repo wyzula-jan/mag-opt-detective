@@ -50,7 +50,7 @@ from PySide6.QtWidgets import (
 from mag_opt_detective import __version__
 from mag_opt_detective.core.processing import Axis
 from mag_opt_detective.core.units import Unit
-from mag_opt_detective.gui import console, export_menu, icons, licences, links, plot_panel
+from mag_opt_detective.gui import console, export_menu, icons, licences, links, plot_panel, updates
 from mag_opt_detective.gui.controller import DATA_CHANGED, DATA_CURRENT, AppController, user_action
 from mag_opt_detective.gui.display import format_range, process_key, unit_text
 from mag_opt_detective.gui.inspector import colour, models, traces, view
@@ -602,6 +602,7 @@ class MainWindow(QMainWindow):
         autopick.install(self)
 
         export_menu.install(self)
+        updates.install(self)
         self._wire_frame()
         self.show_panel(next(iter(self.panels)), open=None)
         if self.persistence is not None:

@@ -69,6 +69,7 @@ def main(argv: list[str] | None = None) -> int:
         window.show()
         if not window.geometry_restored:
             window.center_on_screen()
+        window.updates.check_at_startup()  # once a day, a few seconds from now
         return app.exec()
     finally:
         if window.isVisible():  # the event loop ended another way: save as a close does
