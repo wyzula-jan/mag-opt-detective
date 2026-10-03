@@ -311,6 +311,44 @@ def test_double_click_fits_each_histogram(shown):
     assert w.controller.view.levels["Ratio"] == pytest.approx((lo, lo + 0.1))
 
 
+def fit_button(window) -> QToolButton:
+    head = window.plot_area.tabs.parentWidget()
+    return next(b for b in head.findChildren(QToolButton) if b.accessibleName() == "Fit to data")
+
+
+@pytest.mark.parametrize("auto_scale", [False, True])
+def test_fit_to_data_fits_the_histograms_of_the_plot_on_screen(shown, auto_scale):
+    w = shown
+    if auto_scale:
+        w.plot_area.auto_scale_button.click()
+    page = colour_page(w)
+    lo = page.fields.levels()[0]
+    page.fields.hi.setValue(5.0)
+    page.fields.hi.setValue(lo + 0.1)  # still: both stay wide
+    w.plot_area.set_current_view("stacked")
+    w.plots.map.hist.setHistogramRange(5.0, 6.0)  # as if zoomed away with the wheel
+    before = ranges(w)
+    fit_button(w).click()  # fits the stacked plot, which has no histogram
+    assert ranges(w) == before
+
+    w.plot_area.set_current_view("map")
+    w.plots.map.hist.setHistogramRange(5.0, 6.0)
+    assert ranges(w) != fits(w)
+    fit_button(w).click()
+    for shown_range, fit in zip(ranges(w), fits(w), strict=True):
+        assert shown_range == pytest.approx(fit)
+    assert w.controller.view.levels["Ratio"] == pytest.approx((lo, lo + 0.1))
+
+
+def test_the_histograms_say_how_to_fit_them(window):
+    w = window
+    assert w.plots.map.hist.toolTip() == "Double-click to fit, scroll to zoom"
+    assert colour_page(w).histogram.plot.toolTip() == "Double-click to fit"
+    w.plot_area.scale_style_button.click()  # slim bars, then new histograms
+    w.plot_area.scale_style_button.click()
+    assert w.plots.reference.hist.toolTip() == "Double-click to fit, scroll to zoom"
+
+
 def test_the_auto_scale_button_switches_every_histogram(window):
     w, area = window, window.plot_area
     button = area.auto_scale_button

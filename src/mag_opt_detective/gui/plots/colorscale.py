@@ -190,6 +190,7 @@ class HistogramScale(ColorScale):
         self._view.ci.setContentsMargins(0, 0, 9, 0)
         self._view.setFixedWidth(self.WIDTH)
         self.hist = pg.HistogramLUTItem()
+        self.hist.setToolTip("Double-click to fit, scroll to zoom")
         self._view.addItem(self.hist)
         self.hist.sigLevelChangeFinished.connect(self._on_level_change_finished)
         self._view.scene().sigMouseClicked.connect(self._on_click)

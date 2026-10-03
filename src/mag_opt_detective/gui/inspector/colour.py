@@ -249,6 +249,7 @@ class LevelHistogram(QWidget):
         self.plot.setMenuEnabled(False)
         self.plot.setMouseEnabled(x=False, y=False)
         self.plot.hideButtons()
+        self.plot.setToolTip("Double-click to fit")
         self.bars = pg.BarGraphItem(x0=[0.0], x1=[1.0], height=[0.0], pen=pg.mkPen(None))
         self.strip = QGraphicsRectItem()  # filled with the colour map stretched over the levels
         self.strip.setPen(QPen(Qt.PenStyle.NoPen))
@@ -744,6 +745,12 @@ def install(window) -> None:
     auto_scale = window.plot_area.auto_scale_button
     page.histogram.set_follow_levels(auto_scale.isChecked())
     auto_scale.toggled.connect(page.histogram.set_follow_levels)
+
+    def on_fitted(_view: str) -> None:  # Fit to data (A) on the map or reference shown
+        if sync.target() is not None:
+            page.histogram.fit()
+
+    window.plot_area.fitted.connect(on_fitted)
 
     def on_theme() -> None:
         page.histogram.apply_theme()

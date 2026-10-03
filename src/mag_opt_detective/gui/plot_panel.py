@@ -377,6 +377,8 @@ def scale_width(plot: ColorMapPlot) -> int:
 class PlotArea(QWidget):
     """Tabs and plot toolbar above the three plot views and the error bar."""
 
+    fitted = Signal(str)  # Fit to data (A) on plot view *name*: its histograms fit too
+
     def __init__(self, infobar: QWidget, parent=None):
         super().__init__(parent)
         self.tabs = _Tabs()
@@ -716,7 +718,13 @@ def set_scales_open(window, open_: bool) -> None:
 
 
 def fit_to_data(window) -> None:
-    window.controller.fit_ranges(window.plot_area.current_view())  # the View section draws it
+    """Fit the plot on screen to the data, with its colour scale's histogram."""
+    view = window.plot_area.current_view()
+    window.controller.fit_ranges(view)  # the View section draws it
+    plot = window.plots[view]
+    if isinstance(plot, ColorMapPlot):
+        plot.scale.fit()
+    window.plot_area.fitted.emit(view)  # the inspector's histogram
 
 
 def apply_theme(window) -> None:
