@@ -1,25 +1,31 @@
 """Export > Journal figure…: the journal figure window, next to the quick PNG/SVG save.
 
 The window (:mod:`~mag_opt_detective.gui.export_dialog`) is built the first time it opens, so
-matplotlib is only imported then. What it remembers (:class:`ExportSettings`) and the user's own
-presets (:class:`PresetStore`) are bound to the settings from the start, so they are restored
-with everything else.
+matplotlib is only imported then. What it remembers (:class:`ExportSettings`) is bound to the
+settings from the start, so it is restored with everything else. The user's own presets
+(:class:`PresetStore`) are user data: they are kept outside the settings that Reset settings
+forgets, and written as soon as they change.
 """
 
 from __future__ import annotations
 
 import json
+import logging
 import math
 
-from PySide6.QtCore import QEvent, QObject, Qt
+from PySide6.QtCore import QEvent, QObject, QSettings, Qt
 from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import QApplication, QMenu
 
 from mag_opt_detective.gui import icons
 from mag_opt_detective.gui.controller import user_action
 
+logger = logging.getLogger("mag_opt_detective")
+
 SETTINGS_KEY = "export/figure"
-PRESETS_KEY = "export/presets"
+# outside the v2 prefix: Reset settings (and a prefix bump) keep the presets; the preset
+# file's own format version versions them
+PRESETS_KEY = "figure-presets"
 SHORTCUT = "Ctrl+Shift+E"
 MENU_TEXT = "Journal figure…"  # also the window's title and header
 
@@ -102,33 +108,48 @@ class ExportSettings:
         return True
 
 
-class PresetStore:
-    """Settings protocol for the user's figure presets: the JSON text of a preset file ("" for
-    none). Only its shape is checked here; the export window reads the presets themselves
-    (:func:`export.user_presets.stored_presets`) when it opens, so matplotlib is not imported
-    at start. *listeners* are called after a restore or reset."""
-
-    def __init__(self):
-        self.text = ""
-        self.listeners: list = []
-
-    def settings_value(self) -> str:
-        return self.text
-
-    def set_settings_value(self, value) -> bool:
-        if not isinstance(value, str):
-            return False
-        if value:
-            try:
-                data = json.loads(value)
-            except ValueError:
-                return False
-            if not isinstance(data, dict) or not isinstance(data.get("presets"), list):
-                return False
-        self.text = value
-        for listener in list(self.listeners):
-            listener()
+def presets_text(value) -> bool:
+    """Whether *value* can be the stored text of the presets: "" (none) or the JSON object of
+    a preset file (the presets themselves are checked when the export window reads them)."""
+    if not isinstance(value, str):
+        return False
+    if not value:
         return True
+    try:
+        data = json.loads(value)
+    except (ValueError, RecursionError):
+        return False
+    return isinstance(data, dict) and isinstance(data.get("presets"), list)
+
+
+class PresetStore:
+    """The user's figure presets as the JSON text of a preset file ("" for none), kept in
+    *settings* at ``PRESETS_KEY`` (or only in memory without settings).
+
+    It is read once; :meth:`set_text` writes at once, so a crash loses no preset. The export
+    window reads the presets themselves (:func:`export.user_presets.stored_presets`), so
+    matplotlib is not imported at start.
+    """
+
+    def __init__(self, settings: QSettings | None = None):
+        self.settings = settings
+        self.text = ""
+        if settings is not None:
+            value = settings.value(PRESETS_KEY)
+            if presets_text(value):
+                self.text = value
+            elif value is not None:
+                logger.warning("Ignoring the stored figure presets: they cannot be read.")
+
+    def set_text(self, text: str) -> None:
+        self.text = text
+        if self.settings is None:
+            return
+        if text:
+            self.settings.setValue(PRESETS_KEY, text)
+        else:
+            self.settings.remove(PRESETS_KEY)
+        self.settings.sync()
 
 
 class _CloseWatcher(QObject):
@@ -163,7 +184,8 @@ def open_dialog(window) -> None:
 def install(window) -> None:
     """Add Export > Journal figure… (Ctrl+Shift+E) before the quick image save in the menus."""
     window.export_settings = ExportSettings()
-    window.export_presets = PresetStore()
+    settings = window.persistence.settings if window.persistence is not None else None
+    window.export_presets = PresetStore(settings)
     window.export_dialog = None
     action = QAction(MENU_TEXT, window)
     action.setShortcut(QKeySequence(SHORTCUT))
@@ -179,4 +201,3 @@ def install(window) -> None:
     window.installEventFilter(_CloseWatcher(window))
     if window.persistence is not None:
         window.persistence.bind(SETTINGS_KEY, window.export_settings)
-        window.persistence.bind(PRESETS_KEY, window.export_presets)

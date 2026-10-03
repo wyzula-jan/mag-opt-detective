@@ -4,7 +4,7 @@ A menu button next to the journals lists them (the one the window shows is ticke
 renames, deletes, imports and exports them; names are typed in a row under the journals, never
 in a dialog box. A preset is an :class:`~mag_opt_detective.export.UserPreset` (its checks and
 JSON format are Qt-free, in ``export.user_presets``), kept by a
-:class:`~mag_opt_detective.gui.export_menu.PresetStore`.
+:class:`~mag_opt_detective.gui.export_menu.PresetStore`, which writes them as soon as they change.
 """
 
 from __future__ import annotations
@@ -187,8 +187,7 @@ class MyPresets(QObject):
         return self._active
 
     def load(self) -> None:
-        """Read the stored presets (after a restore or reset too); bad ones are skipped (and
-        logged)."""
+        """Read the stored presets; bad ones are skipped (and logged)."""
         text = self.store.text
         presets, problems = stored_presets(text) if text else ([], [])
         for problem in problems:
@@ -198,7 +197,7 @@ class MyPresets(QObject):
 
     def _set(self, presets: list[UserPreset]) -> None:
         self._presets = sorted(presets, key=lambda p: p.name.casefold())
-        self.store.text = presets_to_json(self._presets) if self._presets else ""
+        self.store.set_text(presets_to_json(self._presets) if self._presets else "")
 
     def save(self, name: str) -> UserPreset:
         """Keep the window's style settings as the preset *name* (replacing one so called)."""

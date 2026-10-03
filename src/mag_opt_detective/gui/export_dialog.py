@@ -378,10 +378,9 @@ class ExportDialog(QDialog):
         self._wire()
         self.my_presets.load()
         self._apply_stored()
-        listeners = ((settings, self._apply_stored), (self.preset_store, self.my_presets.load))
-        for holder, listener in listeners:
-            holder.listeners.append(listener)
-        self.destroyed.connect(lambda: [_forget(*pair) for pair in listeners])
+        listener = self._apply_stored
+        settings.listeners.append(listener)
+        self.destroyed.connect(lambda: _forget(settings, listener))
 
     # ------------------------------------------------------------------ building
     def _build(self) -> None:

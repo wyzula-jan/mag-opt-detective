@@ -40,7 +40,13 @@ from mag_opt_detective.export import (
     robust_levels,
 )
 from mag_opt_detective.gui.controller import AppController
-from mag_opt_detective.gui.export_menu import DEFAULTS, ExportSettings, PresetStore
+from mag_opt_detective.gui.export_menu import (
+    DEFAULTS,
+    PRESETS_KEY,
+    ExportSettings,
+    PresetStore,
+    presets_text,
+)
 from mag_opt_detective.gui.export_render import draw, executor
 from mag_opt_detective.gui.export_state import (
     POINTS_CURRENT,
@@ -969,33 +975,70 @@ def test_user_presets_export_and_import(processed, qtbot, tmp_path, monkeypatch,
     assert [p.name for p in dialog.my_presets.presets()] == ["APS plain", "Inward"]  # unchanged
 
 
-def test_user_presets_are_remembered(qtbot, tmp_path, sweep, errors):
+def test_user_presets_are_kept_and_survive_a_reset(qtbot, tmp_path, sweep, errors):
     ini = str(tmp_path / "settings.ini")
+
+    def stored():
+        value = QSettings(ini, QSettings.Format.IniFormat).value(PRESETS_KEY)
+        return [p.name for p in presets_from_json(value)] if value else []
+
     w = make_window(qtbot, ini, sweep)
     dialog = open_export(w, qtbot)
     dialog.colorbar_position.set_value("top")
     dialog.my_presets.save("Top bar")
+    assert stored() == ["Top bar"]  # written at once, not when the window closes
     dialog.preset.set_value("custom")
     dialog.my_presets.save("Free")
+    assert stored() == ["Free", "Top bar"]
+    w.reset_settings()  # user data: kept
+    assert [p.name for p in dialog.my_presets.presets()] == ["Free", "Top bar"]
+    assert stored() == ["Free", "Top bar"]
+    assert QSettings(ini, QSettings.Format.IniFormat).value("v2/export/presets") is None
     w.close()
-    stored = QSettings(ini, QSettings.Format.IniFormat).value("v2/export/presets")
-    assert [p.name for p in presets_from_json(stored)] == ["Free", "Top bar"]
 
     w2 = make_window(qtbot, ini, sweep)
     dialog = open_export(w2, qtbot)  # a new window and export window
     assert [p.name for p in dialog.my_presets.presets()] == ["Free", "Top bar"]
-    assert dialog.my_presets.button.text() == "Free"  # the settings shown are that preset
+    assert dialog.preset.value() == "nature"  # the reset settings, not the last preset
     dialog.my_presets.apply("Top bar")
-    assert dialog.colorbar_position.value() == "top" and dialog.preset.value() == "nature"
-    w2.reset_settings()
-    assert dialog.my_presets.presets() == [] and dialog.my_presets.button.text() == "My presets"
+    assert dialog.colorbar_position.value() == "top"
+    assert dialog.my_presets.button.text() == "Top bar"
+    dialog.my_presets.delete("Free")
+    assert stored() == ["Top bar"]
     assert not errors
 
 
-def test_preset_store_checks_the_stored_text():
-    store = PresetStore()
-    assert store.set_settings_value('{"version": 1, "presets": []}')
-    assert not store.set_settings_value("not json")
-    assert not store.set_settings_value('{"presets": 3}')
-    assert not store.set_settings_value(5)
-    assert store.set_settings_value("") and store.text == ""
+@pytest.mark.parametrize(
+    "text",
+    [
+        "[" * 100_000,  # nested too deeply for the JSON reader
+        '{"version": 1, "presets": [{"name": "Huge", "journal": "aps", "dpi": 1'
+        + "0" * 400
+        + "}]}",
+        '{"version": 1, "presets": 3}',
+        "not json",
+    ],
+)
+def test_stored_presets_that_cannot_be_read_do_not_stop_the_window(qtbot, tmp_path, sweep, text):
+    ini = str(tmp_path / "settings.ini")
+    QSettings(ini, QSettings.Format.IniFormat).setValue(PRESETS_KEY, text)
+    w = make_window(qtbot, ini, sweep)
+    dialog = open_export(w, qtbot)
+    assert dialog.my_presets.presets() == []
+    dialog.my_presets.save("New")
+    assert [p.name for p in dialog.my_presets.presets()] == ["New"]
+
+
+def test_preset_store_reads_and_writes_its_key(tmp_path):
+    ini = str(tmp_path / "settings.ini")
+    settings = QSettings(ini, QSettings.Format.IniFormat)
+    assert presets_text('{"version": 1, "presets": []}') and presets_text("")
+    for bad in ("not json", '{"presets": 3}', "[" * 100_000, 5, None):
+        assert not presets_text(bad)
+    store = PresetStore(settings)
+    assert store.text == ""
+    store.set_text('{"version": 1, "presets": []}')
+    assert PresetStore(QSettings(ini, QSettings.Format.IniFormat)).text == store.text
+    store.set_text("")
+    assert QSettings(ini, QSettings.Format.IniFormat).value(PRESETS_KEY) is None
+    assert PresetStore().text == ""  # no settings: kept in memory only
