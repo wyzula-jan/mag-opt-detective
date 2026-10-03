@@ -50,7 +50,7 @@ from mag_opt_detective.gui.inspector.view import NumberSpin, load_json, to_pair,
 from mag_opt_detective.gui.kit import CollapsibleSection, SegmentedControl
 from mag_opt_detective.gui.kit._common import set_style_property
 from mag_opt_detective.gui.kit.range_control import ORDER_ERROR, decimals_for
-from mag_opt_detective.gui.plots.colorscale import fit_range, sample_values, tails, widened
+from mag_opt_detective.gui.plots.colorscale import TAILS, fit_range, sample_values, widened
 from mag_opt_detective.gui.theme import current_tokens
 
 Pair = tuple[float, float]
@@ -279,7 +279,7 @@ class LevelHistogram(QWidget):
         self._values = finite
         self._range = None
         if finite.size:
-            self._tails = tails(finite)
+            self._tails = tuple(float(v) for v in np.percentile(finite, TAILS))  # sampled
 
     def levels(self) -> Pair:
         return self._levels
