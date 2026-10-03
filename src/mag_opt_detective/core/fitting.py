@@ -15,6 +15,9 @@ from mag_opt_detective.core.units import Unit
 
 ParamKind = Literal["energy", "velocity", "dimensionless", "other"]
 
+# share of a parameter in a direction the data do not constrain above which its error is NaN
+NULL_SHARE = 1e-6
+
 
 @dataclass
 class Param:
@@ -103,8 +106,9 @@ def fit(
     """Least-squares fit of the free parameters of *model* to *observations*.
 
     Residuals are model minus observed energy. Standard errors come from the Jacobian,
-    ``cov = inv(J^T J) * chi2 / dof``, and are NaN for fixed parameters or when
-    ``dof <= 0``. The model itself is not changed; see :func:`apply`.
+    ``cov = inv(J^T J) * chi2 / dof``, and are NaN for fixed parameters, for parameters the
+    points do not constrain, or when ``dof <= 0``. The model itself is not changed; see
+    :func:`apply`.
     """
     assignment = Assignment(assignment)
     names = [p.name for p in model.params]
@@ -217,13 +221,27 @@ def _residuals(
 
 
 def _covariance(jac: np.ndarray, chi2: float, dof: int) -> np.ndarray:
-    """``inv(J^T J) * chi2 / dof``, with a pseudo-inverse for a singular J^T J."""
+    """``inv(J^T J) * chi2 / dof``, from the SVD of J with its columns scaled to unit length.
+
+    A parameter the data do not constrain (its column is zero, or it has a share in a
+    direction that does not change the model) gets NaN rows and columns: its error is not
+    known, rather than zero.
+    """
     n = jac.shape[1]
     if n == 0:
         return np.empty((0, 0))
-    if dof <= 0:
+    if dof <= 0 or not np.isfinite(jac).all():
         return np.full((n, n), math.nan)
-    jtj = jac.T @ jac
-    full_rank = np.linalg.matrix_rank(jac) == n
-    inverse = np.linalg.inv(jtj) if full_rank else np.linalg.pinv(jtj)
-    return inverse * (chi2 / dof)
+    norms = np.linalg.norm(jac, axis=0)
+    dead = norms == 0
+    scale = np.where(dead, 1.0, norms)
+    _, s, vt = np.linalg.svd(jac / scale, full_matrices=False)
+    tol = s.max(initial=0.0) * max(jac.shape) * np.finfo(float).eps
+    keep = s > tol
+    v = vt.T
+    inverse = (v[:, keep] / s[keep] ** 2) @ v[:, keep].T / np.outer(scale, scale)
+    loose = dead | (np.abs(v[:, ~keep]) > NULL_SHARE).any(axis=1)
+    covariance = inverse * (chi2 / dof)
+    covariance[loose, :] = math.nan
+    covariance[:, loose] = math.nan
+    return covariance

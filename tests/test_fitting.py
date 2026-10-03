@@ -145,3 +145,18 @@ def test_param_defaults():
     p = Param("x", 1.0)
     assert (p.lo, p.hi, p.fixed, p.kind) == (-math.inf, math.inf, False, "other")
     assert param_values([p], {"x": 2}) == {"x": 2.0}
+
+
+def test_a_parameter_the_points_do_not_constrain_has_no_error():
+    """A free parameter that does not change the model gets NaN, not 0, as its error."""
+    from mag_opt_detective.core.expressions import ExpressionModel
+
+    rng = np.random.default_rng(1)
+    field = np.linspace(0.5, 10.0, 20)
+    energy = 50.0 + 1.5 * field + rng.normal(0.0, 0.05, field.size)
+    result = fit(ExpressionModel("E0 + 0*x + a*B"), [Observation(field, energy, 0)])
+    assert math.isnan(result.stderr["x"])
+    assert 0 < result.stderr["E0"] < 0.1 and 0 < result.stderr["a"] < 0.01
+    assert within(result, "a", 1.5, sigmas=4)
+    np.testing.assert_array_equal(np.isnan(result.covariance[1]), True)  # x's row and column
+    assert np.isfinite(result.covariance[np.ix_([0, 2], [0, 2])]).all()
