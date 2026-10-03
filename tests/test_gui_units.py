@@ -30,8 +30,10 @@ def view_page(window):
     return window.inspector["view"].body_layout().itemAt(0).widget()
 
 
-def models_page(window):
-    return window.inspector["overlays"].body_layout().itemAt(0).widget()
+def dirac_card(window):
+    """The card of the massive Dirac model (the first in the Models section)."""
+    models = window.inspector["models"].body_layout().itemAt(0).widget().models
+    return models.cards[models.entries[0]]
 
 
 def test_live_unit_switch(window, sweep, errors):
@@ -46,10 +48,10 @@ def test_live_unit_switch(window, sweep, errors):
     assert c.view.energy_range == (200.0, 800.0)
     window.tools.set_active("pick")
     click_map(window, 1.0, 300.0)
-    models = models_page(window)
-    models.n_lines.setValue(2)
-    models.delta.setValue(10.0)
-    models.show_dirac.setChecked(True)
+    card = dirac_card(window)
+    card.editor.n_lines.field.edit.setText("2")
+    card.editor.delta.field.edit.setText(f"{10.0 * MEV}")  # 10 meV, typed in cm-1
+    card.visible_switch.setChecked(True)
     select(window, kind=PlotKind.DATA, order=1, per_unit=True)
     window.plots.map.hist.region.setRegion((-0.002, 0.003))  # fixed levels per cm-1
     assert c.view.levels["Data_der1_E_unit"] == pytest.approx((-0.002, 0.003))
@@ -144,7 +146,7 @@ def test_figure_state(window, sweep):
     c = window.controller
     window.tools.set_active("pick")
     click_map(window, 1.0, 300.0)
-    models_page(window).show_dirac.setChecked(True)
+    dirac_card(window).visible_switch.setChecked(True)
     set_unit(window, "meV")
     state = c.figure_state()
     assert state.description == "R(B)/R(0)"

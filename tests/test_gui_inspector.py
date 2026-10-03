@@ -320,7 +320,7 @@ def test_stacked_intensity_fits_again_for_another_kind_of_map(processed):
 def test_sections_follow_the_plot_on_screen(window):
     page = view_page(window)
     visible = {
-        "map": ["view", "colour", "overlays"],
+        "map": ["view", "colour", "models"],
         "stacked": ["view", "traces"],
         "reference": ["view", "colour"],
     }

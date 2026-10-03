@@ -42,7 +42,7 @@ from mag_opt_detective.core.processing import Axis
 from mag_opt_detective.core.units import Unit
 from mag_opt_detective.gui import console, icons, plot_panel
 from mag_opt_detective.gui.controller import AppController
-from mag_opt_detective.gui.inspector import colour, overlays, traces, view
+from mag_opt_detective.gui.inspector import colour, models, traces, view
 from mag_opt_detective.gui.kit import CollapsibleSection, InfoBar, SegmentedControl, SlidePanel
 from mag_opt_detective.gui.panels import PanelPage, library, points, processing, reference, sample
 from mag_opt_detective.gui.settings import Persistence
@@ -337,7 +337,7 @@ class MainWindow(QMainWindow):
         console.install(self)
         for module in (sample, reference, processing, library, points):
             module.install(self)
-        for module in (view, colour, traces, overlays):
+        for module in (view, colour, traces, models):
             module.install(self)
         autopick.install(self)
         self._wire_frame()

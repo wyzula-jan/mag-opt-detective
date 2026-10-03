@@ -65,7 +65,7 @@ def test_settings_round_trip(qtbot, ini):
     w.side_panel.set_open(False, animate=False)
     w.log_panel.set_open(True, animate=False)
     w.plot_area.map_scale.set_open(False, animate=False)
-    w.inspector["overlays"].set_expanded(False, animate=False)
+    w.inspector["models"].set_expanded(False, animate=False)
     w.commands["export_suffix"].setChecked(False)
     w.close()
 
@@ -89,7 +89,7 @@ def test_settings_round_trip(qtbot, ini):
     assert c.selection.order == 2
     assert isinstance(w2.plots.reference.scale, BarScale)
     assert not w2.commands["export_suffix"].isChecked()
-    assert not w2.inspector["overlays"].is_expanded()
+    assert not w2.inspector["models"].is_expanded()
     assert w2.current_panel() == "library"
     assert w2.geometry_restored
     qtbot.waitUntil(lambda: not w2.side_panel.is_open())  # splitter layouts

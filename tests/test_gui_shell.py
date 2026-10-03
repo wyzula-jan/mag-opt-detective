@@ -33,7 +33,7 @@ def shown(window, qtbot):
 
 def test_window_exposes_its_areas(window):
     assert list(window.panels) == ["sample", "reference", "processing", "library", "points"]
-    assert list(window.inspector) == ["view", "colour", "traces", "overlays"]
+    assert list(window.inspector) == ["view", "colour", "traces", "models"]
     assert [name for name, _plot in window.plots.items()] == ["map", "stacked", "reference"]
     assert window.plots["map"] is window.plots.map
     for panel in (window.side_panel, window.inspector_panel, window.log_panel):
