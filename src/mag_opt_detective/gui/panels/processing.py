@@ -47,6 +47,7 @@ from mag_opt_detective.gui.widgets import EnergyEdit
 logger = logging.getLogger("mag_opt_detective")
 
 APPLIED = "Applied the next time you process."
+LIVE_APPLIED = "The baseline applies at once (Live); the energy window the next time you process."
 CHANGED = "Changed since the last run. Process again to apply."
 GUIDES = "guides"
 VIEW_ENERGY_LINK = "view-energy"
@@ -89,6 +90,7 @@ class ProcessingPanel(QWidget):
         self.baseline_live.setAccessibleName("Live baseline")
         self.baseline_live.setToolTip(LIVE_TIP)
         self.edit_on_plot = Switch("Edit on plot")
+        self.edit_on_plot.setAccessibleName("Edit baseline on plot")
         self.edit_on_plot.setToolTip(EDIT_TIP)
         self.fields = {edit: UnitField(edit) for edit in self.edits()}
         for edit in (self.cut_lo, self.baseline_lo):
@@ -108,7 +110,7 @@ class ProcessingPanel(QWidget):
         )
         self.cut_note = Note()
         self.baseline_note = Note()
-        self.live_note = Note()  # why Live cannot apply the region (set when installed)
+        self.live_note = Note()  # why the region is not applied (set when installed)
         self.live_note.hide()
         self.guides: MapGuides | None = None  # set when installed in a window
         self.regions: dict[str, BaselineRegion] = {}  # the region on "map" and "stacked"
@@ -420,6 +422,11 @@ def show_view_energy(window) -> None:
         scroll.ensureWidgetVisible(target if isinstance(target, QWidget) else section)
 
 
+def readable(text: str) -> str:
+    """A controller message with the energy unit written as in the window (cm⁻¹)."""
+    return text.replace(str(Unit.CM1), unit_text(Unit.CM1))
+
+
 def stacked_style(window):
     """The region's style over the stacked spectra in the window's theme."""
     colors = PlotColors.from_mapping(window.theme.plot_colors())
@@ -433,7 +440,7 @@ def apply_live(window, show_problem: Callable[[str], None]) -> bool:
     try:
         changed = window.controller.apply_baseline()
     except ValueError as exc:
-        text = str(exc)
+        text = readable(str(exc))
         show_problem(f"Live: {text[:1].upper()}{text[1:]}.")
         return False
     show_problem("")
@@ -497,10 +504,17 @@ def install(window) -> None:
     c.unitChanged.connect(lambda _old, new: panel.set_unit(new))
     c.restored.connect(lambda: panel.set_unit(c.unit))
 
-    def on_changed(changed: bool) -> None:
-        page.set_subtitle(CHANGED if changed else APPLIED)
+    def show_subtitle(*_args) -> None:
+        if c.changed_since_process():
+            page.set_subtitle(CHANGED)
+        elif panel.baseline_live.isChecked() and c.can_apply_baseline():
+            page.set_subtitle(LIVE_APPLIED)
+        else:
+            page.set_subtitle(APPLIED)
 
-    c.changedSinceProcess.connect(on_changed)
+    c.changedSinceProcess.connect(show_subtitle)
+    c.resultChanged.connect(show_subtitle)
+    panel.baseline_live.toggled.connect(show_subtitle)
     push()
     c.processingChanged.connect(pull)
     panel.view_energy_link.linkActivated.connect(lambda _link: show_view_energy(window))

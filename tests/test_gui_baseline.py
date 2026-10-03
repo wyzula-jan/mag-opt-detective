@@ -21,7 +21,10 @@ from mag_opt_detective.gui.controller import AppController, SweepFiles
 from mag_opt_detective.gui.main_window import MainWindow
 from mag_opt_detective.gui.panels import library
 from mag_opt_detective.gui.panels.processing import (
+    APPLIED,
+    CHANGED,
     LIBRARY_NOTE,
+    LIVE_APPLIED,
     LOG_DELAY,
     LiveApply,
     default_region,
@@ -480,7 +483,7 @@ def test_live_explains_a_region_without_data(processed):
     panel.live.flush()
     assert c.result.baseline_region == (450, 550)  # kept
     assert not panel.live_note.isHidden()
-    assert "1300 – 1400 cm-1 contains no data" in panel.live_note.text()
+    assert "1300 – 1400 cm⁻¹ contains no data" in panel.live_note.text()
     assert c.changed_since_process()  # not applied, so it waits for Process
     assert not any(r.isVisible() for r in panel.regions.values())
     panel.baseline_lo.setText("1000")
@@ -676,6 +679,27 @@ def test_the_stacked_fill_lies_below_the_traces(processed, qtbot):
     assert not region.label.isVisibleTo(region)
     drag_like(region, 500, 900)
     assert region.label.isVisibleTo(region)
+
+
+def test_the_subtitle_says_when_the_baseline_applies(processed):
+    w, c = processed, processed.controller
+    panel = w.panels["processing"]
+    subtitle = w.panel_pages["processing"].subtitle
+    assert subtitle.text() == APPLIED
+    panel.baseline_live.setChecked(True)
+    assert subtitle.text() == LIVE_APPLIED
+    panel.cut_on.setChecked(True)
+    panel.cut_lo.setText("450")
+    assert subtitle.text() == CHANGED
+    panel.cut_on.setChecked(False)
+    assert subtitle.text() == LIVE_APPLIED
+    library.save_current(w)
+    library.plot_entry(w, c.library[0].key)  # Live waits for a processed map
+    assert subtitle.text() == APPLIED
+    process(w)
+    assert subtitle.text() == LIVE_APPLIED
+    panel.baseline_live.setChecked(False)
+    assert subtitle.text() == APPLIED
 
 
 def test_a_library_save_or_plot_applies_a_waiting_region(processed, qtbot, errors):
