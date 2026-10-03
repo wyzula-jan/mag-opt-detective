@@ -1191,6 +1191,23 @@ def test_signed_parameters_cross_zero_and_others_stop_at_zero(window, sweep, qtb
     assert not errors
 
 
+def test_g_range_narrows_again_after_a_far_value(window, sweep, qtbot, errors):
+    shown_window(window, qtbot)
+    load_sweep(window, sweep)
+    process(window)
+    models = models_of(window)
+    zeeman = add(window, "zeeman")
+    models.slider_mode.set("range", 10.0)
+    g = card_of(window, zeeman).editor.rows[0].g
+    assert g.slider.range() == (-10.0, 10.0)
+    g.field.edit.setText("-48")  # e.g. InSb
+    lo, hi = g.slider.range()
+    assert lo <= -48 and hi == -lo
+    g.field.edit.setText("2")
+    assert g.slider.range() == (-10.0, 10.0)  # back to a pixel of about 0.3, not 1.7
+    assert not errors
+
+
 def test_a_key_press_commits_the_value_once(window, sweep, qtbot, monkeypatch, errors):
     shown_window(window, qtbot)
     load_sweep(window, sweep)

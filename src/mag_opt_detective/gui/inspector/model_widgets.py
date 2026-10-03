@@ -477,9 +477,13 @@ class ParamRow(QWidget):
         self._range_stale = True
 
     def _fit_range(self, value: float) -> None:
+        """The range-mode span for *value*: new when the value left it or the unit changed,
+        and narrower again when the value is back inside a smaller span (after a far one)."""
         lo, hi = self.slider.range()
-        if self._range_stale or not lo <= value <= hi:
-            self.slider.set_range(*self._range_for(value))
+        new = self._range_for(value)
+        inside = new[0] >= lo and new[1] <= hi
+        if self._range_stale or not lo <= value <= hi or (inside and new != (lo, hi)):
+            self.slider.set_range(*new)
             self._range_stale = False
 
     def _share_floor(self, value: float) -> None:
