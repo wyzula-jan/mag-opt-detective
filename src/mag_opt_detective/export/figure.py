@@ -26,6 +26,7 @@ from matplotlib.backends.backend_svg import FigureCanvasSVG
 from matplotlib.cm import ScalarMappable
 from matplotlib.colors import Colormap, LinearSegmentedColormap, ListedColormap, Normalize
 from matplotlib.figure import Figure
+from matplotlib.ticker import AutoMinorLocator
 from PIL import Image
 from PIL.PngImagePlugin import PngInfo
 
@@ -34,6 +35,7 @@ from mag_opt_detective.core import colormaps
 from mag_opt_detective.core.units import Unit
 from mag_opt_detective.export.presets import JournalPreset, get_preset
 from mag_opt_detective.export.state import FigureState, Range
+from mag_opt_detective.export.style import MINOR_WIDTH, FigureStyle, TickStyle
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +70,8 @@ _MARKERS = ("o", "s", "^", "D", "v", "p")
 _OUTLINE = "#1a1a1a"  # dark edge around light overlays on a map
 _DASHES = (0, (3.0, 2.0))  # in pt, not scaled with the line width
 _PAD_IN = 1.0 / 72.0  # constrained-layout padding around the axes and labels
+_COLORBAR_PAD = 0.02  # gap between the axes and the colour bar (share of the axes)
+_COLORBAR_ASPECT = 25  # length / thickness of a colour bar beside the axes
 
 _EDITABLE_TEXT = {"pdf.fonttype": 42, "ps.fonttype": 42, "svg.fonttype": "none"}
 # rcParams each figure was made with; save and rasterize draw with the same ones
@@ -100,8 +104,14 @@ def resolve_font(families: tuple[str, ...]) -> str:
     return FALLBACK_FONT
 
 
-def figure_rc(preset: JournalPreset, font_size_pt: float, line_width_pt: float) -> dict:
-    """rcParams of a figure: fonts, sizes, line widths and editable text in every format."""
+def figure_rc(
+    preset: JournalPreset,
+    font_size_pt: float,
+    line_width_pt: float,
+    ticks: TickStyle | None = None,
+) -> dict:
+    """rcParams of a figure: fonts, sizes, line widths, tick direction and sizes (*ticks*,
+    by default outward and sized from the text and lines) and editable text in every format."""
     font = resolve_font(tuple(preset.font_family))
     family = [font] if font == FALLBACK_FONT else [font, FALLBACK_FONT]  # glyph fallback
     fs, lw = float(font_size_pt), float(line_width_pt)
@@ -153,13 +163,15 @@ def figure_rc(preset: JournalPreset, font_size_pt: float, line_width_pt: float) 
         "ps.papersize": "figure",
         "svg.hashsalt": "mag-opt-detective",  # reproducible ids
     }
+    ticks = TickStyle() if ticks is None else ticks
+    width = ticks.major_width(lw)
     for axis in ("xtick", "ytick"):
         rc |= {
-            f"{axis}.direction": "out",
-            f"{axis}.major.width": lw,
-            f"{axis}.minor.width": 0.75 * lw,
-            f"{axis}.major.size": 0.45 * fs,
-            f"{axis}.minor.size": 0.25 * fs,
+            f"{axis}.direction": ticks.direction,
+            f"{axis}.major.width": width,
+            f"{axis}.minor.width": MINOR_WIDTH * width,
+            f"{axis}.major.size": ticks.major_length(fs),
+            f"{axis}.minor.size": ticks.minor_length(fs),
             f"{axis}.major.pad": 0.3 * fs,
         }
     return rc
@@ -176,11 +188,13 @@ def render(
     line_width_pt: float | None = None,
     panel_label: str | None = None,
     dpi: float | None = None,
+    style: FigureStyle | None = None,
 ) -> Figure:
     """Figure of exactly *width_mm* × *height_mm* showing *state* in the *preset* style.
 
     Font size, line width and dpi default to the preset's. *panel_label* (e.g. ``"a"``)
-    is drawn bold in the top-left corner in the preset's style; None leaves it out.
+    is drawn bold in the top-left corner in the preset's style; None leaves it out. *style*
+    places the colour bar and sets the ticks (None: the default :class:`FigureStyle`).
     """
     preset = get_preset(preset)
     if not (width_mm > 0 and height_mm > 0):
@@ -191,7 +205,8 @@ def render(
     lw = preset.line_width_pt if line_width_pt is None else float(line_width_pt)
     if fs <= 0 or lw <= 0:
         raise ValueError("font size and line width must be positive")
-    rc = figure_rc(preset, fs, lw)
+    style = FigureStyle() if style is None else style
+    rc = figure_rc(preset, fs, lw, style.ticks)
     with mpl.rc_context(rc):
         fig = Figure(
             figsize=(width_mm / MM_PER_INCH, height_mm / MM_PER_INCH),
@@ -201,9 +216,10 @@ def render(
         FigureCanvasAgg(fig)
         ax = fig.add_subplot()
         if state.kind == "map":
-            _draw_map(fig, ax, state, fs, lw)
+            _draw_map(fig, ax, state, fs, lw, style)
         else:
-            _draw_stacked(fig, ax, state, fs, lw)
+            _draw_stacked(fig, ax, state, fs, lw, style)
+        _style_ticks(ax, style.ticks)
         if state.title:
             ax.set_title(state.title)
         label = preset.panel_label(panel_label) if panel_label else ""
@@ -272,15 +288,39 @@ def _levels(state: FigureState, values: np.ndarray) -> tuple[float, float]:
     return lo, hi
 
 
-def _style_colorbar(cbar, label: str, lw: float) -> None:
+def _colorbar(fig: Figure, ax: Axes, mappable, label: str, lw: float, style: FigureStyle):
+    """A colour bar right of *ax* or above it (ticks and label on top), as thick in both
+    places; its ticks point as the axes' ticks, without minor ticks."""
+    if style.colorbar_location == "top":
+        width, height = fig.get_size_inches()
+        aspect = _COLORBAR_ASPECT * width / height  # the thickness of a bar on the right
+        cbar = fig.colorbar(mappable, ax=ax, location="top", pad=_COLORBAR_PAD, aspect=aspect)
+    else:
+        cbar = fig.colorbar(mappable, ax=ax, pad=_COLORBAR_PAD, aspect=_COLORBAR_ASPECT)
     cbar.outline.set_linewidth(lw)
     cbar.solids.set_rasterized(True)  # no seams between the colour patches in PDF viewers
-    cbar.ax.tick_params(which="both", width=lw)
+    cbar.minorticks_off()
+    ticks = style.ticks
+    cbar.ax.tick_params(which="both", direction=ticks.direction, width=ticks.major_width(lw))
     if label:
         cbar.set_label(label)
+    return cbar
 
 
-def _draw_map(fig: Figure, ax: Axes, state: FigureState, fs: float, lw: float) -> None:
+def _style_ticks(ax: Axes, ticks: TickStyle) -> None:
+    """The ticks' direction, on all four sides if asked (labels only bottom and left), and the
+    minor ticks."""
+    ax.tick_params(which="both", direction=ticks.direction)
+    if ticks.mirror:
+        ax.tick_params(which="both", top=True, right=True)
+    if ticks.minor:
+        ax.xaxis.set_minor_locator(AutoMinorLocator(ticks.minor_intervals))
+        ax.yaxis.set_minor_locator(AutoMinorLocator(ticks.minor_intervals))
+
+
+def _draw_map(
+    fig: Figure, ax: Axes, state: FigureState, fs: float, lw: float, style: FigureStyle
+) -> None:
     field, energy, values = _sorted_map(state)
     cmap = colormap(state.cmap)
     norm = Normalize(*_levels(state, values))
@@ -335,7 +375,7 @@ def _draw_map(fig: Figure, ax: Axes, state: FigureState, fs: float, lw: float) -
             scaley=False,
         )
     if state.colorbar:
-        _style_colorbar(fig.colorbar(image, ax=ax, pad=0.02, aspect=25), state.colorbar_label, lw)
+        _colorbar(fig, ax, image, state.colorbar_label, lw, style)
 
 
 def _field_norm(field: np.ndarray) -> Normalize:
@@ -363,7 +403,9 @@ def _field_tolerance(field: np.ndarray) -> float:
     return 0.5 if steps.size == 0 else 0.5 * float(steps.min())
 
 
-def _draw_stacked(fig: Figure, ax: Axes, state: FigureState, fs: float, lw: float) -> None:
+def _draw_stacked(
+    fig: Figure, ax: Axes, state: FigureState, fs: float, lw: float, style: FigureStyle
+) -> None:
     fmap, options = state.fmap, state.stacked
     order = np.argsort(fmap.energy, kind="stable")
     energy, values = fmap.energy[order], fmap.values[order]
@@ -408,8 +450,7 @@ def _draw_stacked(fig: Figure, ax: Axes, state: FigureState, fs: float, lw: floa
         _apply_range(ax, "y", state.y_range, ax.get_ylim())
     if state.colorbar and options.color_by_field:
         mappable = ScalarMappable(_field_norm(fmap.field), _field_cmap(state.cmap))
-        cbar = fig.colorbar(mappable, ax=ax, pad=0.02, aspect=25)
-        _style_colorbar(cbar, state.colorbar_label or FIELD_LABEL, lw)
+        _colorbar(fig, ax, mappable, state.colorbar_label or FIELD_LABEL, lw, style)
 
 
 # ---------------------------------------------------------------------- output

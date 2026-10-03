@@ -14,6 +14,7 @@ from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.collections import QuadMesh
 from matplotlib.image import AxesImage
 from matplotlib.text import Text
+from matplotlib.ticker import AutoMinorLocator, NullLocator
 from PIL import Image
 
 from mag_opt_detective.core import colormaps
@@ -26,8 +27,10 @@ from mag_opt_detective.export import (
     PRESETS,
     Curve,
     FigureState,
+    FigureStyle,
     PointSet,
     StackedOptions,
+    TickStyle,
     colormap,
     energy_label,
     get_preset,
@@ -620,3 +623,128 @@ def test_export_imports_its_vector_canvases():
         [sys.executable, "-c", code], capture_output=True, text=True, check=True
     ).stdout
     assert out.strip() == ""
+
+
+# ---------------------------------------------------------------------- colour range and style
+def _drawn(fig):
+    """*fig* drawn with its own rcParams (positions and ticks are final)."""
+    rasterize(fig, 100)
+    return fig
+
+
+def test_levels_set_the_map_and_its_colour_bar(fmap):
+    flat = fmap.with_values(np.ones_like(fmap.values))  # every pixel in the middle of 0.5..1.5
+    for location in ("right", "top"):
+        state = FigureState("map", flat, levels=(0.5, 1.5))
+        fig = _drawn(nature_single(state, dpi=100, style=FigureStyle(location)))
+        ax, cax = fig.axes
+        limits = cax.get_ylim() if location == "right" else cax.get_xlim()
+        np.testing.assert_allclose(limits, (0.5, 1.5))
+        rgba = rasterize(fig, 100)
+        x, y = ax.transAxes.transform((0.5, 0.5)) * 100 / fig.dpi
+        pixel = rgba[rgba.shape[0] - int(y), int(x), :3] / 255
+        np.testing.assert_allclose(pixel, colormap("magma")(0.5)[:3], atol=0.01)
+
+
+def test_top_colour_bar_sits_above_the_axes(map_state):
+    right = _drawn(nature_single(map_state, panel_label="a"))
+    fig = _drawn(nature_single(map_state, panel_label="a", style=FigureStyle("top")))
+    np.testing.assert_allclose(fig.get_size_inches() * MM, [89.0, 70.0])  # the size stays
+    ax, cax = fig.axes
+    box, bar = ax.get_position(), cax.get_position()
+    assert bar.y0 > box.y1  # above the plot ...
+    assert bar.x0 == pytest.approx(box.x0) and bar.x1 == pytest.approx(box.x1)  # ... as wide
+    assert box.height < right.axes[0].get_position().height  # the axes made room
+    assert bar.width / bar.height > 10  # horizontal and thin
+    assert cax.xaxis.get_label_position() == "top" and cax.xaxis.get_ticks_position() == "top"
+    assert cax.get_xlabel() == "Relative transmission"
+    renderer = fig.canvas.get_renderer()
+    bbox = fig.get_tightbbox(renderer)
+    w, h = fig.get_size_inches()
+    assert bbox.x0 >= 0 and bbox.y0 >= 0 and bbox.x1 <= w + 1e-9 and bbox.y1 <= h + 1e-9
+    # the panel label keeps its place, above the colour bar and its label
+    (label,) = [t for t in fig.findobj(Text) if t.get_text() == "a"]
+    (before,) = [t for t in right.findobj(Text) if t.get_text() == "a"]
+    assert label.get_position() == before.get_position()
+    assert label.get_window_extent(renderer).y0 >= cax.get_tightbbox(renderer).y1 - 1e-6
+
+
+def test_top_colour_bar_of_a_stacked_figure(fmap):
+    state = FigureState("stacked", fmap, stacked=StackedOptions(0.1, every=4))
+    fig = _drawn(nature_single(state, style=FigureStyle("top")))
+    ax, cax = fig.axes
+    assert cax.get_position().y0 > ax.get_position().y1
+    assert cax.get_xlabel() == FIELD_LABEL
+    np.testing.assert_allclose(cax.get_xlim(), (0.0, 16.0))
+
+
+def test_ticks_direction_mirror_and_minor_ticks(map_state):
+    ticks = TickStyle(
+        "in",
+        mirror=True,
+        length_pt=5.0,
+        width_pt=0.8,
+        minor=True,
+        minor_intervals=4,
+        minor_length_pt=2.0,
+    )
+    fig = _drawn(nature_single(map_state, style=FigureStyle(ticks=ticks)))
+    ax, cax = fig.axes
+    for axis, mirror in ((ax.xaxis, "top"), (ax.yaxis, "right")):
+        for which in ("major", "minor"):
+            params = axis.get_tick_params(which=which)
+            assert params["direction"] == "in" and params[mirror]
+            assert not params.get(f"label{mirror}", False)  # ticks only, no labels
+        assert isinstance(axis.get_minor_locator(), AutoMinorLocator)
+        major = axis.get_major_ticks()[0]
+        assert major.tick1line.get_markersize() == 5.0
+        assert major.tick1line.get_markeredgewidth() == 0.8
+        assert major.tick2line.get_visible()  # mirrored
+        minor = axis.get_minor_ticks()[0]
+        assert minor.tick1line.get_markersize() == 2.0
+        assert minor.tick1line.get_markeredgewidth() == pytest.approx(0.6)
+        majors, minors = axis.get_majorticklocs(), axis.get_minorticklocs()
+        lo, hi = majors[1], majors[2]
+        assert np.sum((minors > lo) & (minors < hi)) == 3  # four intervals
+    # the colour bar follows the direction and size, without minor or mirrored ticks
+    bar = cax.yaxis.get_tick_params(which="major")
+    assert bar["direction"] == "in"
+    assert cax.yaxis.get_major_ticks()[0].tick2line.get_markersize() == 5.0
+    assert cax.yaxis.get_minorticklocs().size == 0
+
+
+def test_the_default_style_keeps_the_presets_look(map_state):
+    fig = _drawn(nature_single(map_state))
+    ax = fig.axes[0]
+    for axis in (ax.xaxis, ax.yaxis):
+        tick = axis.get_major_ticks()[0]
+        assert tick.tick1line.get_markersize() == pytest.approx(0.45 * 7)
+        assert tick.tick1line.get_markeredgewidth() == 0.5
+        assert not tick.tick2line.get_visible()  # bottom and left only
+        assert isinstance(axis.get_minor_locator(), NullLocator)
+    assert ax.xaxis.get_tick_params(which="major")["direction"] == "out"
+    same = nature_single(map_state, style=FigureStyle(), dpi=100)
+    np.testing.assert_array_equal(rasterize(same, 100), rasterize(nature_single(map_state), 100))
+    assert figure_rc(NATURE, 7, 0.5) == figure_rc(NATURE, 7, 0.5, TickStyle())
+
+
+def test_style_checks_and_round_trip():
+    for bad in (
+        dict(direction="sideways"),
+        dict(minor_intervals=1),
+        dict(minor_intervals=11),
+        dict(minor_intervals=2.5),
+        dict(length_pt=-1.0),
+        dict(width_pt=0.0),
+        dict(minor_length_pt=float("nan")),
+        dict(mirror="yes"),
+    ):
+        with pytest.raises(ValueError):
+            TickStyle(**bad)
+    with pytest.raises(ValueError, match="colour bar"):
+        FigureStyle("left")
+    style = FigureStyle("top", TickStyle("in", True, 4.0, None, True, 5, 1.5))
+    assert FigureStyle.from_dict(style.to_dict()) == style
+    assert FigureStyle.from_dict({}) == FigureStyle()  # missing keys: the defaults
+    with pytest.raises(ValueError):
+        FigureStyle.from_dict({"ticks": {"direction": 3}})

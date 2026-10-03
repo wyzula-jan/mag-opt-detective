@@ -7,6 +7,7 @@ from mag_opt_detective.export.figure import (
     rasterize,
     render,
     resolve_font,
+    robust_levels,
     save,
 )
 from mag_opt_detective.export.presets import (
@@ -18,6 +19,7 @@ from mag_opt_detective.export.presets import (
     get_preset,
 )
 from mag_opt_detective.export.state import Curve, FigureState, PointSet, StackedOptions
+from mag_opt_detective.export.style import FigureStyle, TickStyle
 
 __all__ = [
     "APS",
@@ -27,14 +29,17 @@ __all__ = [
     "PRESETS",
     "Curve",
     "FigureState",
+    "FigureStyle",
     "JournalPreset",
     "PointSet",
     "StackedOptions",
+    "TickStyle",
     "colormap",
     "energy_label",
     "get_preset",
     "rasterize",
     "render",
     "resolve_font",
+    "robust_levels",
     "save",
 ]
