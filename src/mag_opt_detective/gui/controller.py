@@ -919,11 +919,13 @@ class AppController(QObject):
             return False
         return region is None or bool(energy_mask(self.result.ratio.energy, *region).any())
 
-    def settle_baseline(self) -> None:
+    def settle_baseline(self) -> bool:
         """Apply a live region that counts as applied but is still waiting (the panel applies
-        changes at most about ten times a second), before the map shown is kept or replaced."""
+        changes at most about ten times a second), before the map shown is kept or replaced or
+        Live is turned off. Returns whether the map changed."""
         if self._baseline_is_live() and self._baseline() != self.result.baseline_region:
-            self.apply_baseline()
+            return self.apply_baseline()
+        return False
 
     def apply_baseline(self) -> bool:
         """Apply the baseline region of the processing options (none when it is off) to the

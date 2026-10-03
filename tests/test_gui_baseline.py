@@ -885,3 +885,22 @@ def test_a_tool_switch_during_a_drag_ends_it(processed, qtbot, grip):
     panel.baseline_hi.setText("1000")  # typed changes apply as usual (once typing pauses)
     qtbot.waitUntil(lambda: c.result.baseline_region == c.processing.baseline, timeout=3000)
     assert c.processing.baseline[1] == 1000 and not c.changed_since_process()
+
+
+def test_turning_live_off_applies_a_waiting_change(processed, qtbot, caplog):
+    w, c = processed, processed.controller
+    panel = w.panels["processing"]
+    panel.baseline_live.setChecked(True)
+    caplog.set_level(logging.INFO, logger="mag_opt_detective")
+    panel.live.slow = True  # typed changes wait until the typing pauses
+    panel.baseline_hi.setText("1100")
+    panel.baseline_lo.setText("900")
+    assert panel.live.is_pending() and c.result.baseline_region == (450, 550)
+    panel.baseline_live.setChecked(False)
+    assert not panel.live.is_pending()
+    assert c.result.baseline_region == (900, 1100) and not c.changed_since_process()
+    np.testing.assert_allclose(shown_image(w), fresh_result(w).ratio.values)
+    qtbot.waitUntil(
+        lambda: any("900 – 1100 cm-1 (Live)" in r.getMessage() for r in caplog.records),
+        timeout=3000,
+    )

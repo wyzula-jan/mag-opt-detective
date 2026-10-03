@@ -633,11 +633,19 @@ def install(window) -> None:
         live.flush()
 
     def on_live(on: bool) -> None:
+        nonlocal applying
         if on:
             c.set_live_baseline(True)
             apply_now()
-        else:
-            live.flush()  # what was changed with Live on is applied
+        else:  # what was changed with Live on is applied (Live is still on in the controller)
+            applying = True
+            try:
+                changed = c.settle_baseline()
+            finally:
+                applying = False
+            live.cancel()
+            if changed:
+                log_timer.start()
             c.set_live_baseline(False)
         show_live_note()
 
