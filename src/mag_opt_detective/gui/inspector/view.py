@@ -347,6 +347,16 @@ class ViewRanges(QObject):
         self.apply()
         self.sync_controls()
 
+    def on_unit(self, old: Unit, new: Unit) -> None:
+        """Another energy unit: a pan or zoom in progress (in the old unit) goes into the view
+        state converted, as the state's ranges were."""
+        pending = self._pending
+        self.discard()
+        if pending:
+            moved = ViewState(**pending).converted(old, new, self.c.selection)
+            self.c.set_ranges(**{name: getattr(moved, name) for name in pending})
+        self.refresh()
+
     def on_ranges(self) -> None:
         """The ranges were set (controls, Fit, Auto, a pan or zoom put into the state): a pan
         or zoom still in progress gives way to them."""
@@ -603,11 +613,7 @@ def install(window) -> None:
         signal.connect(ranges.refresh)
     c.rangesChanged.connect(ranges.on_ranges)
 
-    def on_unit(_old, _new) -> None:
-        ranges.discard()  # a pan or zoom in the old unit
-        ranges.refresh()
-
-    c.unitChanged.connect(on_unit)
+    c.unitChanged.connect(ranges.on_unit)
 
     def on_tab(_index: int) -> None:
         view = window.plot_area.current_view()

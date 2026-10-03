@@ -209,16 +209,41 @@ def test_changes_during_a_gesture(shown, qtbot):
     assert plot_range(w)[1] == pytest.approx((150.0, 1050.0))
 
     step(w, "map", dy=50.0)
-    set_unit(w, "meV")  # a step in the old unit is dropped
+    set_unit(w, "meV")  # the drag goes in converted, as the state's ranges are
     assert not w.view_ranges.in_gesture()
-    assert c.view.energy_range == pytest.approx((150.0 / MEV, 1050.0 / MEV))
-    assert plot_range(w)[1] == pytest.approx((150.0 / MEV, 1050.0 / MEV))
+    assert c.view.energy_range == pytest.approx((200.0 / MEV, 1100.0 / MEV))
+    assert plot_range(w)[1] == pytest.approx((200.0 / MEV, 1100.0 / MEV))
+    assert inspector_page(w, "view").energy.range() == pytest.approx((200.0 / MEV, 1100.0 / MEV))
 
     step(w, "stacked", dy=0.5)  # the stacked intensity, also with the other tab on screen
     lo, hi = plot_range(w, "stacked")[1]
     inspector_page(w, "view").field.lo_spin.setValue(1.0)  # an edit goes after the drag
     assert c.view.stacked_range == pytest.approx((lo, hi))
     assert c.view.field_range == (1.0, 2.0)
+
+
+def test_a_unit_switch_converts_a_zoom_in_progress(shown):
+    w, c = shown, shown.controller
+    page = inspector_page(w, "view")
+    for _ in range(2):  # wheel steps, then the unit within GESTURE_MS
+        wheel(w, "map")
+    field, energy = plot_range(w)
+    set_unit(w, "meV")
+    assert not w.view_ranges.in_gesture()
+    assert c.view.field_range == pytest.approx(field)
+    assert c.view.energy_range == pytest.approx((energy[0] / MEV, energy[1] / MEV))
+    assert plot_range(w) == [pytest.approx(field), pytest.approx(c.view.energy_range)]
+    assert not page.field.is_auto() and not page.energy.is_auto()
+    assert page.energy.range() == pytest.approx(c.view.energy_range)
+    set_unit(w, "cm-1")
+    assert c.view.energy_range == pytest.approx(energy)
+
+    gui_helpers.select(w, order=1, per_unit=True)  # intensities per cm-1 scale with the unit
+    step(w, "stacked", dy=0.002)
+    lo, hi = plot_range(w, "stacked")[1]
+    set_unit(w, "meV")
+    assert c.view.stacked_range == pytest.approx((lo * MEV, hi * MEV))
+    assert plot_range(w, "stacked")[1] == pytest.approx((lo * MEV, hi * MEV))
 
 
 def test_a_drag_in_progress_is_saved(qtbot, tmp_path, sweep):
