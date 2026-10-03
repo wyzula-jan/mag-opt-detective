@@ -83,7 +83,12 @@ def preview(window) -> list[tuple[np.ndarray, np.ndarray]]:
 
 
 def lines_drawn(window) -> list[tuple[np.ndarray, np.ndarray]]:
+    """The lines found as drawn: the others (joined, NaN between them), then the chosen one."""
     return window.plots.map.layer("preview").curve_data()
+
+
+def segments(y: np.ndarray) -> int:
+    return int(np.count_nonzero(np.isnan(y))) + 1 if y.size else 0
 
 
 def status(window) -> str:
@@ -192,7 +197,10 @@ def test_detect_finds_the_lines_in_a_box_and_a_click_chooses_one(picked):
         np.testing.assert_allclose(candidate.field, inside)
         np.testing.assert_allclose(candidate.energy, line(inside), atol=STEP)
     assert tool.chosen == 0  # as long as the other, but deeper
-    assert len(lines_drawn(w)) == 2
+    others, chosen = lines_drawn(w)
+    assert segments(others[1]) == 1
+    np.testing.assert_allclose(others[1], tool.candidates[1].energy)
+    np.testing.assert_allclose(chosen[1], tool.candidates[0].energy)
     assert status(w).startswith("2 lines found: 25 points for LL 1 on the one with diamonds")
     assert click_map(w, 5.0, line2(5.0) + 2.0)  # a click on the other line chooses it
     assert tool.chosen == 1
@@ -382,6 +390,9 @@ def test_default_choice_and_window():
     assert default_choice([short, long_weak, long_strong], previous) == 1
     elsewhere = candidate([7, 8], 205.0, 1.0)
     assert default_choice([short, long_weak], elsewhere) == 1
+    x, y = autopick._joined([short, long_weak], "meV")  # drawn as one curve with a gap
+    assert segments(y) == 2 and x.size == 8
+    np.testing.assert_allclose(y[:3], 100.0 / MEV)
 
     from mag_opt_detective.core.spectra import FieldMap
 

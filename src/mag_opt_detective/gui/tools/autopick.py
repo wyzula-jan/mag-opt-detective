@@ -45,7 +45,7 @@ HISTORY = 3  # points the next energy is predicted from
 MIN_LENGTH = 3  # Detect drops lines with fewer points
 MARKER_SIZE = 9  # px, the diamonds of the chosen line
 SELECT_RADIUS, DRAG_DISTANCE = 12.0, 4.0  # px: a click this close chooses a line; a drag
-BUSY_SIZE = 2_000_000  # map values from which a search shows the wait cursor
+BUSY_SIZE = 250_000  # map values from which a search shows the wait cursor (about 0.2 s)
 DEBOUNCE_MS = 300  # typing in a field searches again after this pause
 UNIT_TEXT = {Unit.CM1: "cm⁻¹", Unit.MEV: "meV", Unit.THZ: "THz"}
 SINGULAR = {
@@ -297,7 +297,7 @@ class AutoPick(QObject):
             self._fail(str(exc))
             return
         try:
-            with _busy(fmap):
+            with _busy(searched_size(fmap, self.target)):
                 tracks, used = search(fmap, self.target, options)
         except ValueError as exc:
             seed = self.target.seed
@@ -454,9 +454,12 @@ class AutoPick(QObject):
             return
         unit = self.c.unit
         accent, halo = self.colors()
-        lines = [(c.field, from_cm1(c.energy, unit)) for c in self.candidates]
-        layer.set_curves(lines, pg.mkPen(accent, width=1.5), shadow_pen=pg.mkPen(halo, width=3.5))
         chosen = self.chosen_candidate()
+        others = [c for c in self.candidates if c is not chosen]
+        lines = [_joined(others, unit)] if others else []  # one item: hundreds draw slowly
+        if chosen is not None:
+            lines.append((chosen.field, from_cm1(chosen.energy, unit)))
+        layer.set_curves(lines, pg.mkPen(accent, width=1.5), shadow_pen=pg.mkPen(halo, width=3.5))
         if chosen is not None:
             x, y = chosen.field, from_cm1(chosen.energy, unit)
             for pen in (pg.mkPen(halo, width=3.5), pg.mkPen(accent, width=1.6)):
@@ -578,10 +581,27 @@ class AutoPick(QObject):
             self._quiet = False
 
 
+def _joined(candidates: list[Candidate], unit: Unit) -> tuple[np.ndarray, np.ndarray]:
+    """The lines of *candidates* as one curve, NaN between them (a gap when drawn)."""
+    gap = np.array([np.nan])
+    x = np.concatenate([part for c in candidates for part in (c.field, gap)])
+    y = np.concatenate([part for c in candidates for part in (from_cm1(c.energy, unit), gap)])
+    return x[:-1], y[:-1]
+
+
+def searched_size(fmap: FieldMap, target: Target) -> int:
+    """How many map values a search for *target* goes through."""
+    if target.box is None:
+        return fmap.values.size
+    (b0, b1), _energies = target.box
+    columns = np.count_nonzero((fmap.field >= b0) & (fmap.field <= b1))
+    return fmap.energy.size * columns
+
+
 @contextlib.contextmanager
-def _busy(fmap: FieldMap) -> Iterator[None]:
-    """The wait cursor while a large map is searched."""
-    if fmap.values.size < BUSY_SIZE:
+def _busy(size: int) -> Iterator[None]:
+    """The wait cursor while a search goes through *size* map values or more."""
+    if size < BUSY_SIZE:
         yield
         return
     QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
