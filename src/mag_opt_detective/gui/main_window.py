@@ -1118,19 +1118,19 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------ web links
     @user_action("Open the documentation")
     def open_documentation(self) -> None:
-        self._open_link("Open the documentation", links.DOCS_URL)
+        self.open_link("Open the documentation", links.DOCS_URL)
 
     @user_action("Request a feature")
     def request_feature(self) -> None:
-        self._open_link("Request a feature", links.feature_request_url())
+        self.open_link("Request a feature", links.feature_request_url())
 
     @user_action("Report a bug")
     def report_bug(self) -> None:
         """Open the bug form, filled in with :func:`links.environment` and the plot shown."""
         url = links.bug_report_url(links.environment(self.plot_summary()))
-        self._open_link("Report a bug", url)
+        self.open_link("Report a bug", url)
 
-    def _open_link(self, title: str, url: str) -> None:
+    def open_link(self, title: str, url: str) -> None:
         """Open *url* in the web browser; without one, the error bar offers to copy it."""
         try:
             links.open_url(url)

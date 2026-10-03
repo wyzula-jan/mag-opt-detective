@@ -54,7 +54,7 @@ NEWEST = "There is no newer release on GitHub."
 def open_release(window, url: str) -> None:
     """Open a release page or file of this repository (the notice's buttons) as the Help
     menu's links open theirs: without a web browser the error bar offers to copy it."""
-    window._open_link("Open the release", url)
+    window.open_link("Open the release", url)
 
 
 class ActionSetting:
