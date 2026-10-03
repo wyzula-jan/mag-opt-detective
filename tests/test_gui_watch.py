@@ -794,6 +794,31 @@ def test_the_chip_sits_beside_the_baseline_chip_and_shrinks(window, qtbot, tmp_p
     assert window.minimumSizeHint().width() == narrowest <= 1100  # it adds nothing
 
 
+def test_a_crowded_status_bar_shortens_the_folder_name_first(window, clock, qtbot, tmp_path):
+    folder = tmp_path / "FePS3_BF_T222_eGlob_40kHz-R1_18V_2p2K_Sam1_run"
+    folder.mkdir()
+    zero(folder, old=True)
+    for b in (0.5, 1.0):
+        spectrum(folder, b, old=True)
+    c = window.controller
+    c.set_processing(baseline=(300.0, 400.0))
+    window.resize(1100, 800)
+    window.show()
+    qtbot.waitExposed(window)
+    window.folder_watch.start(folder)
+    fine(folder, sweep_name(1.5))  # held back for its axis: the longest chip
+    arrive(window, clock)
+    c.set_processing(energy_cut=(150.0, 950.0))  # "Settings changed · process again"
+    window.set_cursor_text("B 7.25 T · E 1234.5 cm⁻¹ · 1.0234")
+    watching, baseline = chip(window), window.baseline_chip
+    tail = " · 3 files · 1 held back (energy axis)"  # the count stays
+    # once the bar is laid out, the baseline chip keeps its value and the count stays
+    qtbot.waitUntil(lambda: baseline.form() == 0 and watching.shown_text().endswith(tail))
+    shown = watching.shown_text()
+    assert shown.startswith("Watching FePS3") and "…" in shown  # the folder name gave way
+    assert watching.geometry().right() < baseline.geometry().left()
+
+
 # ---------------------------------------------------------------------- stopping
 def test_stop_watching_keeps_the_files_and_the_map(window, clock, tmp_path):
     zero(tmp_path, old=True)

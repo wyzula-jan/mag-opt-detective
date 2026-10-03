@@ -14,7 +14,7 @@ import html
 from collections.abc import Callable
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, QObject, QSize, Qt
+from PySide6.QtCore import QEvent, QObject, QSize, Qt, QTimer
 from PySide6.QtGui import QAction, QKeySequence, QPainter
 from PySide6.QtWidgets import QFileDialog, QHBoxLayout, QLabel, QToolButton, QVBoxLayout, QWidget
 
@@ -54,6 +54,8 @@ from mag_opt_detective.gui.panels.files import (
 from mag_opt_detective.gui.theme import current_tokens
 from mag_opt_detective.gui.watch import OK, PROBLEM, FolderWatcher, WatchStatus, sweep_folder
 from mag_opt_detective.gui.widgets import last_dir, set_last_dir
+
+QWIDGETSIZE_MAX = (1 << 24) - 1  # Qt's largest widget size
 
 NAMES, CUSTOM = "names", "custom"
 NAMES_HINT = "Read from names like …_a01p250T.txt (1.25 T)."
@@ -142,24 +144,87 @@ class WatchBox(QWidget):
             self.state.set_text(*watch_text(status))
 
 
-class _TokenLabel(QLabel):
-    """A one-line label painted in the theme token *token* (read at paint time); given less
-    width than its text, it elides it at the right."""
+class _ChipText(QLabel):
+    """The chip's text, a head ("Watching <folder>") and the rest (" · 23 files · …"),
+    painted in the theme token *token* (read at paint time). Given less width than it needs,
+    the head is elided first, then left out, then the rest is elided."""
 
     token = "muted"
+    SEPARATOR = " · "
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._head, self._rest = "", ""
+
+    def set_parts(self, head: str, rest: str) -> None:
+        self._head, self._rest = head, rest
+        self.setText(f"{head}{self.SEPARATOR}{rest}" if rest else head)
+        self.update()
 
     def minimumSizeHint(self) -> QSize:
         return QSize(0, super().minimumSizeHint().height())
+
+    def shown(self) -> str:
+        """The text as it fits the label's width."""
+        metrics, width = self.fontMetrics(), self.contentsRect().width()
+        if metrics.horizontalAdvance(self.text()) <= width or not self._rest:
+            return metrics.elidedText(self.text(), Qt.TextElideMode.ElideRight, width)
+        rest = self.SEPARATOR + self._rest
+        room = width - metrics.horizontalAdvance(rest)
+        head = metrics.elidedText(self._head, Qt.TextElideMode.ElideRight, room)
+        if room > 0 and head not in ("", "…") and len(head) > len("Watching …"):
+            return head + rest
+        return metrics.elidedText(self._rest, Qt.TextElideMode.ElideRight, width)
 
     def paintEvent(self, event) -> None:
         painter = QPainter(self)
         painter.setPen(current_tokens()[self.token])
         painter.setFont(self.font())
-        rect = self.contentsRect()
-        text = self.fontMetrics().elidedText(self.text(), Qt.TextElideMode.ElideRight, rect.width())
         flags = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
-        painter.drawText(rect, int(flags), text)
+        painter.drawText(self.contentsRect(), int(flags), self.shown())
         painter.end()
+
+
+class _YieldRoom(QObject):
+    """Lets *chip* have only the room of its status-bar row that the other widgets leave at
+    their preferred widths, so it shrinks before them (e.g. before the baseline chip)."""
+
+    def __init__(self, bar: QWidget, chip: QWidget):
+        super().__init__(chip)
+        self._bar, self._chip = bar, chip
+        self._pending = False
+        bar.installEventFilter(self)
+
+    def eventFilter(self, watched, event) -> bool:
+        if event.type() in (QEvent.Type.Resize, QEvent.Type.LayoutRequest) and not self._pending:
+            self._pending = True  # once the bar is laid out
+            QTimer.singleShot(0, self, self.fit)
+        return False
+
+    def _row(self):
+        layouts = [self._bar.layout()]
+        while layouts:
+            layout = layouts.pop()
+            if layout.indexOf(self._chip) >= 0:
+                return layout
+            layouts.extend(
+                item.layout() for i in range(layout.count()) if (item := layout.itemAt(i)).layout()
+            )
+        return None
+
+    def fit(self) -> None:
+        self._pending = False
+        row = self._row()
+        if row is None:
+            return
+        items = [row.itemAt(i) for i in range(row.count())]
+        others = sum(item.sizeHint().width() for item in items if item.widget() is not self._chip)
+        shown = [item for item in items if not item.isEmpty()]  # (spacing between these)
+        width = row.geometry().width()
+        room = width - others - row.spacing() * (len(shown) - 1) if width > 0 else QWIDGETSIZE_MAX
+        room = max(0, min(room, QWIDGETSIZE_MAX))  # (no limit before the first layout)
+        if room != self._chip.maximumWidth():
+            self._chip.setMaximumWidth(room)
 
 
 class WatchChip(QWidget):
@@ -174,7 +239,7 @@ class WatchChip(QWidget):
         self.icon_label = QLabel()
         self.icon_label.setFixedSize(16, 16)
         self.icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.text_label = _TokenLabel()
+        self.text_label = _ChipText()
         self.text_label.setFont(scaled_font(self.text_label, 0.94))
         self.stop_button = QToolButton()
         self.stop_button.setProperty("kit", "tool")
@@ -206,12 +271,12 @@ class WatchChip(QWidget):
         name = Path(status.folder).name or status.folder
         if len(name) > self.MAX_NAME:
             name = name[: self.MAX_NAME - 1] + "…"
-        parts = [f"Watching {name}", count_text(status.files)]
+        parts = [count_text(status.files)]
         if status.brief:  # the whole note is in the tooltip and the panel
             parts.append(status.brief)
         elif status.last is not None:
             parts.append(f"{status.last:%H:%M:%S}")
-        self.text_label.setText(" · ".join(parts))
+        self.text_label.set_parts(f"Watching {name}", " · ".join(parts))
         self.setToolTip(f"{status.folder}\n{watch_text(status)[0]}")
         self._level = status.level
         self.text_label.token = "warn" if status.level == PROBLEM else "muted"
@@ -220,6 +285,10 @@ class WatchChip(QWidget):
 
     def level(self) -> str:
         return self._level
+
+    def shown_text(self) -> str:
+        """The text as it fits the chip's width (the folder name is elided first)."""
+        return self.text_label.shown()
 
     def _update_icon(self) -> None:
         color = "warn" if self._level == PROBLEM else "muted"
@@ -470,6 +539,7 @@ def install_watch(window, panel: SamplePanel) -> FolderWatcher:
     box = panel.watch
     chip = WatchChip()
     window.add_status_chip(chip)  # beside the state and the baseline chip
+    _YieldRoom(window.statusBar(), chip)
     syncing = False
 
     def show() -> None:
