@@ -228,3 +228,40 @@ def test_a_drag_in_progress_is_saved(qtbot, tmp_path, sweep):
     w.close()
     ranges = json.loads(QSettings(ini, QSettings.Format.IniFormat).value("v2/view/ranges"))
     assert ranges["energy_cm1"] == pytest.approx([150.0, 1050.0])
+
+
+# ---------------------------------------------------------------------- range sliders
+def test_a_range_slider_keeps_its_extent_while_dragged(shown, qtbot):
+    w, c = shown, shown.controller
+    control = inspector_page(w, "view").energy
+    slider = control.slider
+    assert slider.isVisible() and slider.width() > 100
+    c.set_ranges(energy_range=(500.0, 1300.0))  # partly beyond the data
+    assert slider.extent() == (100.0, 1300.0)  # the data and the range
+    assert plot_range(w, "stacked")[0] == (500.0, 1300.0)
+    per_px = 1200.0 / (slider.x_for(1300.0) - slider.x_for(100.0))
+    y = slider.height() // 2
+    x0 = round(slider.x_for(900.0))  # on the bar between the handles
+    dx = math.ceil(110.0 / per_px)  # three moves bring the range back inside the data
+    qtbot.mousePress(slider, LEFT, pos=QPoint(x0, y))
+    for k in range(1, 4):  # the extent would shrink after each
+        qtbot.mouseMove(slider, QPoint(x0 - dx * k, y))
+        assert slider.extent() == (100.0, 1300.0)  # kept while dragged
+        lo, hi = control.range()
+        assert lo == pytest.approx(500.0 - dx * k * per_px, abs=0.5 * per_px)  # under the cursor
+        assert hi - lo == pytest.approx(800.0)
+        assert c.view.energy_range == pytest.approx((lo, hi))  # the plot follows at once
+        assert plot_range(w)[1] == pytest.approx((lo, hi))
+        assert plot_range(w, "stacked")[0] == (500.0, 1300.0)  # off screen: on the release
+    qtbot.mouseRelease(slider, LEFT, pos=QPoint(x0 - 3 * dx, y))
+    qtbot.waitUntil(lambda: slider.extent() != (100.0, 1300.0))
+    lo, hi = control.range()
+    assert hi < 1000.0 and slider.extent() == (100.0, 1000.0)  # the data again
+    assert plot_range(w, "stacked")[0] == pytest.approx((lo, hi))
+
+    c.set_ranges(energy_range=(500.0, 1300.0))
+    qtbot.keyPress(slider, Qt.Key.Key_Left, Qt.KeyboardModifier.ShiftModifier)  # 1 % left
+    assert control.range() == pytest.approx((488.0, 1288.0))
+    assert slider.extent() == (100.0, 1300.0)  # kept until the key is released
+    qtbot.keyRelease(slider, Qt.Key.Key_Left, Qt.KeyboardModifier.ShiftModifier)
+    qtbot.waitUntil(lambda: slider.extent() == pytest.approx((100.0, 1288.0)))

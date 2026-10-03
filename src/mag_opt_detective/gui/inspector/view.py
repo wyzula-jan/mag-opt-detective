@@ -14,7 +14,9 @@ inspector sections use.
 A pan or zoom on a plot moves only that plot while it lasts: the View fields follow at most
 every :data:`GESTURE_MS`, and the ranges go into the view state (and onto the other plots) once,
 when the mouse button is released or :data:`GESTURE_MS` after the last wheel step
-(``window.view_ranges.finish()`` does it at once).
+(``window.view_ranges.finish()`` does it at once). A range slider changes the view state and
+the plot on screen at once; while it is dragged it keeps its extent, so the range stays under
+the cursor, and the other plots catch up when it is released.
 """
 
 from __future__ import annotations
@@ -266,6 +268,8 @@ class ViewRanges(QObject):
         self._follow = self._timer(self.sync_controls)  # the fields follow the gesture
         self._idle = self._timer(self._on_idle)  # restarted on every step: the gesture ended
         self._viewports: set[QObject] = set()  # of the plots: their mouse releases end gestures
+        self._sliders: dict[QObject, RangeControl] = {}
+        self._sliding: set[RangeControl] = set()  # controls whose slider is dragged or keyed
 
     def _timer(self, slot) -> QTimer:
         timer = QTimer(self)
@@ -293,10 +297,13 @@ class ViewRanges(QObject):
         return out
 
     def apply(self) -> None:
-        """Put the ranges on the plots that show data."""
+        """Put the ranges on the plots that show data; while a range slider is in use only on
+        the plot on screen (the others follow when it is released)."""
         self._applied = self.effective()
+        only = self.window.plot_area.current_view() if self._sliding else None
         for name, (x, y) in self._applied.items():
-            self.window.plots[name].plot.vb.setRange(xRange=x, yRange=y, padding=0)
+            if only is None or name == only:
+                self.window.plots[name].plot.vb.setRange(xRange=x, yRange=y, padding=0)
 
     def shown(self) -> ViewState:
         """The view state with the ranges of a pan or zoom in progress."""
@@ -318,13 +325,16 @@ class ViewRanges(QObject):
         e_note = None
         if e_data is not None:
             e_note = f"Data {format_range(*e_data, unit)} · shared with {shared}"
-        _show(page.field, v.field_range, b_data)
-        _show(page.energy, v.energy_range, e_data, e_note)
+        self._show(page.field, v.field_range, b_data)
+        self._show(page.energy, v.energy_range, e_data, e_note)
         i_data = None
         if fmap is not None and view == "stacked":
             e = v.energy_range or e_data
             i_data = stacked_extent(fmap, v, e)
-        _show(page.intensity, v.stacked_range, i_data, INTENSITY_NOTE)
+        self._show(page.intensity, v.stacked_range, i_data, INTENSITY_NOTE)
+
+    def _show(self, control: RangeControl, fixed: Pair | None, data: Pair | None, note=None):
+        _show(control, fixed, data, note, keep_extent=control in self._sliding)
 
     def refresh(self) -> None:
         """Put the ranges on the plots and into the controls; a pan or zoom in progress goes
@@ -417,9 +427,26 @@ class ViewRanges(QObject):
         self._viewports.add(viewport)
         viewport.installEventFilter(self)
 
+    def watch_slider(self, control: RangeControl) -> None:
+        """Keep the extent of *control*'s slider while it is dragged or moved with keys."""
+        self._sliders[control.slider] = control
+        control.slider.installEventFilter(self)
+
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:
-        if watched in self._viewports and event.type() == QEvent.Type.MouseButtonRelease:
-            QTimer.singleShot(0, self, self._on_release)  # after pyqtgraph's last drag step
+        kind = event.type()
+        if watched in self._viewports:
+            if kind == QEvent.Type.MouseButtonRelease:  # after pyqtgraph's last drag step
+                QTimer.singleShot(0, self, self._on_release)
+        elif watched in self._sliders:
+            control = self._sliders[watched]
+            if kind in (QEvent.Type.MouseButtonPress, QEvent.Type.KeyPress):
+                self._sliding.add(control)
+            elif control in self._sliding and (
+                kind in (QEvent.Type.MouseButtonRelease, QEvent.Type.FocusOut)
+                or (kind == QEvent.Type.KeyRelease and not event.isAutoRepeat())
+            ):
+                self._sliding.discard(control)
+                QTimer.singleShot(0, self, self.refresh)  # the extent and other plots
         return False
 
     def on_click(self, view: str, event) -> None:
@@ -448,15 +475,23 @@ class ViewRanges(QObject):
             self.edit(**{VIEW_RANGES[view][axis]: (float(lo), float(hi))})
 
 
-def _show(control: RangeControl, fixed: Pair | None, data: Pair | None, note=None) -> None:
-    """Show *fixed* (or, on Auto, the *data* range) in *control*, with *data* as its extent."""
+def _show(
+    control: RangeControl,
+    fixed: Pair | None,
+    data: Pair | None,
+    note=None,
+    keep_extent: bool = False,
+) -> None:
+    """Show *fixed* (or, on Auto, the *data* range) in *control*, with *data* (and *fixed*) as
+    its extent; with *keep_extent* (its slider is in use) the extent stays."""
     shown = fixed or data
     if data is None:
         data = shown or control.extent()
         note = "No data to show yet"
     elif fixed is not None:
         data = (min(data[0], fixed[0]), max(data[1], fixed[1]))
-    control.set_extent(*data, note=note)
+    if not keep_extent:
+        control.set_extent(*data, note=note)
     if shown is not None:
         control.set_range(*shown)
     control.set_auto(fixed is None)
@@ -551,6 +586,7 @@ def install(window) -> None:
     for name, control in page.controls().items():
         control.rangeEdited.connect(lambda lo, hi, n=name: ranges.edit(**{n: (lo, hi)}))
         control.autoRequested.connect(lambda n=name: ranges.edit(**{n: None}))
+        ranges.watch_slider(control)
 
     for view, plot in window.plots.items():
         plot.plot.vb.sigRangeChangedManually.connect(lambda _mask, v=view: ranges.on_manual(v))
@@ -577,7 +613,7 @@ def install(window) -> None:
         view = window.plot_area.current_view()
         page.show_view(view)
         update_sections(window)
-        ranges.sync_controls()
+        ranges.refresh()
 
     window.plot_area.tabs.currentChanged.connect(on_tab)
     on_tab(window.plot_area.tabs.currentIndex())
