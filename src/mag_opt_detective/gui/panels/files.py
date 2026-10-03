@@ -379,7 +379,7 @@ class ZeroList(QWidget):
             name = Path(path).name
             if self._prefix and name.startswith(self._prefix) and name != self._prefix:
                 name = name[len(self._prefix) :]
-            label = ElidedLabel(name, mode=Qt.TextElideMode.ElideMiddle)
+            label = ElidedLabel(name, mode=Qt.TextElideMode.ElideLeft)  # names differ at the end
             label.setProperty("kit", "muted")
             label.setFont(mono_font())
             label.setToolTip(path)
@@ -580,8 +580,9 @@ class SweepFilesBox(QWidget):
         self.field_drop.setVisible(not n_field)
         self.clear_button.setEnabled(bool(n_field))
         prefix = self.field_list.file_model.prefix()
-        self.prefix_label.setText(f"Common prefix <b>{prefix}</b>" if prefix else "")
-        self.prefix_label.setVisible(bool(prefix) and n_field > 1)
+        title = "Common prefix" if n_field > 1 else "Prefix"
+        self.prefix_label.setText(f"{title} <b>{prefix}</b>" if prefix else "")
+        self.prefix_label.setVisible(bool(prefix))
         self.zero_list.set_prefix(prefix)
         check = check_fields(self.field_list.file_model.fields()) if self._gap_check else None
         self.gap_note.setVisible(check is not None)

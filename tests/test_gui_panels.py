@@ -143,6 +143,9 @@ def test_file_table_shows_fields_prefix_and_gaps(window, tmp_path):
         "Even 1 T steps, no missing fields.",
         "ok",
     )
+    table.set_paths(field[:1])  # one file: its name is still split, so the prefix shows
+    assert not box.prefix_label.isHidden()
+    assert box.prefix_label.text() == "Prefix <b>Sample_4p2K_Sam1_</b>"
     box.clear_button.click()
     assert table.count() == 0 and not box.field_drop.isHidden() and box.gap_note.isHidden()
 
