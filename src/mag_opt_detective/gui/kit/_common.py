@@ -59,8 +59,3 @@ def json_object(value) -> dict | None:
     except ValueError:
         return None
     return data if isinstance(data, dict) else None
-
-
-def format_number(value: float) -> str:
-    """Compact display of a number (five significant digits)."""
-    return f"{value:.5g}"

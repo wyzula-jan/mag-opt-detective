@@ -146,7 +146,8 @@ def test_range_control_shows_state(control):
     assert control.note.text() == "Data 0.25 – 16 T"
     assert control.lo_spin.suffix() == " T"
     assert control.lo_spin.locale().decimalPoint() == "."
-    assert control.lo_spin.decimals() == 2
+    assert (control.lo_spin.text(), control.hi_spin.text()) == ("0.25 T", "16 T")  # as the note
+    assert control.lo_spin.decimals() == 4  # 0.25 to four significant digits
     assert control.slider.is_muted()
     assert control.mode.value() == "auto"
     assert control.accessibleName() == "Field B"  # the title without markup
@@ -158,9 +159,20 @@ def test_range_control_shows_state(control):
     assert control.note.text().endswith("16 mT")
     control.set_extent(0.0, 4000.0, note="Data shared with Stacked")
     assert control.note.text() == "Data shared with Stacked"
-    assert control.lo_spin.decimals() == 0
+    assert control.lo_spin.resolution == 0
     control.set_extent(0.8, 1.3)
-    assert control.lo_spin.decimals() == 4
+    assert control.lo_spin.resolution == 4
+
+
+def test_range_control_fields_and_note_show_the_same_digits(control):
+    control.set_unit("meV")
+    control.set_extent(43.394, 396.75)
+    control.set_range(43.394, 396.75)
+    assert control.note.text() == "Data 43.39 – 396.8 meV"
+    assert (control.lo_spin.text(), control.hi_spin.text()) == ("43.39 meV", "396.8 meV")
+    control.set_extent(0.995, 1.002)  # a narrow range keeps the digits that resolve it
+    control.set_range(0.995123, 1.0019)
+    assert control.lo_spin.text() == "0.995123 meV"
 
 
 def test_range_control_programmatic_setters_are_silent(qtbot, control):

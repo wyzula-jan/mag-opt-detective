@@ -18,8 +18,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from mag_opt_detective.gui.display import format_number
 from mag_opt_detective.gui.kit._common import (
-    format_number,
     json_object,
     set_style_property,
     to_bool,
@@ -32,7 +32,18 @@ ORDER_ERROR = "The lower limit must be below the upper limit."
 
 
 class _Spin(QDoubleSpinBox):
-    """Number field that ignores the wheel unless it has focus (scrolling past it is safe)."""
+    """Number field that ignores the wheel unless it has focus (scrolling past it is safe).
+
+    It shows its value as the notes do (four significant digits, no trailing zeros), with
+    at least the decimals that resolve the range (:attr:`resolution`).
+    """
+
+    resolution = 0
+
+    def textFromValue(self, value: float) -> str:
+        shown = min(self.decimals(), max(self.resolution, significant_decimals(value)))
+        text = f"{value:.{shown}f}"
+        return text.rstrip("0").rstrip(".") if "." in text else text
 
     def wheelEvent(self, event: QWheelEvent) -> None:
         if self.hasFocus():
@@ -46,6 +57,13 @@ def decimals_for(width: float) -> int:
     if not math.isfinite(width) or width <= 0:
         return 3
     return min(8, max(0, 3 - math.floor(math.log10(width))))
+
+
+def significant_decimals(value: float, digits: int = 4) -> int:
+    """Decimals that show *value* with *digits* significant digits (at most 8)."""
+    if not math.isfinite(value) or value == 0:
+        return 0
+    return min(8, max(0, digits - 1 - math.floor(math.log10(abs(value)))))
 
 
 class RangeControl(QWidget):
@@ -215,7 +233,8 @@ class RangeControl(QWidget):
         """Show the stored (valid) state in the child widgets, without emitting."""
         self._error = ""  # the fields get the stored values back
         width = self._b - self._a
-        decimals = decimals_for(width if width > 0 else abs(self._hi - self._lo))
+        resolution = decimals_for(width if width > 0 else abs(self._hi - self._lo))
+        decimals = max(resolution, *(significant_decimals(v) for v in (self._lo, self._hi)))
         span = max(width, self._hi - self._lo, 1e-12)
         step = 10.0 ** (math.floor(math.log10(span)) - 2)
         low = min(self._a - 10 * span, self._lo)
@@ -223,6 +242,7 @@ class RangeControl(QWidget):
         suffix = f" {self._unit}" if self._unit else ""
         for spin, value in ((self.lo_spin, self._lo), (self.hi_spin, self._hi)):
             with QSignalBlocker(spin):
+                spin.resolution = resolution
                 spin.setDecimals(decimals)
                 spin.setRange(low, high)
                 spin.setSingleStep(step)
