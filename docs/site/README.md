@@ -6,7 +6,9 @@ only.
 
 - `pages/*.html`: one fragment of plain HTML per page, starting with a comment that holds its
   `title` and `description`; `<!-- toc -->` puts an "On this page" list of the `h2` headings
-  there.
+  there, and `<!-- changelog -->` (in `release-notes.html`) the releases of the repository's
+  `CHANGELOG.md`, which the build reads (written by `tools/release.py`; "No release yet"
+  before the first).
 - `layout.html`, `site.css`, `favicon.svg`: the frame around every page and its style.
 - `images/`: screenshots of the app, rendered from a synthetic sweep by
   `python docs/make_screenshots.py --site` (never from measurement data).

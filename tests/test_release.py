@@ -497,6 +497,7 @@ def test_the_repository_version_files_agree():
         release.parse_version(version)
     else:
         assert release.citation_date(ROOT) is None
+    assert changelog.startswith(release.CHANGELOG_HEADER)
     release.check_versions(ROOT)  # what a release checks first
 
 
