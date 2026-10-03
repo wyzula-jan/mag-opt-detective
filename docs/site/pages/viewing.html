@@ -1,6 +1,6 @@
 <!--
 title: Viewing
-description: Plot kinds, derivatives per data point or per unit, the live energy unit switch, view ranges, colour maps and levels, colour scales, stacked traces and the sliding panels.
+description: Plot kinds, derivatives per data point or per unit, the live energy unit switch, view ranges, colour maps and levels, colour scales, the plot legend, stacked traces and the sliding panels.
 -->
 <h1>Viewing</h1>
 <p>Everything on this page changes only how the processed sweep is shown. It applies at once, without processing again, and is remembered for the next session.</p>
@@ -48,6 +48,10 @@ description: Plot kinds, derivatives per data point or per unit, the live energy
   <li>a <b>slim</b> colour bar with two handles, which leaves more room for the map. With slim bars the inspector shows the histogram instead.</li>
 </ul>
 <p>A click on the handle between a map and its scale slides the scale away or back; the eye button in the plot toolbar shows or hides all of them.</p>
+
+<h2 id="legend">Legend</h2>
+<p>The legend button in the plot toolbar shows a legend in the map or in the stacked plot, each on its own; it starts off. It lists the picked curves with their markers, the current curve in bold, and on the map every model drawn, with its line and its branches in one row, e.g. <i>Zeeman / magnon · 3 branches</i>; a fit not yet applied gets a row of its own. The legend follows the points, the models and the unit as they change, and hides while there is nothing to list.</p>
+<p>Drag the legend anywhere on the plot: it keeps that place when you zoom, pan or resize the window, and the next session remembers it. A press on the legend only moves it, whichever tool is active. For the legend of a journal figure, see <a href="figures.html#settings">Journal figures</a>.</p>
 
 <h2 id="stacked">Stacked spectra</h2>
 <figure class="shot">

@@ -1,6 +1,6 @@
 <!--
 title: Journal figures
-description: Export the map or the stacked plot at print size with the Nature, APS or custom presets or your own, as PDF, SVG, EPS, PNG or TIFF, with its colour range, colour bar and ticks, and what the warnings mean.
+description: Export the map or the stacked plot at print size with the Nature, APS or custom presets or your own, as PDF, SVG, EPS, PNG or TIFF, with its colour range, colour bar, ticks and legend, and what the warnings mean.
 -->
 <h1>Journal figures</h1>
 <p><b>Export › Journal figure…</b> (<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>E</kbd>) opens a window that draws the plot as a figure for print: at its exact size in millimetres, with text and lines in points, in the formats journals ask for.</p>
@@ -30,6 +30,8 @@ description: Export the map or the stacked plot at print size with the Nature, A
   <dd>The visible models, dashed.</dd>
   <dt>Picked points</dt>
   <dd>On or off, for the <b>current curve</b> or <b>all curves</b>; it starts from the markers shown in the main window.</dd>
+  <dt>Legend</dt>
+  <dd>On or off (off to start). It lists the picked points of each curve with their marker, the current curve filled, and each model once, with the names of the main window, inside the plot where it covers the fewest points and lines. Over a map it has a white ground and a thin frame. Each model is drawn with its own dashes so that the legend tells them apart. The note under the switch says what it lists.</dd>
   <dt>Panel label</dt>
   <dd>None, or a to f, in the journal's style: a bold <b>a</b> for Nature, <b>(a)</b> for APS and Custom.</dd>
   <dt>Colour range</dt>
@@ -41,7 +43,7 @@ description: Export the map or the stacked plot at print size with the Nature, A
   <dt>Axis labels</dt>
   <dd>Empty fields use the automatic labels, such as <i>Energy (meV)</i>; type your own, or a single space for no label.</dd>
 </dl>
-<p><b>Save…</b> asks where to save, with a name made from the sweep, the plot and the preset, such as <code>…_Ratio_nature-single.pdf</code>. The window remembers the journal, the sizes, the format, the resolution, the colour range with the fixed values, the colour bar, the ticks and the panel label for the next time.</p>
+<p><b>Save…</b> asks where to save, with a name made from the sweep, the plot and the preset, such as <code>…_Ratio_nature-single.pdf</code>. The window remembers the journal, the sizes, the format, the resolution, the colour range with the fixed values, the colour bar, the ticks, the legend and the panel label for the next time.</p>
 
 <h2 id="my-presets">Your presets</h2>
 <p><b>My presets</b>, next to the journals, keeps your own styles. <b>Save as preset…</b> asks for a name in the window and keeps:</p>
@@ -49,7 +51,7 @@ description: Export the map or the stacked plot at print size with the Nature, A
   <li>the journal it is based on, whose rules and warnings still apply;</li>
   <li>the width and height, the text size and the line width;</li>
   <li>the format and the resolution;</li>
-  <li>the colour bar (on or off, right or top), the ticks and the colour range (Window, Auto or Fixed).</li>
+  <li>the colour bar (on or off, right or top), the ticks, the legend (on or off) and the colour range (Window, Auto or Fixed).</li>
 </ul>
 <p>It does not keep what one figure shows: the view, the model curves and points, the panel letter, the axis and colour bar labels and the fixed colour range values. Saving under a name in use replaces that preset.</p>
 <p>Choose a preset in the menu to use it; the button shows its name until you change one of its settings. <b>Rename…</b> and <b>Delete</b> act on the preset shown. <b>Export presets…</b> writes all of them to a JSON file, and <b>Import presets…</b> adds those of a file, replacing presets with the same name. A file that is not a preset file, holds values no figure can have (such as a height above 1000 mm), or comes from a newer version of the app, is refused with a message and changes nothing. Your presets are saved as soon as you change them, and <b>View › Reset settings</b> keeps them. Presets this version cannot read (saved by a newer version of the app) are kept unchanged; if they are in a newer format, this version leaves them alone and does not save new presets over them.</p>
