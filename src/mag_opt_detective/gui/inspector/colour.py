@@ -740,6 +740,10 @@ def install(window) -> None:
     style = window.plot_area.scale_style_button
     page.hist_section.set_expanded(style.isChecked(), animate=False)
     style.toggled.connect(page.hist_section.set_expanded)
+    # auto-scale with the maps' histograms (the plot toolbar button)
+    auto_scale = window.plot_area.auto_scale_button
+    page.histogram.set_follow_levels(auto_scale.isChecked())
+    auto_scale.toggled.connect(page.histogram.set_follow_levels)
 
     def on_theme() -> None:
         page.histogram.apply_theme()

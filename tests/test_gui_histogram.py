@@ -1,17 +1,19 @@
-"""The histograms keep their value range while only the colour levels change, unless they
-follow the levels (auto-scale); new data fits them again."""
+"""The histograms keep their value range while only the colour levels change, unless the
+auto-scale button of the plot toolbar is on; new data fits them again."""
 
 import math
 
 import numpy as np
 import pyqtgraph as pg
 import pytest
-from PySide6.QtCore import QPoint, QPointF, Qt
+from PySide6.QtCore import QPoint, QPointF, QSettings, Qt
 from PySide6.QtTest import QTest
+from PySide6.QtWidgets import QToolButton
 
 import gui_helpers
 from gui_helpers import inspector_page, load_sweep, process, select, set_unit
 from mag_opt_detective.core.spectra import FieldMap
+from mag_opt_detective.gui.main_window import MainWindow
 from mag_opt_detective.gui.plots import ColorMapPlot
 from mag_opt_detective.gui.plots.colorscale import fit_range, same_values, tails, widened
 
@@ -220,6 +222,7 @@ def drag_level(qtbot, window, line: int, value: float) -> None:
 def test_a_level_drag_leaves_both_histograms_still(shown, qtbot):
     w, c = shown, shown.controller
     page = colour_page(w)
+    assert not w.plot_area.auto_scale_button.isChecked()  # still by default
     start = ranges(w)
     for shown_range, fit in zip(start, fits(w), strict=True):
         assert shown_range == pytest.approx(fit)
@@ -239,8 +242,25 @@ def test_a_level_drag_leaves_both_histograms_still(shown, qtbot):
     assert ranges(w) == start
 
 
-def test_new_data_fits_both_histograms(shown):
+def test_with_auto_scale_both_histograms_follow_the_levels(shown, qtbot):
+    w, c = shown, shown.controller
+    w.plot_area.auto_scale_button.click()
+    lo, hi = c.view.levels["Ratio"]
+    drag_level(qtbot, w, 0, lo + 0.4 * (hi - lo))  # the lower level
+    levels = c.view.levels["Ratio"]
+    assert levels[0] > lo + 0.2 * (hi - lo)
+    r0, r1 = classic_range(w)
+    assert (r0 + r1) / 2 == pytest.approx(sum(levels) / 2)  # the levels in the middle
+    assert r1 - r0 == pytest.approx(FOLLOW_SPAN * (levels[1] - levels[0]))
+    values = w.shown_maps.get("map").values
+    assert inspector_range(w) == pytest.approx(fit_range(levels, tails(values)))
+
+
+@pytest.mark.parametrize("auto_scale", [False, True])
+def test_new_data_fits_both_histograms(shown, auto_scale):
     w = shown
+    if auto_scale:
+        w.plot_area.auto_scale_button.click()
     for change in (
         lambda: select(w, order=1),  # a derivative (Symmetric levels)
         lambda: select(w, kind="Data", order=0),  # another kind (Auto levels)
@@ -252,7 +272,14 @@ def test_new_data_fits_both_histograms(shown):
         assert ranges(w) != before
         classic, inspector = fits(w)
         assert inspector_range(w) == pytest.approx(inspector)
-        assert classic_range(w) == pytest.approx(classic)
+        if not auto_scale:
+            assert classic_range(w) == pytest.approx(classic)
+        elif w.controller.current_levels() is not None:  # kept levels: around them
+            levels = w.plots.map.levels()
+            r0, r1 = classic_range(w)
+            assert r1 - r0 == pytest.approx(FOLLOW_SPAN * (levels[1] - levels[0]))
+        else:  # Auto levels: the whole histogram
+            assert w.plots.map.hist.vb.autoRangeEnabled()[1]
 
 
 def test_levels_typed_beyond_the_histograms_widen_them_just_enough(shown):
@@ -282,3 +309,64 @@ def test_double_click_fits_each_histogram(shown):
     double_click(page.histogram.view, page.histogram.plot.vb)
     assert inspector_range(w) == pytest.approx(fits(w)[1])
     assert w.controller.view.levels["Ratio"] == pytest.approx((lo, lo + 0.1))
+
+
+def test_the_auto_scale_button_switches_every_histogram(window):
+    w, area = window, window.plot_area
+    button = area.auto_scale_button
+    assert button.isCheckable() and not button.isChecked()
+    assert button.accessibleName() == "Auto-scale the histograms to the colour levels"
+    maps = [w.plots.map, w.plots.reference]
+    histogram = colour_page(w).histogram
+
+    def following() -> list[bool]:
+        return [*(m.scale_follows_levels() and m.scale.follows_levels() for m in maps),
+                histogram.follows_levels()]  # fmt: skip
+
+    assert following() == [False, False, False]
+    button.click()
+    assert following() == [True, True, True]
+    area.scale_style_button.click()  # slim bars, then new histograms: they follow too
+    area.scale_style_button.click()
+    assert following() == [True, True, True]
+    button.click()
+    assert following() == [False, False, False]
+
+
+def test_the_auto_scale_choice_is_remembered(qtbot, tmp_path, errors):
+    ini = str(tmp_path / "settings.ini")
+    first = MainWindow(settings=QSettings(ini, QSettings.Format.IniFormat))
+    qtbot.addWidget(first)
+    assert not first.plot_area.auto_scale_button.isChecked()
+    first.plot_area.auto_scale_button.click()
+    first.close()
+    stored = QSettings(ini, QSettings.Format.IniFormat).value("v2/plot/histogram_auto_scale")
+    assert str(stored).lower() == "true"
+
+    second = MainWindow(settings=QSettings(ini, QSettings.Format.IniFormat))
+    qtbot.addWidget(second)
+    assert second.plot_area.auto_scale_button.isChecked()
+    assert second.plots.map.scale.follows_levels()
+    assert colour_page(second).histogram.follows_levels()
+    second.persistence.reset()  # View > Reset settings: still again
+    assert not second.plot_area.auto_scale_button.isChecked()
+    assert not second.plots.reference.scale.follows_levels()
+    second.close()
+
+
+def test_the_plot_toolbar_with_the_auto_scale_button_fits_1100_px(window, qtbot):
+    window.resize(1100, 800)
+    window.show()
+    qtbot.waitExposed(window)
+    assert window.side_panel.is_open() and window.inspector_panel.is_open()
+    assert window.minimumSizeHint().width() <= 1100 and window.width() == 1100
+    area = window.plot_area
+    head = area.tabs.parentWidget()
+    tabs_end = area.tabs.geometry().right()
+    tools = [
+        b for b in head.findChildren(QToolButton) if b.isVisible() and not area.tabs.isAncestorOf(b)
+    ]
+    assert area.auto_scale_button in tools
+    for button in tools:  # right of the tabs, all inside the head
+        rect = button.geometry().translated(button.parentWidget().mapTo(head, QPoint(0, 0)))
+        assert rect.left() > tabs_end + 4 and head.rect().contains(rect)

@@ -252,7 +252,7 @@ class _Tabs(QTabBar):
 
     def minimumTabSizeHint(self, index: int) -> QSize:
         # narrower padding only where the plot head has no room for all its tools (1100 px)
-        width = self.fontMetrics().horizontalAdvance(self.tabText(index)) + 10
+        width = self.fontMetrics().horizontalAdvance(self.tabText(index)) + 6
         return QSize(width, 38)
 
     def paintEvent(self, event) -> None:
@@ -401,9 +401,13 @@ class PlotArea(QWidget):
         head.setFixedHeight(40)
         row = QHBoxLayout(head)
         row.setContentsMargins(4, 0, 8, 0)
-        row.setSpacing(6)
+        # the description's margins space it, so a narrow window (1100 px), which squeezes it
+        # out, has room for one more tool instead of the empty gaps around it
+        row.setSpacing(0)
+        self.description.setContentsMargins(6, 0, 2, 0)
         row.addWidget(self.tabs)
         row.addWidget(self.description, stretch=1)
+        row.addSpacing(4)
         row.addLayout(self.tools_row)
 
         self.map = ColorMapPlot()
@@ -699,6 +703,13 @@ def set_scale_style(window, style: str) -> None:
         area.scale_style_button.setChecked(style == "bar")
 
 
+def set_histogram_auto_scale(window, on: bool) -> None:
+    """Fit the histogram of every map to the levels whenever they change (*on*), or keep it
+    still while only the levels change (the inspector's histogram follows the button too)."""
+    for name in window.plot_area.scale_panels():
+        window.plots[name].set_scale_follows_levels(on)
+
+
 def set_scales_open(window, open_: bool) -> None:
     for panel in window.plot_area.scale_panels().values():
         panel.set_open(open_)
@@ -812,6 +823,9 @@ def install(window) -> None:
     area.scale_style_button = area.add_tool_button(
         "palette", "Slim colour bars instead of histograms", checkable=True
     )
+    area.auto_scale_button = area.add_tool_button(
+        "zoom-in", "Auto-scale the histograms to the colour levels", checkable=True
+    )
     area.scales_button = area.add_tool_button(
         "eye", "Show or hide all colour scales", checkable=True
     )
@@ -829,6 +843,7 @@ def install(window) -> None:
     area.scale_style_button.toggled.connect(
         lambda bar: set_scale_style(window, "bar" if bar else DEFAULT_SCALE_STYLE)
     )
+    area.auto_scale_button.toggled.connect(lambda on: set_histogram_auto_scale(window, on))
     area.scales_button.clicked.connect(lambda checked: set_scales_open(window, checked))
 
     def sync_scales_button(_open=None) -> None:
@@ -899,6 +914,7 @@ def install(window) -> None:
     if p is not None:
         migrate_reference_kind(p)
         p.bind("plot/scale_style_bar", area.scale_style_button)
+        p.bind("plot/histogram_auto_scale", area.auto_scale_button)
         p.bind("plot/reference_kind", area.ref_kind)
         p.bind("export/type_suffix", CheckableSetting(window.commands["export_suffix"]))
     window.add_splitter("map_scale", area.map_splitter)
