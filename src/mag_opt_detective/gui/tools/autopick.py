@@ -65,6 +65,7 @@ SELECT_RADIUS, DRAG_DISTANCE = 12.0, 4.0  # px: a click this close chooses a lin
 BUSY_SIZE = 250_000  # map values from which a search shows the wait cursor (about 0.2 s)
 DEBOUNCE_MS = 300  # typing in a field searches again after this pause
 LIVE_MS = 100  # a region being edited is searched at most this often (twice the search time)
+LIVE_LIMIT_MS = 250  # a slower search runs only when the edit ends
 SINGULAR = {
     Feature.MAX: "maximum",
     Feature.MIN: "minimum",
@@ -378,8 +379,9 @@ class AutoPick(QObject):
 
     def _on_region_moving(self) -> None:
         """Search a region being edited every so often: :data:`LIVE_MS`, or twice as long as a
-        search takes, so that the drag stays smooth."""
-        if not self._live.isActive():
+        search takes, so that the drag stays smooth (and only at its end if a search is slower
+        than :data:`LIVE_LIMIT_MS`)."""
+        if not self._live.isActive() and self.search_ms <= LIVE_LIMIT_MS:
             self._live.start(max(LIVE_MS, round(2 * self.search_ms)))
 
     def _start(self, target: Target) -> None:
