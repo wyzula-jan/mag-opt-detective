@@ -4,6 +4,13 @@ All notable changes to Magneto-Optical Detective, newest first. The format is ba
 Changelog, and the versions follow Semantic Versioning. `tools/release.py` writes each section
 from the commit messages when a version is released (see Releases in CONTRIBUTING.md).
 
+## 0.4.0 - 2026-10-03
+
+### Added
+
+- **gui:** Help › Documentation (F1, or ⌘? on macOS), Request a feature… and Report a bug…, which open the documentation site and GitHub's issue forms. A bug report is filled in with the app version, how it runs, the system, Python, Qt and library versions and the kind of plot shown, never with file names or paths. When no browser opens, the address can be copied from the message.
+- Issue forms for bug reports and feature requests.
+
 ## 0.3.0 - 2026-10-03
 
 ### Added
