@@ -1,101 +1,13 @@
 <!--
 title: Release notes
-description: What is new in Magneto-Optical Detective 5.0, the rewritten app, compared with the legacy version 4.9. Version 5.0 is not released yet.
+description: What changed in each version of Magneto-Optical Detective, newest first.
 -->
 <div class="wrap page">
 <div class="prose">
 <h1>Release notes</h1>
+<p class="lead">What changed in each version, newest first. The standalone apps of every version are attached to its <a href="https://github.com/wyzula-jan/mag-opt-detective/releases">release on GitHub</a>.</p>
+<p class="muted small">Version numbers follow semantic versioning: fixes raise the last number, new features the middle one, and changes that break compatibility the first one (the middle one before 1.0.0). Versions before 1.0.0 are pre-releases.</p>
 
-<div class="release-head">
-  <h2 id="v5-0" class="release-title">Version 5.0</h2>
-  <span class="badge">Upcoming · not released</span>
-</div>
-<p class="lead">Version 5.0 is the first release of the rewritten app. It replaces the PyQt5 scripts up to version 4.9 and is still in development: this page describes the state of the main branch, and it changes until the release is tagged.</p>
-
-
-<h3 id="highlights">Highlights</h3>
-<ul>
-  <li>A new workbench window, in light and dark, with sliding panels, an inspector and a log.</li>
-  <li>A live switch between cm⁻¹, meV and THz that converts everything without processing again.</li>
-  <li>Auto-pick: follow a line field by field, or find every line in a region.</li>
-  <li>Models and fitting: massive Dirac, Zeeman or magnon branches with coupling, and your own expressions, fitted to the picked points with errors.</li>
-  <li>Journal figures for Nature, APS or custom sizes, with editable text.</li>
-  <li>Standalone apps for macOS, Windows and Linux.</li>
-</ul>
-
-<h3 id="new-app">A new app</h3>
-<ul>
-  <li>Rewritten from the ground up on Qt 6 (PySide6), numpy and scipy, as a Python package that runs with <code>uv run mag-opt-detective</code>.</li>
-  <li>Standalone apps that need no Python, built and checked for every release on macOS, Windows and Linux.</li>
-  <li>Automatic tests of the processing, the file formats and the window on all three systems.</li>
-  <li>Your choices (units, ranges, colours, layout and more) are remembered between sessions; <b>View › Reset settings</b> restores the defaults.</li>
-</ul>
-
-<h3 id="loading">Loading and processing</h3>
-<ul>
-  <li>OPUS binary files are read by the app itself, and OPUS and text files are told apart automatically.</li>
-  <li>Drop a whole sweep folder on the Sample panel: the files are sorted by field, zero-field files go to their own list, and missing fields are reported.</li>
-  <li>New plot <b>R(B)/R(B-ΔB)</b>, the ratio of neighbouring field steps.</li>
-  <li>Derivatives <b>per unit</b>: d/dE per cm⁻¹, meV or THz and d/dB per tesla, besides per data point.</li>
-  <li>A dot on Process shows that settings changed since the last run.</li>
-</ul>
-
-<h3 id="viewing">Viewing</h3>
-<ul>
-  <li>The energy unit is no longer chosen before processing: switch it at any time, and maps, axes, ranges, points, models and exports follow.</li>
-  <li>Field, energy and intensity ranges with Auto or Fixed, shared by the map and the stacked plot.</li>
-  <li>Colour maps magma, inferno, viridis, plasma, turbo, grey and bipolar; levels Auto, Fixed or Symmetric, remembered per plot kind; a histogram of the map.</li>
-  <li>Classic histogram colour scales or slim colour bars, each of which slides away.</li>
-  <li>Stacked spectra with an offset, every n-th field and colours by field.</li>
-  <li>Errors appear in a bar above the plot with a button that opens the panel to fix them, and the log keeps the details.</li>
-</ul>
-
-<h3 id="picking">Picking</h3>
-<ul>
-  <li>Curves as chips with their colours, a table of their points, and markers for the current curve, all curves or none.</li>
-  <li>Undo and redo for every point edit (<kbd>Ctrl</kbd>+<kbd>Z</kbd>, <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd>); Alt-click removes a point.</li>
-  <li>Picking on the stacked plot, with the points drawn on the traces.</li>
-  <li>Auto-pick with Track and Detect, for maxima, minima or inflection points, with a preview to accept or discard.</li>
-</ul>
-
-<h3 id="models">Models and fitting</h3>
-<ul>
-  <li>Massive Dirac transitions drawn over the map and fitted.</li>
-  <li>Zeeman and magnon branches, linear or hyperbolic, optionally coupled to give avoided crossings.</li>
-  <li>Custom expressions in B with physical constants, checked as you type.</li>
-  <li>Fits to the picked curves by branch, by energy order or to the nearest branch, with value ± σ for every parameter, χ², and results to copy or save as a table.</li>
-</ul>
-
-<h3 id="library">Library</h3>
-<ul>
-  <li>The numbered slots of the old version became a library without a limit, with energy and field limits per map.</li>
-  <li>New: <b>Merge by field</b> (e.g. 0 – 8 T and 8 – 16 T) and <b>Average</b> of repeated sweeps, next to <b>Merge by energy</b>.</li>
-</ul>
-
-<h3 id="export">Export</h3>
-<ul>
-  <li>The journal figure window: Nature, APS and custom presets, PDF, SVG and EPS with editable text, PNG and TIFF with their dpi, and a live preview.</li>
-  <li>Quick PNG or SVG images of the plot as shown, with its colour scale.</li>
-  <li>Fit results as tab-separated tables.</li>
-</ul>
-
-<h3 id="compatibility">Changes and compatibility</h3>
-<ul>
-  <li><b>Data tables</b> keep the format of the old versions: tables from 4.9 load into the library, and new tables open where the old ones did.</li>
-  <li><b>Point tables</b> now name the energy unit in their first header cell, e.g. <code>Energy (meV)</code>. Tables from 4.9, without it, are read in the unit shown.</li>
-  <li><kbd>Ctrl</kbd>+<kbd>F</kbd> still processes, next to the new <kbd>Ctrl</kbd>+<kbd>Return</kbd>; <kbd>Ctrl</kbd>+<kbd>E</kbd>, <kbd>Ctrl</kbd>+<kbd>1</kbd> to <kbd>3</kbd> and <kbd>Alt</kbd>+<kbd>1</kbd> to <kbd>3</kbd> work as before.</li>
-</ul>
-
-<h3 id="limitations">Known limitations</h3>
-<ul>
-  <li>The apps are not code-signed: macOS and Windows ask once before the first launch (<a href="download.html#first-launch">how to open them</a>).</li>
-  <li>There is no build for Intel Macs; run from source there.</li>
-  <li>In the standalone app the first journal figure takes about 20 s while the font cache is built.</li>
-  <li>The two-column width of the APS preset (17.8 cm) is not confirmed by an official APS page.</li>
-  <li>Released under the GNU GPL v3; see <a href="about.html#cite">how to cite</a> the app in a publication.</li>
-</ul>
-
-<h2 id="older">Older versions</h2>
-<p>Versions up to 4.9 were PyQt5 scripts versioned by file name; the last of them is kept in git under the tag <code>v4.9-legacy</code>. Releases from 5.0 on are listed on <a href="https://github.com/wyzula-jan/mag-opt-detective/releases">GitHub</a>.</p>
+<!-- changelog -->
 </div>
 </div>

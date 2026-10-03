@@ -151,3 +151,75 @@ def test_the_pages_workflow_runs_only_by_hand():
     assert set(triggers) == {"workflow_dispatch"}
     steps = [step.get("run", "") for job in workflow["jobs"].values() for step in job["steps"]]
     assert any("docs/site/build.py" in run for run in steps)
+
+
+# ---------------------------------------------------------------------- release notes
+CHANGELOG = """\
+# Changelog
+
+Intro text that the page does not show.
+
+## 0.2.0 - 2026-10-05
+
+### Added
+
+- **gui:** add a ruler
+- **core:** read `.dpt` files <b>now</b>
+  in two lines
+
+### Changed
+
+- **io:** write units. **Breaking:** tables name the unit.
+
+## 0.1.0 - 2026-10-03
+
+The first release.
+It plots sweeps.
+
+### Known limitations
+
+- Not signed.
+"""
+
+
+def test_the_release_notes_are_built_from_the_changelog(build, tmp_path):
+    changelog = tmp_path / "CHANGELOG.md"
+    changelog.write_text(CHANGELOG, encoding="utf-8")
+    out = tmp_path / "out"
+    build.build(out, changelog=changelog)
+    assert build.problems(out) == []
+    text = (out / "release-notes.html").read_text(encoding="utf-8")
+    assert "No release yet" not in text and "Intro text" not in text
+    assert text.index('id="v0.2.0"') < text.index('id="v0.1.0"')  # newest first
+    assert '<h2 id="v0.2.0">Version 0.2.0</h2>' in text
+    assert '<time datetime="2026-10-05">5 October 2026</time>' in text
+    assert text.count('<span class="badge">Pre-release</span>') == 2
+    assert "<h3>Added</h3>" in text and "<h3>Known limitations</h3>" in text
+    assert (
+        "<li><strong>core:</strong> read <code>.dpt</code> files &lt;b&gt;now&lt;/b&gt; "
+        "in two lines</li>"
+    ) in text
+    assert "<strong>Breaking:</strong> tables name the unit." in text
+    assert "<p>The first release. It plots sweeps.</p>" in text
+    assert outline(out / "release-notes.html").h1 == 1
+
+
+def test_the_release_notes_before_the_first_release(build, tmp_path):
+    header = "# Changelog\n\nNothing released.\n"
+    assert build.changelog_html(header) == build.NO_RELEASE
+    assert build.read_changelog(tmp_path / "missing.md") == build.NO_RELEASE
+    assert "No release yet" in build.NO_RELEASE
+    assert "Pre-release" not in build.changelog_html("## 1.0.0 - 2027-01-04\n\n- Public.\n")
+    with pytest.raises(ValueError, match="not a release heading"):
+        build.changelog_html(header + "\n## Unreleased\n\n- a\n")
+
+
+def test_the_release_notes_page_shows_the_repository_changelog(build, site):
+    text = (site / "release-notes.html").read_text(encoding="utf-8")
+    changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+    versions = re.findall(r"^## (\S+) - ", changelog, re.MULTILINE)
+    if versions:
+        assert f'id="v{versions[0]}"' in text
+    else:
+        assert "No release yet" in text
+    assert "<!-- changelog -->" not in text

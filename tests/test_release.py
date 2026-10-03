@@ -2,6 +2,7 @@
 release commit and tag (on temporary repositories), and the release workflows."""
 
 import importlib.util
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -483,3 +484,19 @@ def test_only_the_release_workflow_publishes_releases():
     assert "ref" in triggers["workflow_call"]["inputs"]
     assert "tags" not in triggers["push"]  # a pushed tag builds nothing on its own
     assert list(bundles["jobs"]) == ["bundle"]
+
+
+def test_the_release_texts_name_no_earlier_app():
+    changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+    texts = {
+        "CHANGELOG.md header": changelog.partition("\n## ")[0],
+        "CITATION.cff": (ROOT / "CITATION.cff").read_text(encoding="utf-8"),
+        "release-notes.html": (ROOT / "docs/site/pages/release-notes.html").read_text("utf-8"),
+        "release.yml": (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8"),
+    }
+    notes = ROOT / "tools" / "release-notes-0.1.0.md"
+    if notes.exists():
+        texts[notes.name] = notes.read_text(encoding="utf-8")
+    for name, text in texts.items():
+        found = re.findall(r"4\.9|4p9|legacy|rewritten|PyQt5", text, re.IGNORECASE)
+        assert not found, f"{name}: {found}"

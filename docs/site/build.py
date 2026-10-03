@@ -15,8 +15,10 @@ title and description::
 
 layout.html wraps every fragment in the page head, the header with the main navigation and
 the footer; the documentation pages also get the sidebar and links to the previous and
-next page. The style sheet, the icon and images/ are copied next to the pages. Every link is
-relative, so the site works from a local server and from a project page such as
+next page. ``<!-- changelog -->`` in a fragment (the release notes) becomes the releases in
+the repository's CHANGELOG.md, newest first, or "No release yet" before the first. The style
+sheet, the icon and images/ are copied next to the pages. Every link is relative, so the site
+works from a local server and from a project page such as
 https://wyzula-jan.github.io/mag-opt-detective/. The build fails on a broken internal link,
 image or anchor.
 """
@@ -24,6 +26,7 @@ image or anchor.
 from __future__ import annotations
 
 import argparse
+import datetime as dt
 import html
 import re
 import shutil
@@ -39,6 +42,7 @@ IMAGES = HERE / "images"
 LAYOUT = HERE / "layout.html"
 STATIC = ("site.css", "favicon.svg")
 OUT = HERE / "_build"
+CHANGELOG = HERE.parents[1] / "CHANGELOG.md"  # written by tools/release.py
 
 SITE_NAME = "Magneto-Optical Detective"
 SEPARATOR = " \N{MIDDLE DOT} "
@@ -71,6 +75,27 @@ PLACEHOLDER = re.compile(r"\{\{\s*(\w+)\s*\}\}")
 H2 = re.compile(r'<h2 id="(?P<id>[^"]+)"[^>]*>(?P<text>.*?)</h2>', re.DOTALL)
 TAG = re.compile(r"<[^>]+>")
 TOC_MARK = "<!-- toc -->"
+CHANGELOG_MARK = "<!-- changelog -->"
+# CHANGELOG.md: "## 1.2.3 - 2026-10-03" starts a release; its body has "### " headings,
+# "- " lists (indented lines continue an item) and paragraphs, with **bold** and `code`
+RELEASE_START = re.compile(r"^## ", re.MULTILINE)
+RELEASE = re.compile(r"## (?P<version>(?P<major>\d+)\.\d+\.\d+) - (?P<date>\d{4}-\d{2}-\d{2})")
+INLINE = re.compile(r"\*\*(?P<bold>.+?)\*\*|`(?P<code>[^`]+)`")
+MONTHS = (
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December",
+)
+NO_RELEASE = '<p class="muted">No release yet.</p>'
 MEASUREMENT_DATA = "data_to_test"  # the lab data folder: never part of the site
 
 
@@ -206,8 +231,91 @@ def render(page: Page, layout: str) -> str:
     return PLACEHOLDER.sub(fill, layout)
 
 
-def build(out: Path = OUT) -> list[Path]:
-    """Write the site into *out*; returns the pages written.
+# ---------------------------------------------------------------------- release notes
+def inline_html(text: str) -> str:
+    """*text* escaped, with **bold** and `code`."""
+    parts, pos = [], 0
+    for match in INLINE.finditer(text):
+        parts.append(html.escape(text[pos : match.start()], quote=False))
+        if match["code"] is not None:
+            parts.append(f"<code>{html.escape(match['code'], quote=False)}</code>")
+        else:
+            parts.append(f"<strong>{inline_html(match['bold'])}</strong>")
+        pos = match.end()
+    parts.append(html.escape(text[pos:], quote=False))
+    return "".join(parts)
+
+
+def markdown_html(text: str) -> str:
+    """The HTML of a release's body: ``###`` headings, ``-`` lists and paragraphs."""
+    blocks: list[str] = []
+    items: list[str] = []
+    lines: list[str] = []  # the paragraph being read
+
+    def end_paragraph():
+        if lines:
+            blocks.append(f"<p>{inline_html(' '.join(lines))}</p>")
+            lines.clear()
+
+    def end_list():
+        if items:
+            entries = "\n".join(f"  <li>{inline_html(item)}</li>" for item in items)
+            blocks.append(f"<ul>\n{entries}\n</ul>")
+            items.clear()
+
+    for line in text.splitlines():
+        if not line.strip():
+            end_paragraph()
+        elif line.startswith("### "):
+            end_paragraph()
+            end_list()
+            blocks.append(f"<h3>{inline_html(line[4:].strip())}</h3>")
+        elif line.startswith(("- ", "* ")):
+            end_paragraph()
+            items.append(line[2:].strip())
+        elif items and not lines and line[0] in " \t":
+            items[-1] += " " + line.strip()  # an item's next line
+        else:
+            end_list()
+            lines.append(line.strip())
+    end_paragraph()
+    end_list()
+    return "\n".join(blocks)
+
+
+def changelog_html(text: str) -> str:
+    """The releases of a CHANGELOG.md *text* as HTML, newest first (the order of the file);
+    a note when there is none yet. ValueError for a ``##`` heading that is no release."""
+    starts = list(RELEASE_START.finditer(text))
+    if not starts:
+        return NO_RELEASE
+    releases = []
+    for index, start in enumerate(starts):
+        end = starts[index + 1].start() if index + 1 < len(starts) else len(text)
+        head, _, body = text[start.start() : end].partition("\n")
+        match = RELEASE.fullmatch(head.strip())
+        if match is None:
+            raise ValueError(f"CHANGELOG.md: not a release heading: {head.strip()!r}")
+        version = match["version"]
+        date = dt.date.fromisoformat(match["date"])
+        badge = '\n  <span class="badge">Pre-release</span>' if match["major"] == "0" else ""
+        releases.append(
+            '<div class="release-head">\n'
+            f'  <h2 id="v{version}">Version {version}</h2>{badge}\n'
+            f'  <span class="muted small"><time datetime="{date.isoformat()}">'
+            f"{date.day} {MONTHS[date.month - 1]} {date.year}</time></span>\n"
+            "</div>\n" + markdown_html(body)
+        )
+    return "\n\n".join(releases)
+
+
+def read_changelog(path: Path = CHANGELOG) -> str:
+    """The releases in the changelog at *path* as HTML; "No release yet" without the file."""
+    return changelog_html(path.read_text(encoding="utf-8")) if path.is_file() else NO_RELEASE
+
+
+def build(out: Path = OUT, changelog: Path = CHANGELOG) -> list[Path]:
+    """Write the site into *out*, with the releases in *changelog*; returns the pages written.
 
     The default folder is replaced; any other must be new or empty, so nothing else is lost.
     ValueError for a page problem or a broken internal link.
@@ -220,8 +328,10 @@ def build(out: Path = OUT) -> list[Path]:
             raise ValueError(f"{out} is not empty")
     out.mkdir(parents=True, exist_ok=True)
     layout = LAYOUT.read_text(encoding="utf-8")
+    releases = read_changelog(changelog)
     written = []
     for page in read_pages().values():
+        page = page._replace(body=page.body.replace(CHANGELOG_MARK, releases))
         path = out / page.name
         path.write_text(render(page, layout), encoding="utf-8", newline="\n")
         written.append(path)
