@@ -45,7 +45,8 @@ spectra (measured before and after the sweep) correct the drift.
   plot. Colour maps magma, inferno, viridis, plasma, turbo, grey and bipolar, with levels
   Auto (1–99 %), Fixed or Symmetric, remembered per plot kind, and a histogram.
 - Colour scales as the classic histogram or a slim bar (a switch in the plot toolbar);
-  each one collapses with its handle, or all at once.
+  each one collapses with its handle, or all at once. The histograms hold still while
+  you set the levels, or follow them with the toolbar's auto-scale button.
 - Stacked spectra: offset, every n-th field and colours by field.
 - A legend in the map and the stacked plot (a button in the plot toolbar) lists the
   picked curves and the models drawn; drag it anywhere.
