@@ -30,7 +30,7 @@ import numpy as np
 import pyqtgraph as pg
 from PySide6.QtCore import QEvent, QObject, QPointF, Qt, QTimer
 from PySide6.QtGui import QColor, QKeySequence
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QGraphicsItem
 
 from mag_opt_detective.core import picking
 from mag_opt_detective.core.picking import Feature, Track
@@ -745,11 +745,23 @@ def _busy(size: int) -> Iterator[None]:
         QApplication.restoreOverrideCursor()
 
 
+def takes_presses(item: QGraphicsItem) -> bool:
+    """*item* is (part of) something on the map that a left press moves or edits: the plot
+    legend, an ROI, or a region or line that can be dragged (e.g. a baseline region)."""
+    while item is not None:
+        if isinstance(item, PlotLegend | pg.ROI):
+            return True
+        if isinstance(item, pg.LinearRegionItem | pg.InfiniteLine) and item.movable:
+            return True
+        item = item.parentItem()
+    return False
+
+
 class RegionDrag(QObject):
     """Left-drags on the map draw the Detect region (instead of panning); a click there chooses
     one of the lines found. Presses on the region (its inside, edges or handles) go to it, to
-    move or reshape it, and presses on the legend move the legend. Other buttons, the wheel and
-    the moves (crosshair) pass through."""
+    move or reshape it, as do presses on anything else on the map that a press moves or edits
+    (:func:`takes_presses`). Other buttons, the wheel and the moves (crosshair) pass through."""
 
     def __init__(self, tool: AutoPick):
         super().__init__(tool)
@@ -765,10 +777,10 @@ class RegionDrag(QObject):
         self.start = self.press = None
         self.points, self.moved = [], False
 
-    def on_region(self, event) -> bool:
-        """The press is on the region (which then takes it) or on the legend (which moves)."""
+    def on_item(self, event) -> bool:
+        """The press is on the region or another item that takes it (see :class:`RegionDrag`)."""
         items = self.plot.view.items(event.position().toPoint())
-        return any(self.tool.region.owns(item) or isinstance(item, PlotLegend) for item in items)
+        return any(self.tool.region.owns(item) or takes_presses(item) for item in items)
 
     def _point(self, event, inside: bool) -> QPointF | None:
         vb = self.plot.plot.vb
@@ -784,7 +796,7 @@ class RegionDrag(QObject):
         kind = event.type()
         left = Qt.MouseButton.LeftButton
         if kind in (QEvent.Type.MouseButtonPress, QEvent.Type.MouseButtonDblClick):
-            if event.button() != left or not self.tool.wants_region() or self.on_region(event):
+            if event.button() != left or not self.tool.wants_region() or self.on_item(event):
                 return False
             point = self._point(event, inside=True)
             if point is None:

@@ -338,6 +338,28 @@ def test_the_region_drawn_over_the_legend_takes_presses_there(shown, qtbot):
     assert legend(w).position() == (0.0, 0.0)  # the legend did not
 
 
+def test_detect_leaves_presses_on_other_movable_items_to_them(shown, qtbot):
+    """As on the legend, a press on a region the user can drag (e.g. a baseline region) moves
+    that region and draws no auto-pick region; one on a fixed region draws as before."""
+    w = shown
+    tool = w.autopick
+    w.tools.set_active("autopick")
+    tool.bar.mode.set_value("detect")
+    band = pg.LinearRegionItem((300.0, 500.0), orientation="horizontal")
+    band.setZValue(9.5)
+    w.plots.map.plot.addItem(band, ignoreBounds=True)
+    start = data_point(w, 1.2, 400.0)
+    drag(qtbot, w, [start, start + QPoint(0, 20), start + QPoint(0, 40)])
+    assert band.getRegion()[0] < 300.0  # the band moved down
+    assert tool.region.roi is None and tool.target is None
+
+    band.setMovable(False)  # as the Processing panel's guide band
+    lo, hi = band.getRegion()
+    drag(qtbot, w, [start, start + QPoint(40, 20), start + QPoint(80, 40)])
+    assert band.getRegion() == (lo, hi)
+    assert tool.region.roi is not None and tool.target is not None  # a region drawn
+
+
 def test_the_legend_follows_the_theme(processed):
     w = processed
     item = legend(w)
