@@ -12,7 +12,9 @@ on:
     branches: [main]
   workflow_dispatch:
 
-# one run at a time, never cancelled: a waiting run sees the release the one before created
+# one run at a time and a running one is never cancelled; a waiting run may be replaced by a
+# newer one (harmless: each run publishes the version on main then), and it sees the release
+# the run before it created
 concurrency:
   group: release
   cancel-in-progress: false
@@ -43,6 +45,9 @@ jobs:
           publish=true
           if [ "$GITHUB_REF" != refs/heads/main ]; then
             echo "Releases are published from main only."
+            publish=false
+          elif ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "$version is a development version: nothing to publish."
             publish=false
           elif ! python3 tools/release.py --print-notes "$version" > /dev/null; then
             echo "$version has no section in CHANGELOG.md: nothing to publish."
