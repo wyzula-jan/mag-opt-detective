@@ -676,3 +676,25 @@ def test_the_stacked_fill_lies_below_the_traces(processed, qtbot):
     assert not region.label.isVisibleTo(region)
     drag_like(region, 500, 900)
     assert region.label.isVisibleTo(region)
+
+
+def test_a_library_save_or_plot_applies_a_waiting_region(processed, qtbot, errors):
+    w, c = processed, processed.controller
+    panel = w.panels["processing"]
+    panel.baseline_live.setChecked(True)
+    drag_like(panel.regions["map"], 600, 700)
+    assert c.result.baseline_region == (600, 700)
+    panel.live.slow = True  # typed changes wait until the typing pauses
+    panel.baseline_hi.setText("1000")
+    assert panel.live.is_pending() and c.result.baseline_region == (600, 700)
+    assert not c.changed_since_process()  # it counts as applied ...
+    library.save_current(w)  # ... so the map saved has it
+    np.testing.assert_allclose(c.library[-1].fmap.values, fresh_result(w).ratio.values)
+    assert c.result.baseline_region == (600, 1000)
+
+    panel.baseline_lo.setText("700")
+    assert panel.live.is_pending()
+    library.plot_entry(w, c.library[0].key)  # the processed map leaves with its region
+    assert c.result_source == "library" and not c.changed_since_process()
+    qtbot.wait(2 * LiveApply.SETTLE)  # the waiting change has nothing left to do
+    assert not panel.live.is_pending() and not errors

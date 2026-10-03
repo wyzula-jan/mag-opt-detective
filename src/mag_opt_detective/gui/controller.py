@@ -883,6 +883,7 @@ class AppController(QObject):
 
     def from_map(self, fmap: FieldMap) -> ProcessResult:
         """Show an already processed map (library), baseline-corrected like a processed one."""
+        self.settle_baseline()  # the processed map leaves with the region it counts as having
         baseline = self._baseline(panel="processing")
         if baseline is not None:
             self.check_energy_range("baseline region", baseline, fmap.energy, "processing")
@@ -917,6 +918,12 @@ class AppController(QObject):
         except ValueError:
             return False
         return region is None or bool(energy_mask(self.result.ratio.energy, *region).any())
+
+    def settle_baseline(self) -> None:
+        """Apply a live region that counts as applied but is still waiting (the panel applies
+        changes at most about ten times a second), before the map shown is kept or replaced."""
+        if self._baseline_is_live() and self._baseline() != self.result.baseline_region:
+            self.apply_baseline()
 
     def apply_baseline(self) -> bool:
         """Apply the baseline region of the processing options (none when it is off) to the
@@ -1366,6 +1373,7 @@ class AppController(QObject):
         """Add the R(B)/R(0) map shown to the library."""
         if self.result is None:
             raise panel_error("nothing to save - process data first", "library")
+        self.settle_baseline()
         entry = self.add_map(self.result.ratio, name or self.result_name())
         logger.info("Library: saved the current R(B)/R(0) as %r", entry.name)
         return entry
