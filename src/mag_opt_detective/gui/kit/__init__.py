@@ -5,6 +5,7 @@ Widgets that hold state implement the settings protocol used by ``gui.settings.P
 ``set_settings_value(value)`` restores it, returning False for invalid values.
 """
 
+from mag_opt_detective.gui.kit._common import TightToolButton
 from mag_opt_detective.gui.kit.collapsible import CollapsibleSection
 from mag_opt_detective.gui.kit.empty_state import EmptyState
 from mag_opt_detective.gui.kit.infobar import InfoBar
@@ -23,4 +24,5 @@ __all__ = [
     "SegmentedControl",
     "SlidePanel",
     "Switch",
+    "TightToolButton",
 ]

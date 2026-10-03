@@ -7,6 +7,7 @@ from PySide6.QtGui import QIcon, QKeyEvent
 from PySide6.QtWidgets import QButtonGroup, QHBoxLayout, QSizePolicy, QToolButton, QWidget
 
 from mag_opt_detective.gui import icons
+from mag_opt_detective.gui.kit._common import TightToolButton
 
 SIZES = ("md", "sm", "xs")
 
@@ -46,7 +47,7 @@ class SegmentedControl(QWidget):
         """Append an option; *icon* is a QIcon or an icon name from ``gui.icons`` (re-tinted)."""
         if value in self._buttons:
             raise ValueError(f"duplicate option {value!r}")
-        button = QToolButton(self)
+        button = TightToolButton(self)
         button.setProperty("kit", "segment")
         button.setCheckable(True)
         button.setText(text)

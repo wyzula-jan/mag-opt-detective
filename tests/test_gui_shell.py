@@ -1,6 +1,7 @@
 """The window frame: rail and slide panels, colour scales, the log drawer and the appearance."""
 
 import logging
+import sys
 
 import numpy as np
 import pytest
@@ -286,6 +287,40 @@ def test_empty_states_replace_plots_with_nothing_to_show(shown, sweep, monkeypat
     assert empty.isHidden() and not area.ref_kind.isHidden()
     area.set_current_view("map")
     assert empty.isHidden() and area.ref_kind.isHidden()
+
+
+def test_toolbar_keeps_one_row_at_the_design_size(shown, qtbot):
+    """With the app's stylesheet the toolbar is one row at 1400 x 900 (as in the mockup):
+    Process leaves out its key hint where that keeps the row, and shows it once the toolbar
+    wraps anyway."""
+    w, tb = shown, shown.toolbar
+    w.setStyleSheet(theme.build_stylesheet(theme.tokens_for(False)))  # the app's paddings
+    full = tb.one_row_width()
+    short = full - tb.process_button.key_width()
+    if sys.platform == "darwin":  # the design platform (other UI fonts can be wider)
+        assert short <= 1400 - 10 and tb.process_button.key_width() > 0
+
+    def layout_at(width: int, rows: int, key: bool, height: int | None = None) -> None:
+        """Resize the toolbar to *width*; it settles on *rows* rows, the key hint as *key*."""
+        w.resize(w.width() + width - tb.width(), 900)
+        qtbot.waitUntil(lambda: tb.width() == width)
+        qtbot.waitUntil(
+            lambda: (
+                len({group.y() for group in tb.groups}) == rows
+                and tb.process_button.key_shown() is key
+                and (height is None or tb.height() == height)
+            )
+        )
+
+    layout_at(full + 50, rows=1, key=True)
+    one_row = tb.height()
+    layout_at(full, rows=1, key=True, height=one_row)
+    layout_at(full - 1, rows=1, key=False, height=one_row)
+    layout_at(short, rows=1, key=False, height=one_row)
+    layout_at(short - 1, rows=2, key=True)
+    assert tb.height() > one_row
+    if sys.platform == "darwin":
+        layout_at(1400, rows=1, key=full <= 1400, height=one_row)
 
 
 def test_toolbar_and_status_bar_details(window, sweep):

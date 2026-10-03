@@ -4,7 +4,7 @@ import pytest
 from PySide6.QtCore import QPoint, QSettings, QSize, Qt
 from PySide6.QtWidgets import QCheckBox, QLabel, QLineEdit, QSplitter, QVBoxLayout, QWidget
 
-from mag_opt_detective.gui import icons
+from mag_opt_detective.gui import icons, theme
 from mag_opt_detective.gui.kit import (
     CollapsibleSection,
     InfoBar,
@@ -322,6 +322,17 @@ def test_segmented_keyboard_and_roving_focus(qtbot, segmented):
     assert segmented.value() == "0"
     qtbot.keyClick(segmented.button("0"), Qt.Key.Key_End)
     assert segmented.value() == "1"
+
+
+def test_segments_are_as_wide_as_their_text_and_padding(segmented):
+    """As the mockup's ``.seg.sm`` button: the text in an 8 px padding and a 1 px border (Qt's
+    tool button would add the width of two spaces)."""
+    segmented.setStyleSheet(theme.build_stylesheet(theme.tokens_for(False)))
+    for value in segmented.options():
+        button = segmented.button(value)
+        text = button.fontMetrics().horizontalAdvance(button.text())
+        assert text + 2 * 9 <= button.sizeHint().width() <= text + 2 * 9 + 5
+        assert button.minimumSizeHint() == button.sizeHint()
 
 
 def test_segmented_settings_protocol(segmented):

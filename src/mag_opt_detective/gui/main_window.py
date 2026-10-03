@@ -59,7 +59,13 @@ from mag_opt_detective.gui import console, export_menu, icons, plot_panel
 from mag_opt_detective.gui.controller import AppController
 from mag_opt_detective.gui.display import format_range, process_key, unit_text
 from mag_opt_detective.gui.inspector import colour, models, traces, view
-from mag_opt_detective.gui.kit import CollapsibleSection, InfoBar, SegmentedControl, SlidePanel
+from mag_opt_detective.gui.kit import (
+    CollapsibleSection,
+    InfoBar,
+    SegmentedControl,
+    SlidePanel,
+    TightToolButton,
+)
 from mag_opt_detective.gui.panels import PanelPage, library, points, processing, reference, sample
 from mag_opt_detective.gui.settings import Persistence
 from mag_opt_detective.gui.theme import SCHEMES, Theme, current_theme, current_tokens
@@ -134,7 +140,7 @@ class _Button(QPushButton):
 
     GAP = 6
     ICON = 16
-    STYLE_SPACING = 4  # what the style itself puts between icon and text
+    PADDING = 11  # the stylesheet's 10 px padding and 1 px border, on each side
 
     def __init__(self, text: str, icon: str, color: str | None = None, key: str = "", parent=None):
         super().__init__(text, parent)
@@ -142,9 +148,25 @@ class _Button(QPushButton):
         icons.set_icon(self, icon, color)
         self.setIconSize(QSize(self.ICON, self.ICON))
         self._key = key
+        self._key_shown = bool(key)
 
     def key_text(self) -> str:
         return self._key
+
+    def key_shown(self) -> bool:
+        return self._key_shown
+
+    def show_key(self, shown: bool) -> None:
+        """Show or leave out the key hint (a narrow toolbar leaves it out)."""
+        shown = shown and bool(self._key)
+        if shown != self._key_shown:
+            self._key_shown = shown
+            self.updateGeometry()
+            self.update()
+
+    def key_width(self) -> int:
+        """The width the key hint adds to the button."""
+        return self.GAP + self._key_size().width() if self._key else 0
 
     def _key_font(self) -> QFont:
         font = QFont(self.font())
@@ -158,14 +180,16 @@ class _Button(QPushButton):
         return QSize(metrics.horizontalAdvance(self._key) + 10, metrics.height() + 2)
 
     def _trailing_width(self) -> int:
-        if self._key:
-            return self.GAP + self._key_size().width()
+        if self._key_shown:
+            return self.key_width()
         return self.GAP + 12 if self.menu() is not None else 0
 
     def sizeHint(self) -> QSize:
-        hint = super().sizeHint()
-        extra = self.GAP - self.STYLE_SPACING + self._trailing_width()
-        return QSize(hint.width() + extra, max(hint.height(), 28))
+        """What is painted inside the padding; Qt's own width also counts a menu indicator
+        (drawn here as the chevron) and its icon spacing."""
+        text = self.fontMetrics().horizontalAdvance(self.text())
+        width = 2 * self.PADDING + self.ICON + self.GAP + text + self._trailing_width()
+        return QSize(width, max(super().sizeHint().height(), 28))
 
     def minimumSizeHint(self) -> QSize:
         return self.sizeHint()
@@ -195,7 +219,7 @@ class _Button(QPushButton):
         )
         x += text_width + self.GAP
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        if self._key:
+        if self._key_shown:
             size = self._key_size()
             box = QRectF(x, middle - size.height() / 2, size.width(), size.height())
             faded = QColor(color)
@@ -400,7 +424,7 @@ class MainToolbar(QWidget):
         self.axis = _segmented(
             [("E", "d/dE", "Along energy"), ("B", "d/dB", "Along field")], "Derivative axis"
         )
-        self.per_unit = QToolButton()
+        self.per_unit = TightToolButton()
         self.per_unit.setProperty("kit", "chip")
         self.per_unit.setCheckable(True)
         self.per_unit.setText("per unit")
@@ -422,20 +446,40 @@ class MainToolbar(QWidget):
         self.appearance.setProperty("kit", "tool")
         self.appearance.setIconSize(QSize(18, 18))
 
+        self.groups = [  # wrap as wholes
+            _group(self.open_button, self.process_button),
+            _group(self.kind, label="Plot", separated=True),
+            _group(self.order, self.axis, self.per_unit, label="Derivative", separated=True),
+            _group(self.unit, label="Unit", separated=True),
+        ]
         flow_box = QWidget()
         flow = FlowLayout(flow_box, spacing=_Group.SEPARATION, row_spacing=8)
-        flow.addWidget(_group(self.open_button, self.process_button))
-        flow.addWidget(_group(self.kind, label="Plot", separated=True))
-        flow.addWidget(
-            _group(self.order, self.axis, self.per_unit, label="Derivative", separated=True)
-        )
-        flow.addWidget(_group(self.unit, label="Unit", separated=True))
+        for group in self.groups:
+            flow.addWidget(group)
         flow_box.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        self._end = _group(self.export_button, self.appearance)
         row = QHBoxLayout(self)
         row.setContentsMargins(10, 8, 10, 8)
         row.setSpacing(8)
         row.addWidget(flow_box, stretch=1)
-        row.addWidget(_group(self.export_button, self.appearance), 0, Qt.AlignmentFlag.AlignTop)
+        row.addWidget(self._end, 0, Qt.AlignmentFlag.AlignTop)
+
+    def one_row_width(self) -> int:
+        """The toolbar width that holds every group on one row, with Process's key hint."""
+        widths = [group.sizeHint().width() for group in self.groups]
+        if not self.process_button.key_shown():
+            widths[0] += self.process_button.key_width()
+        row, margins = self.layout(), self.layout().contentsMargins()
+        flow = sum(widths) + _Group.SEPARATION * (len(widths) - 1)  # the flow's spacing
+        end = row.spacing() + self._end.sizeHint().width()
+        return margins.left() + flow + end + margins.right()
+
+    def resizeEvent(self, event) -> None:
+        """Process leaves out its key hint where that keeps the toolbar on one row."""
+        full = self.one_row_width()
+        short = full - self.process_button.key_width()
+        self.process_button.show_key(not short <= self.width() < full)
+        super().resizeEvent(event)
 
 
 class AppearanceSetting:

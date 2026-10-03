@@ -5,8 +5,8 @@ from __future__ import annotations
 import json
 import math
 
-from PySide6.QtCore import QEasingCurve, QVariantAnimation
-from PySide6.QtWidgets import QWidget
+from PySide6.QtCore import QEasingCurve, QSize, Qt, QVariantAnimation
+from PySide6.QtWidgets import QToolButton, QWidget
 
 DURATION_MS = 180
 QWIDGETSIZE_MAX = 16777215
@@ -59,3 +59,18 @@ def json_object(value) -> dict | None:
     except ValueError:
         return None
     return data if isinstance(data, dict) else None
+
+
+class TightToolButton(QToolButton):
+    """A tool button whose text sits in the stylesheet's padding alone, as the mockup's
+    segments and chips: QToolButton's own hint adds the width of two spaces to the text."""
+
+    def sizeHint(self) -> QSize:
+        hint = super().sizeHint()
+        beside = (
+            Qt.ToolButtonStyle.ToolButtonTextOnly,
+            Qt.ToolButtonStyle.ToolButtonTextBesideIcon,
+        )
+        if self.text() and self.toolButtonStyle() in beside:
+            hint.setWidth(hint.width() - 2 * self.fontMetrics().horizontalAdvance(" "))
+        return hint

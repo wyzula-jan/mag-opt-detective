@@ -7,7 +7,7 @@ import threading
 import numpy as np
 import pytest
 from PySide6.QtCore import QEvent, QSettings
-from PySide6.QtWidgets import QApplication, QLabel
+from PySide6.QtWidgets import QApplication, QLabel, QStyle
 
 import gui_helpers
 from gui_helpers import inspector_page, load_sweep, process, save_to, set_unit
@@ -20,7 +20,7 @@ from mag_opt_detective.core.zeeman import MU_B, Form, branch_energy
 from mag_opt_detective.gui.controller import AppController
 from mag_opt_detective.gui.inspector import model_state as ms
 from mag_opt_detective.gui.inspector import models as models_module
-from mag_opt_detective.gui.main_window import MainWindow
+from mag_opt_detective.gui.main_window import INSPECTOR_MIN_WIDTH, MainWindow
 from mag_opt_detective.gui.settings import PREFIX
 
 window, errors = gui_helpers.window, gui_helpers.errors  # shared fixtures
@@ -657,8 +657,8 @@ def test_visible_models_are_overlays_of_the_figure(window, sweep, qtbot, errors)
 
 
 def test_the_section_never_widens_the_inspector(window, sweep, tmp_path, errors):
-    """With every card open and a fit shown, Models needs no more width than Colour (the
-    inspector content cannot scroll sideways, so wider content would be clipped)."""
+    """With every card open and a fit shown, Models fits the inspector at its narrowest (its
+    content cannot scroll sideways, so wider content would be clipped)."""
     load_sweep(window, sweep)
     process(window)
     field, columns = zeeman_points(np.random.default_rng(1))
@@ -674,8 +674,9 @@ def test_the_section_never_widens_the_inspector(window, sweep, tmp_path, errors)
         card_of(window, entry).fit_button.click()
     card_of(window, zeeman).fit_area.fit_button.click()
     assert models.result(zeeman) is not None
-    colour = window.inspector["colour"].minimumSizeHint().width()
-    assert window.inspector["models"].minimumSizeHint().width() <= colour
+    scrollbar = window.style().pixelMetric(QStyle.PixelMetric.PM_ScrollBarExtent)
+    narrowest = INSPECTOR_MIN_WIDTH - scrollbar
+    assert window.inspector["models"].minimumSizeHint().width() <= narrowest
     assert not errors
 
 
