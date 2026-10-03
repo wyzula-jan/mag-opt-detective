@@ -105,6 +105,25 @@ def test_field_range():
         FieldRange(1.0, 0.0, 2.0).values()
 
 
+def test_a_custom_field_range_is_counted_before_it_is_made(controller, sweep):
+    """A tiny step is refused before a huge array is made (no MemoryError)."""
+    tiny = FieldRange(0.0, 1e-12, 1.0)
+    assert tiny.count() == 10**12 + 1
+    with pytest.raises(ValueError, match="1000000000001 values but 4 files are loaded"):
+        tiny.values(expected=4)
+    with pytest.raises(ValueError, match="at most 100000"):
+        tiny.values()
+    controller.set_processing(
+        sample_files=SweepFiles(tuple(sweep["zero"]), tuple(sweep["field"])),
+        custom_field=True,
+        sample_field=tiny,
+    )
+    with pytest.raises(ValueError, match="values but 4 files are loaded") as exc:
+        controller.process()
+    assert exc.value.panel == "sample"
+    np.testing.assert_allclose(FieldRange(1.0, 0.5, 2.5).values(expected=4), [1, 1.5, 2, 2.5])
+
+
 def test_the_stacked_offset_of_other_maps_survives_a_unit_switch(controller):
     """A unit switch on a per-unit d/dE rescales the offset for that map only: it is the
     same per cm^-1 whichever map is shown."""

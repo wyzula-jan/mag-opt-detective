@@ -97,6 +97,7 @@ VIEW_RANGES = {
 }
 
 CURVE_NAME = re.compile(r"[A-Za-z0-9_ .+-]{1,32}")  # names of picked-point curves
+MAX_FIELD_VALUES = 100_000  # of a custom field range
 
 Curve = tuple[np.ndarray, np.ndarray]
 
@@ -353,17 +354,29 @@ class FieldRange:
     step: float | None = 0.25
     end: float | None = 16.0
 
-    def values(self) -> np.ndarray:
+    def count(self) -> int:
+        """How many values the range has (ValueError for an empty or reversed range)."""
         for name, value in (("start", self.start), ("step", self.step), ("end", self.end)):
             if value is None:
                 raise ValueError(f"custom field range: enter a number for the {name}")
         start, step, end = self.start, self.step, self.end
+        if not (math.isfinite(start) and math.isfinite(step) and math.isfinite(end)):
+            raise ValueError("custom field range: enter finite numbers")
         if step <= 0:
             raise ValueError("field step must be positive")
         if end < start:
             raise ValueError("end field must not be smaller than start field")
-        n = round((end - start) / step) + 1
-        return start + step * np.arange(n)
+        return round((end - start) / step) + 1
+
+    def values(self, expected: int | None = None) -> np.ndarray:
+        """The field values; ValueError before they are made when there are not *expected*
+        of them (one per file) or more than MAX_FIELD_VALUES."""
+        n = self.count()
+        if expected is not None and n != expected:
+            raise ValueError(f"custom field range has {n} values but {expected} files are loaded")
+        if n > MAX_FIELD_VALUES:
+            raise ValueError(f"custom field range has {n} values; at most {MAX_FIELD_VALUES}")
+        return self.start + self.step * np.arange(n)
 
 
 @dataclass(frozen=True)
@@ -711,7 +724,9 @@ class AppController(QObject):
 
     def _load(self, files: SweepFiles, field_range: FieldRange, panel: str) -> Measurement:
         with in_panel(panel):
-            field_values = field_range.values() if self._processing.custom_field else None
+            field_values = None
+            if self._processing.custom_field:
+                field_values = field_range.values(expected=len(files.field) or None)
             return load_measurement(files.zero, files.field, field=field_values)
 
     def _cut(self, measurement: Measurement) -> Measurement:
