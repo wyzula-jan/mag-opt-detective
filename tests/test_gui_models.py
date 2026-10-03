@@ -2,6 +2,7 @@
 the picked points, the results table, figure_state overlays and the saved model list."""
 
 import json
+import threading
 
 import numpy as np
 import pytest
@@ -15,7 +16,9 @@ from mag_opt_detective.core.models import dirac_interband
 from mag_opt_detective.core.points import PointTable
 from mag_opt_detective.core.units import Unit, convert
 from mag_opt_detective.core.zeeman import MU_B, Form, branch_energy
+from mag_opt_detective.gui.controller import AppController
 from mag_opt_detective.gui.inspector import model_state as ms
+from mag_opt_detective.gui.inspector import models as models_module
 from mag_opt_detective.gui.main_window import MainWindow
 from mag_opt_detective.gui.settings import PREFIX
 
@@ -401,6 +404,49 @@ def test_fit_a_custom_expression(window, sweep, tmp_path, errors):
     assert float(editor.rows["E0"].value.text()) == pytest.approx(
         ms.params(entry)["E0"].value, rel=1e-5
     )
+    assert not errors
+
+
+def test_a_long_fit_runs_in_the_background_and_can_be_cancelled(
+    window, sweep, tmp_path, qtbot, monkeypatch, errors
+):
+    load_sweep(window, sweep)
+    process(window)
+    field, columns = zeeman_points(np.random.default_rng(5))
+    load_table(window, tmp_path, field, {"LL 1": columns["LL 1"]})
+    release = threading.Event()
+    original = AppController.run_fit
+
+    def slow(model, observations, assignment):  # waits until the test lets it go on
+        release.wait(5)
+        return original(model, observations, assignment)
+
+    monkeypatch.setattr(AppController, "run_fit", staticmethod(slow))
+    monkeypatch.setattr(models_module, "FIT_WAIT", 0.02)
+    models = models_of(window)
+    entry = add(window, "zeeman")
+    card = card_of(window, entry)
+    card.fit_button.click()
+    area = card.fit_area
+    area.fit_button.click()
+    assert models.is_fitting(entry) and models.result(entry) is None  # busy, not frozen
+    assert area.fit_button.text() == "Fitting…" and not area.fit_button.isEnabled()
+    assert not area.cancel_button.isHidden() and not area.mode.isEnabled()
+    release.set()
+    qtbot.waitUntil(lambda: models.result(entry) is not None, timeout=5000)
+    assert not models.is_fitting(entry) and area.cancel_button.isHidden()
+    assert area.fit_button.text() == "Fit" and not area.results.isHidden()
+
+    release.clear()
+    area.fit_button.click()
+    job = models.jobs[entry]
+    area.cancel_button.click()
+    assert not models.is_fitting(entry) and area.fit_button.isEnabled()
+    release.set()  # the worker stops at its next evaluation of the model
+    qtbot.waitUntil(lambda: job.wait(0), timeout=5000)
+    qtbot.wait(20)  # the worker's signal arrives and is ignored
+    assert isinstance(job.error, models_module.FitCancelled)
+    assert models.result(entry) is None and area.error.isHidden()
     assert not errors
 
 

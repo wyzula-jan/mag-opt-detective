@@ -41,6 +41,7 @@ from mag_opt_detective.gui.panels.common import (
     Note,
     WidthWatcher,
     fit_segments,
+    scaled_font,
     section_label,
     small_button,
 )
@@ -63,6 +64,10 @@ class FitOwner(Protocol):
     def picked(self) -> list[tuple[str, int, QColor]]: ...
 
     def fit(self, entry: ms.ModelEntry) -> None: ...
+
+    def is_fitting(self, entry: ms.ModelEntry) -> bool: ...
+
+    def cancel_fit(self, entry: ms.ModelEntry) -> None: ...
 
     def result(self, entry: ms.ModelEntry) -> FitResult | None: ...
 
@@ -112,9 +117,10 @@ class FitArea(QWidget):
         head.addStretch(1)
         head.addWidget(self.close_button)
 
-        self.mode = SegmentedControl(size="sm", expand=True)
+        self.mode = SegmentedControl(size="xs", expand=True)
         for value, text, tip in ms.ASSIGNMENTS:
-            self.mode.add_option(value.value, text, tip)
+            button = self.mode.add_option(value.value, text, tip)
+            button.setFont(scaled_font(button, 0.92))
         self.mode.setAccessibleName("Assignment of the picked points")
         self.mode.setMinimumWidth(10)  # the labels shorten instead (WidthWatcher)
         WidthWatcher(self, lambda width: fit_segments(self.mode, MODE_LABELS, width))
@@ -133,11 +139,14 @@ class FitArea(QWidget):
         self.fit_button.setProperty("kit", "primary")
         self.fit_button.setToolTip("Fit the free parameters to the assigned curves")
         icons.set_icon(self.fit_button, "play", "accent-fg")
+        self.cancel_button = LinkButton("Cancel", "Stop the fit")
+        self.cancel_button.hide()
         self.error = Note("", "err")
         self.error.hide()
         fit_row = QHBoxLayout()
         fit_row.setContentsMargins(0, 0, 0, 0)
         fit_row.addWidget(self.fit_button)
+        fit_row.addWidget(self.cancel_button)
         fit_row.addStretch(1)
         fit_row.addWidget(self.points_link)
 
@@ -188,6 +197,7 @@ class FitArea(QWidget):
 
         self.mode.valueChanged.connect(self._on_mode)
         self.fit_button.clicked.connect(self._on_fit)
+        self.cancel_button.clicked.connect(lambda: owner.cancel_fit(entry))
         self.points_link.clicked.connect(owner.open_points)
         self.apply_button.clicked.connect(lambda: owner.apply(entry))
         self.discard_button.clicked.connect(lambda: owner.discard(entry))
@@ -208,10 +218,15 @@ class FitArea(QWidget):
             self._shown = shown
         self._fill_combos()
         has_points = bool(picked)
+        busy = self.owner.is_fitting(self.entry)
         self.table.setVisible(has_points)
+        self.table.setEnabled(not busy)
+        self.mode.setEnabled(not busy)
         self.empty.setVisible(not has_points)
         self.points_link.setVisible(not has_points or self._error_panel == "points")
-        self.fit_button.setEnabled(has_points and self.entry.is_drawable())
+        self.fit_button.setText("Fitting…" if busy else "Fit")
+        self.fit_button.setEnabled(has_points and self.entry.is_drawable() and not busy)
+        self.cancel_button.setVisible(busy)
         if not self.entry.is_drawable():
             self.fit_button.setToolTip("Enter a valid expression first")
         else:
@@ -311,7 +326,7 @@ class FitArea(QWidget):
     def _on_fit(self) -> None:
         self.show_error(None)
         try:
-            self.owner.fit(self.entry)
+            self.owner.fit(self.entry)  # the result (or its error) is shown when it is done
         except EXPECTED_ERRORS as exc:
             self.show_error(str(exc), getattr(exc, "panel", None))
-        self.refresh_results()
+        self.refresh()

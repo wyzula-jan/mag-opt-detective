@@ -852,6 +852,34 @@ class AppController(QObject):
             raise ValueError("assign at least one picked curve to a branch")
         return observations
 
+    def prepare_fit(self, model: Model, mapping: Mapping[str, int | None]) -> list[Observation]:
+        """The observations to fit *model* to; ValueError when they cannot fit it (no points,
+        no curve assigned, every parameter fixed, not more points than free parameters)."""
+        observations = self.fit_observations(mapping, model.unit)
+        n_points = sum(obs.field.size for obs in observations)
+        n_free = sum(not p.fixed for p in model.params)
+        if n_free == 0:
+            raise ValueError("every parameter is fixed, so there is nothing to fit")
+        if n_points <= n_free:
+            raise ValueError(
+                f"{n_points} points cannot fit {n_free} free parameters; "
+                "pick more points or fix parameters"
+            )
+        return observations
+
+    @staticmethod
+    def run_fit(
+        model: Model, observations: list[Observation], assignment: Assignment | str
+    ) -> FitResult:
+        """:func:`fit`, with a ValueError when it does not converge (no Qt: a worker thread
+        may run it on a copy of the model)."""
+        result = fit(model, observations, assignment)
+        if not result.success:
+            raise ValueError(f"the fit did not converge ({result.message})")
+        if not all(math.isfinite(v) for v in result.values.values()):
+            raise ValueError("the fit gave values that are not finite")
+        return result
+
     def fit_model(
         self,
         model: Model,
@@ -863,30 +891,22 @@ class AppController(QObject):
         Raises ValueError with a readable message for missing points, too few points for the
         free parameters, a model that cannot be evaluated or a fit that does not converge.
         """
-        observations = self.fit_observations(mapping, model.unit)
-        n_points = sum(obs.field.size for obs in observations)
-        n_free = sum(not p.fixed for p in model.params)
-        if n_free == 0:
-            raise ValueError("every parameter is fixed, so there is nothing to fit")
-        if n_points <= n_free:
-            raise ValueError(
-                f"{n_points} points cannot fit {n_free} free parameters; "
-                "pick more points or fix parameters"
-            )
-        result = fit(model, observations, assignment)
-        if not result.success:
-            raise ValueError(f"the fit did not converge ({result.message})")
-        if not all(math.isfinite(v) for v in result.values.values()):
-            raise ValueError("the fit gave values that are not finite")
+        observations = self.prepare_fit(model, mapping)
+        result = self.run_fit(model, observations, assignment)
+        self.log_fit(result, assignment, model.unit)
+        return result
+
+    @staticmethod
+    def log_fit(result: FitResult, assignment: Assignment | str, unit: Unit | str) -> None:
+        n_points = sum(r.size for r in result.residuals)
         logger.info(
             "Fit (%s, %d points): chi2 = %.4g %s^2, dof = %d",
             Assignment(assignment).value,
             n_points,
             result.chi2,
-            model.unit,
+            unit,
             result.dof,
         )
-        return result
 
     # --- points ------------------------------------------------------------------------
     @contextlib.contextmanager

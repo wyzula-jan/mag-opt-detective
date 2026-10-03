@@ -15,17 +15,20 @@ by the Dirac card once.
 
 from __future__ import annotations
 
+import contextlib
+import copy
 import logging
 import math
+import threading
 from pathlib import Path
 
 import numpy as np
 import pyqtgraph as pg
-from PySide6.QtCore import QObject, Qt
-from PySide6.QtGui import QColor, QGuiApplication
+from PySide6.QtCore import QObject, Qt, Signal
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QApplication, QMenu, QVBoxLayout, QWidget
 
-from mag_opt_detective.core.fitting import FitResult, apply
+from mag_opt_detective.core.fitting import FitResult, Model, Observation, apply
 from mag_opt_detective.core.units import Unit, from_cm1
 from mag_opt_detective.gui import icons
 from mag_opt_detective.gui.controller import EXPECTED_ERRORS, AppController, user_action
@@ -44,6 +47,7 @@ LAYER, PREVIEW_LAYER = "models", "models fit"
 SETTINGS_KEY = "models/list"
 LEGACY_KEYS = ("models/show_dirac", "models/velocity", "models/delta", "models/n_lines")
 SHADOW_PEN = pg.mkPen((0, 0, 0, 110), width=3)  # as the processing guides
+FIT_WAIT = 0.25  # s: a fit that takes longer goes on in the background (busy, cancellable)
 NO_MODELS = (
     "No models. Add one to draw transition energies over the map and fit them to the picked points."
 )
@@ -108,6 +112,73 @@ class ModelsPage(QWidget):
         return [card for card in items if isinstance(card, ModelCard)]
 
 
+class FitCancelled(Exception):
+    """Raised in a worker's model evaluation once its fit was cancelled."""
+
+
+class _Cancellable:
+    """*model* for a worker thread: its evaluation stops the fit once *cancelled* is set."""
+
+    def __init__(self, model: Model, cancelled: threading.Event):
+        self._model = model
+        self._cancelled = cancelled
+        self.unit = model.unit
+        self.params = model.params
+
+    def branch_names(self) -> list[str]:
+        return self._model.branch_names()
+
+    def evaluate(self, field: np.ndarray, values=None) -> np.ndarray:
+        if self._cancelled.is_set():
+            raise FitCancelled
+        return self._model.evaluate(field, values)
+
+
+class FitJob(QObject):
+    """One fit of a copy of a model in a worker thread; ``finished`` (queued to the GUI
+    thread) carries the job, with its ``result`` or ``error``."""
+
+    finished = Signal(object)
+
+    def __init__(
+        self,
+        entry: ms.ModelEntry,
+        model: Model,
+        observations: list[Observation],
+        mapping: dict[str, int | None],
+        parent: QObject | None = None,
+    ):
+        super().__init__(parent)
+        self.entry, self.model, self.mapping = entry, model, mapping
+        self.observations = observations
+        self.assignment = entry.fit.assignment
+        self.result: FitResult | None = None
+        self.error: Exception | None = None
+        self._cancelled = threading.Event()
+        self._done = threading.Event()
+
+    def start(self) -> None:
+        threading.Thread(target=self._run, name="model fit", daemon=True).start()
+
+    def wait(self, seconds: float) -> bool:
+        """Whether the fit ended within *seconds*."""
+        return self._done.wait(seconds)
+
+    def cancel(self) -> None:
+        self._cancelled.set()
+
+    def _run(self) -> None:
+        try:
+            model = _Cancellable(self.model, self._cancelled)
+            self.result = AppController.run_fit(model, self.observations, self.assignment)
+        except Exception as exc:  # shown by the GUI thread
+            self.error = exc
+        finally:
+            self._done.set()
+            with contextlib.suppress(RuntimeError):  # the window may be gone
+                self.finished.emit(self)
+
+
 class Models(QObject):
     """The model list, its cards, the curves on the map and the fits."""
 
@@ -119,6 +190,7 @@ class Models(QObject):
         self.entries: list[ms.ModelEntry] = ms.default_entries()
         self.cards: dict[ms.ModelEntry, ModelCard] = {}
         self.results: dict[ms.ModelEntry, tuple[FitResult, dict[str, int | None]]] = {}
+        self.jobs: dict[ms.ModelEntry, FitJob] = {}  # fits running in a worker thread
         self._registered: set[str] = set()
         self._slots = 0  # model layers in use
         self._previews: set[str] = set()  # preview layers created
@@ -134,6 +206,8 @@ class Models(QObject):
     # --- the list -------------------------------------------------------------------------
     def rebuild(self) -> None:
         """Cards for every entry (after a restore), then draw."""
+        for entry in list(self.jobs):
+            self.cancel_fit(entry)
         for card in self.cards.values():
             self.page.cards_layout.removeWidget(card)
             card.hide()
@@ -172,6 +246,7 @@ class Models(QObject):
     def remove(self, entry: ms.ModelEntry) -> None:
         if entry not in self.entries:
             return
+        self.cancel_fit(entry)
         self.entries.remove(entry)
         self.results.pop(entry, None)
         card = self.cards.pop(entry)
@@ -201,6 +276,7 @@ class Models(QObject):
         """*entry*'s parameters changed; *structure*: its branches or parameters did."""
         card = self.cards.get(entry)
         if structure:
+            self.cancel_fit(entry)
             self.results.pop(entry, None)
             if card is not None:
                 card.refresh()
@@ -311,22 +387,62 @@ class Models(QObject):
         return ms.resolve_mapping(entry, list(self.c.picked_curves()))
 
     def fit(self, entry: ms.ModelEntry) -> None:
-        """Fit *entry* to the picked curves; ValueError explains what is missing."""
+        """Fit *entry* to the picked curves; ValueError explains what is missing.
+
+        The fit runs on a copy of the model in a worker thread. One that ends within
+        :data:`FIT_WAIT` is shown at once; a longer one leaves the card busy (with Cancel)
+        and shows its result when it is done.
+        """
+        if entry in self.jobs:
+            return
         if entry.model is None or not entry.is_drawable():
             raise ValueError("enter a valid expression first")
         mapping = self.mapping(entry)
-        QGuiApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
-        try:
-            result = self.c.fit_model(entry.model, mapping, entry.fit.assignment)
-        except EXPECTED_ERRORS:
-            raise
-        except Exception as exc:  # a bug, not the data: the dialog and the log say so
-            logger.exception("Fit of %s failed", entry.name)
-            self.window.report_error("Fit", str(exc) or type(exc).__name__, expected=False)
+        observations = self.c.prepare_fit(entry.model, mapping)
+        job = FitJob(entry, copy.deepcopy(entry.model), observations, mapping, self)
+        job.finished.connect(self._job_signal)
+        self.results.pop(entry, None)
+        self.jobs[entry] = job
+        job.start()
+        if job.wait(FIT_WAIT):
+            self._job_finished(job)
+        else:
+            self.cards[entry].fit_area.refresh()  # busy
+
+    def is_fitting(self, entry: ms.ModelEntry) -> bool:
+        return entry in self.jobs
+
+    def cancel_fit(self, entry: ms.ModelEntry) -> None:
+        """Stop the running fit of *entry* (its result is dropped)."""
+        job = self.jobs.pop(entry, None)
+        if job is not None:
+            job.cancel()
+            logger.info("Fit of %s cancelled", entry.name)
+            if entry in self.cards:
+                self.cards[entry].fit_area.refresh()
+
+    def _job_signal(self, job: FitJob) -> None:
+        self._job_finished(job)
+        job.deleteLater()  # every job signals once, also when shown at once or cancelled
+
+    def _job_finished(self, job: FitJob) -> None:
+        entry = job.entry
+        if self.jobs.get(entry) is not job:  # cancelled, replaced or already shown
             return
-        finally:
-            QGuiApplication.restoreOverrideCursor()
-        self.results[entry] = (result, mapping)
+        del self.jobs[entry]
+        area = self.cards[entry].fit_area
+        if job.error is not None:
+            if isinstance(job.error, EXPECTED_ERRORS):
+                area.show_error(str(job.error), getattr(job.error, "panel", None))
+            else:  # a bug, not the data: the dialog and the log say so
+                logger.error("Fit of %s failed", entry.name, exc_info=job.error)
+                message = str(job.error) or type(job.error).__name__
+                self.window.report_error("Fit", message, expected=False)
+        else:
+            self.c.log_fit(job.result, entry.fit.assignment, job.model.unit)
+            self.results[entry] = (job.result, job.mapping)
+            area.show_error(None)
+        area.refresh()
         self.draw()
 
     def result(self, entry: ms.ModelEntry) -> FitResult | None:
