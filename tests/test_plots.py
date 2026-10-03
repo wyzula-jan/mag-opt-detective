@@ -614,3 +614,47 @@ def test_the_classic_histogram_follows_the_theme(qtbot):
     region = hist.region.brush.color()
     assert region.rgb() == qcolor(LIGHT.accent).rgb()
     assert region.alphaF() == pytest.approx(0.12, abs=0.01)
+
+
+# ---------------------------------------------------------------------- maps below the map
+def flat_map(lo, hi, step, level=1.0):
+    """A map of *level* + B / 100 over *lo* - *hi* with four fields."""
+    energy = np.arange(lo, hi + step / 2, step)
+    field = np.array([0.5, 1.0, 1.5, 2.0])
+    return FieldMap(energy, field, np.full((energy.size, field.size), level) + field / 100)
+
+
+def test_maps_below_follow_the_colour_scale(qtbot):
+    """Overlays: an opaque pass (lowest map drawn last) and a translucent one above it."""
+    plot = ColorMapPlot()
+    qtbot.addWidget(plot)
+    low, high = flat_map(50, 300, 1.0), flat_map(200, 1000, 4.0, level=1.02)
+    plot.set_map(high, levels=(0.9, 1.1), cmap="magma")
+    assert plot.data_extent() == ((0.5, 2.0), (200.0, 1000.0))
+    plot.set_overlays([low], 0.4)
+    assert plot.data_extent() == ((0.5, 2.0), (50.0, 1000.0))  # the maps below count
+    copy, below = plot.image.followers  # the map's opaque copy, then the map below
+    np.testing.assert_allclose(copy.image, plot.image.image)
+    np.testing.assert_allclose(below.image, low.values)
+    assert copy.zValue() < below.zValue() < plot.image.zValue()
+    assert (copy.opacity(), below.opacity(), plot.image.opacity()) == (1.0, 1.0, 0.4)
+    plot.set_levels(0.95, 1.05)
+    for image in plot.image.followers:
+        np.testing.assert_allclose(image.levels, (0.95, 1.05))
+    plot.set_colormap("viridis")
+    plot.set_scale_style("bar")
+    assert all(image.lut is plot.image.lut for image in plot.image.followers)
+    assert plot.plot.vb.childrenBounds()[1][0] <= 50  # the auto range takes them in
+
+    middle = flat_map(250, 600, 2.0)
+    plot.set_overlays([low, middle])
+    images = plot.image.followers
+    assert len(images) == 4  # three opaque (map, middle, low) and the middle translucent
+    np.testing.assert_allclose(images[3].image, middle.values)
+    assert [image.opacity() for image in images] == [1.0, 1.0, 1.0, 0.4]
+    plot.set_overlay_opacity(1.0)  # every map whole: the later ones cover the earlier
+    assert plot.image.opacity() == 1.0
+    assert plot.drawn_value_at(1.0, 100.0) == pytest.approx(1.01)  # only the lowest map there
+    plot.set_overlays([])
+    assert plot.image.followers == [] and plot.image.opacity() == 1.0
+    assert not [item for item in plot.plot.items if isinstance(item, type(copy))][1:]

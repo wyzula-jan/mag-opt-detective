@@ -28,10 +28,43 @@ from mag_opt_detective.gui.plots.colorscale import (
 )
 
 
+def _drawn(fmap: FieldMap) -> tuple[np.ndarray, tuple[AxisCells, AxisCells]]:
+    """The values of *fmap* as an image and its cells (an uneven axis is drawn on a finer,
+    even one, see :func:`~mag_opt_detective.gui.plots.base.axis_cells`)."""
+    x, y = cells = map_cells(fmap.field, fmap.energy)
+    values = fmap.values
+    if y.index is not None:
+        values = values[y.index]
+    if x.index is not None:
+        values = values[:, x.index]
+    return values, cells
+
+
+class _LeadImage(pg.ImageItem):
+    """The map's image. The images drawn with it (:attr:`followers`, other maps below it)
+    take its levels and lookup table, so the colour scale drives them all."""
+
+    def __init__(self, *args, **kwargs):
+        self.followers: list[pg.ImageItem] = []
+        super().__init__(*args, **kwargs)
+
+    def setLevels(self, levels, update: bool = True):
+        super().setLevels(levels, update)
+        for image in self.followers:
+            image.setLevels(levels, update)
+
+    def setLookupTable(self, lut, update: bool = True):
+        super().setLookupTable(lut, update)
+        for image in self.followers:
+            image.setLookupTable(lut, update)
+
+
 class ColorMapPlot(PlotView):
     """Intensity as a function of field (x) and energy (y) with a colour scale beside it.
 
     The scale sits in :attr:`scale_container`, a separate widget right of the plot.
+    Other maps can be drawn below the map with its colours (:meth:`set_overlays`); where they
+    overlap, the upper ones are translucent.
     Emits :attr:`pointClicked` ``(field, energy)`` on a left click inside the plot,
     :attr:`levelsEdited` when the user changes the levels on the scale and
     :attr:`cursorMoved` ``(field, energy, value or None)``.
@@ -49,9 +82,14 @@ class ColorMapPlot(PlotView):
         self._auto_levels = True
         self._follow_levels = False  # the scale's value axis follows the levels (auto-scale)
         self._margins = (0, 0)
+        self._overlays: list[tuple[FieldMap, tuple[AxisCells, AxisCells]]] = []  # bottom first
+        self._base: list[pg.ImageItem] = []  # the opaque pass of the overlays (map first)
+        self._blend: list[pg.ImageItem] = []  # the translucent pass (without the map)
+        self._opacity = 1.0
+        self._auto = (True, True)  # the field and energy ranges fit the data (set_map)
         self.plot.setLabel("bottom", FIELD_LABEL)
         self.plot.setLabel("left", "Energy")
-        self.image = pg.ImageItem(axisOrder="row-major")
+        self.image = _LeadImage(axisOrder="row-major")
         self.plot.addItem(self.image)
         self.layer("points")
         self.layer("models")
@@ -208,11 +246,23 @@ class ColorMapPlot(PlotView):
         return self._cells
 
     def _cursor_value(self, x: float, y: float) -> float | None:
-        return self.value_at(x, y)
+        return self.drawn_value_at(x, y)
+
+    def drawn_value_at(self, b: float, energy: float) -> float | None:
+        """Value of the top map drawn at (b, energy): the map's, else the overlays' (top
+        first), None where nothing is drawn."""
+        value = self.value_at(b, energy)
+        if value is not None:
+            return value
+        for fmap, cells in reversed(self._overlays):
+            col, row = cells[0].sample_at(b), cells[1].sample_at(energy)
+            if col is not None and row is not None:
+                return float(fmap.values[row, col])
+        return None
 
     def _cursor_text(self, x: float, y: float) -> str:
         text = f"B = {x:.3f} T    E = {y:.3f} {self._unit}"
-        value = self.value_at(x, y)
+        value = self.drawn_value_at(x, y)
         return text if value is None else f"{text}    value = {value:.5g}"
 
     def set_map(
@@ -224,8 +274,9 @@ class ColorMapPlot(PlotView):
         y_range: Range = None,
     ) -> None:
         self._show(fmap, levels, cmap)
-        if x_range is None:
-            x_range = (float(fmap.field.min()), float(fmap.field.max()))
+        self._auto = (x_range is None, y_range is None)
+        if x_range is None:  # (y_range None auto-ranges over the images, overlays too)
+            x_range = self.data_extent()[0]
         set_range(self.plot, x_range, y_range)
 
     def _show(self, fmap: FieldMap, levels: Range, cmap: str) -> None:
@@ -249,12 +300,97 @@ class ColorMapPlot(PlotView):
             self.image.setImage(values, autoLevels=False, levels=(lo, hi))
             self.image.setRect(QRectF(x.start, y.start, x.span, y.span))
             scale.set_levels(lo, hi, auto_range=self._auto_levels, fit=new_data)
+        self._copy_map_below()
 
     def clear_map(self) -> None:
         self._fmap = None
         self._cells = None
         self.image.clear()
+        self.set_overlays([])
         self.set_points(None)
+
+    # ------------------------------------------------------------------ overlays
+    # Overlays are drawn in two passes, so that a map shows in full colour where no other
+    # map lies under it: every map opaque, the lowest one last (at each point the lowest map
+    # drawn there shows), then every map above the bottom one, the map last, translucent.
+    def set_overlays(self, maps: list[FieldMap], opacity: float | None = None) -> None:
+        """Draw *maps* below the map (bottom first) with its levels and colours. Where maps
+        overlap, those above the lowest one are blended in with *opacity* (None keeps it);
+        elsewhere every map shows as it is. Without overlays the map is drawn alone."""
+        k = len(maps)
+        self._resize(self._base, k + 1 if k else 0)
+        self._resize(self._blend, max(k - 1, 0))
+        self.image.followers = [*self._base, *self._blend]
+        drawn = [_drawn(fmap) for fmap in maps]
+        self._overlays = [(fmap, cells) for fmap, (_values, cells) in zip(maps, drawn, strict=True)]
+        if k:
+            self._copy_map_below()
+            for image, layer in zip(self._base[1:], reversed(drawn), strict=True):
+                self._set_layer(image, *layer)
+            for image, layer in zip(self._blend, drawn[1:], strict=True):
+                self._set_layer(image, *layer)
+        for z, image in enumerate(self._base):
+            image.setZValue(-200 + z)
+        for z, image in enumerate(self._blend):
+            image.setZValue(-100 + z)
+        if opacity is not None:
+            self._opacity = float(opacity)
+        self.set_overlay_opacity(self._opacity)
+        if self._fmap is not None and self._auto[0]:  # the field range fits the maps below too
+            self.plot.setXRange(*self.data_extent()[0], padding=0)  # (y auto-ranges on its own)
+
+    def set_overlay_opacity(self, opacity: float) -> None:
+        """Opacity of the maps above the lowest one where maps overlap."""
+        self._opacity = float(opacity)
+        for image in self._base:
+            image.setOpacity(1.0)
+        for image in self._blend:
+            image.setOpacity(self._opacity)
+        self.image.setOpacity(self._opacity if self._overlays else 1.0)
+
+    def _resize(self, images: list[pg.ImageItem], size: int) -> None:
+        while len(images) > size:
+            self.plot.removeItem(images.pop())
+        while len(images) < size:
+            image = pg.ImageItem(axisOrder="row-major")
+            image.setLookupTable(self.image.lut)
+            self.plot.addItem(image)
+            images.append(image)
+
+    def _set_layer(self, image: pg.ImageItem, values: np.ndarray, cells) -> None:
+        x, y = cells
+        levels = self.image.levels if self.image.levels is not None else (0.0, 1.0)
+        image.setImage(values, autoLevels=False, levels=levels)
+        image.setRect(QRectF(x.start, y.start, x.span, y.span))
+
+    def _copy_map_below(self) -> None:
+        """The opaque copy of the map under the overlays follows the map."""
+        if self._base and self._cells is not None and self.image.image is not None:
+            self._set_layer(self._base[0], self.image.image, self._cells)
+
+    def overlay_maps(self) -> list[FieldMap]:
+        """The maps drawn below the map, bottom first."""
+        return [fmap for fmap, _ in self._overlays]
+
+    def overlay_opacity(self) -> float:
+        return self._opacity
+
+    def data_extent(self) -> tuple[tuple[float, float], tuple[float, float]] | None:
+        """(field, energy) span of the samples of the map and the maps below it (what the
+        ranges fit when they fit the data), or None without a map."""
+        maps = [m for m in (self._fmap, *self.overlay_maps()) if m is not None]
+        if not maps:
+            return None
+        return (
+            (
+                float(min(np.nanmin(m.field) for m in maps)),
+                float(max(np.nanmax(m.field) for m in maps)),
+            ),
+            (
+                float(min(np.nanmin(m.energy) for m in maps)),
+                float(max(np.nanmax(m.energy) for m in maps)),
+            ),
+        )
 
     def _on_click(self, event) -> None:
         if event.button() != Qt.MouseButton.LeftButton or self.image.image is None:

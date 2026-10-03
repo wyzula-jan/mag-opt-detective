@@ -293,14 +293,25 @@ class ViewRanges(QObject):
             fmap = self.maps.get(name)
             if fmap is None:
                 continue
-            b = v.field_range or span(fmap.field)
-            e = v.energy_range or span(fmap.energy)
+            b_data, e_data = self.data_spans(name, fmap)
+            b = v.field_range or b_data
+            e = v.energy_range or e_data
             if b is None or e is None:
                 continue
             out[name] = (b, e)
-            if name == "map":
+            if name == "map":  # the stacked plot shows the map on top only
+                e = v.energy_range or span(fmap.energy)
                 out["stacked"] = (e, v.stacked_range or stacked_extent(fmap, v, e))
         return out
+
+    def data_spans(self, view: str, fmap: FieldMap) -> tuple[Pair | None, Pair | None]:
+        """(field, energy) span of the data on plot *view*: on the map also the library maps
+        drawn below the map shown (see ``ColorMapPlot.data_extent``)."""
+        if view == "map":
+            extent = self.window.plots.map.data_extent()
+            if extent is not None:
+                return span(np.array(extent[0])), span(np.array(extent[1]))
+        return span(fmap.field), span(fmap.energy)
 
     def apply(self) -> None:
         """Put the ranges on the plots that show data; while a range slider is in use only on
@@ -326,8 +337,7 @@ class ViewRanges(QObject):
         page.energy.set_unit(unit)
         fmap = self.maps.get(view)
         shared = "Map" if view == "stacked" else "Stacked"
-        b_data = span(fmap.field) if fmap is not None else None
-        e_data = span(fmap.energy) if fmap is not None else None
+        b_data, e_data = self.data_spans(view, fmap) if fmap is not None else (None, None)
         e_note = None
         if e_data is not None:
             e_note = f"Data {format_range(*e_data, unit)} · shared with {shared}"
