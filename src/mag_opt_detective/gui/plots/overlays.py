@@ -9,7 +9,11 @@ import pyqtgraph as pg
 
 Curve = tuple[np.ndarray, np.ndarray]
 
-_BASE_Z = 10.0  # above the image (z = 0), below the crosshair
+# Layer k is drawn at z 10 + 0.5 k: above the image (z 0), below the plot legend (19.5), the
+# auto-pick region (20) and the crosshair. Inside a layer its items span less than 0.5; layers
+# after the 18th share the top z and keep their order by insertion.
+_BASE_Z, _LAYER_STEP, _TOP_LAYER = 10.0, 0.5, 17
+_MAX_GROUP_DZ = 0.19  # scatter groups of a layer above its curves (0.3 + at most this)
 
 
 class OverlayLayer:
@@ -74,7 +78,7 @@ class OverlayLayer:
         i = self._n_scatters
         if i == len(self._scatters):
             self._scatters.append(pg.ScatterPlotItem())
-            self._add(self._scatters[i], 0.3 + 0.01 * i)
+            self._add(self._scatters[i], 0.3 + min(0.01 * i, _MAX_GROUP_DZ))
         scatter = self._scatters[i]
         scatter.setData(
             x=np.asarray(x, dtype=float),
@@ -148,7 +152,8 @@ class OverlayMixin:
         """The layer *name*, created above all existing layers on first use."""
         layer = self._layers.get(name)
         if layer is None:
-            layer = OverlayLayer(name, self.plot, _BASE_Z + len(self._layers))
+            index = min(len(self._layers), _TOP_LAYER)
+            layer = OverlayLayer(name, self.plot, _BASE_Z + _LAYER_STEP * index)
             self._layers[name] = layer
         return layer
 

@@ -2,6 +2,7 @@
 change, its place (dragged, kept through zooms and resizes, remembered) and presses on it while
 the plot tools are active."""
 
+import itertools
 import json
 import math
 
@@ -306,6 +307,25 @@ def test_a_drag_moves_the_legend_and_its_place_survives_zoom_and_resize(shown, q
     assert_near(legend(w).rect_in_view().bottomRight(), corner)
     assert_drawn_where_placed(w)
     assert json.loads(legend(w).settings_value())["x"] == 1.0
+
+
+def test_overlay_layers_stay_below_the_legend_in_their_order(shown):
+    w = shown
+    plot = w.plots.map
+    x = np.array([1.0, 1.5])
+    for k in range(30):  # far more layers than models and previews make
+        layer = plot.layer(f"extra {k}")
+        layer.set_curves([(x, x)], pg.mkPen("w"), shadow_pen=pg.mkPen("k"))
+        layer.set_points(x, x)
+        for _group in range(25):
+            layer.add_points(x, x)
+    spans = [[item.zValue() for item in layer.items()] for layer in plot.layers()]
+    assert max(max(span, default=0.0) for span in spans) < 19.0 < legend(w).zValue()
+    first = [span for span in spans[:18] if span]  # the 18 lowest layers have their own z
+    for below, above in itertools.pairwise(first):
+        assert max(below) < min(above)  # each layer whole above the one before
+    lowest = [min(span) for span in spans if span]
+    assert lowest == sorted(lowest)
 
 
 def test_presses_on_the_legend_reach_no_tool_and_clicks_elsewhere_do(shown, qtbot):
