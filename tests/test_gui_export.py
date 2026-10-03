@@ -357,6 +357,17 @@ def test_preview_follows_changes_and_the_window(processed, qtbot, no_dialogs):
     assert w.controller.result is result
 
 
+def test_a_label_that_cannot_be_drawn_is_reported_inline(processed, qtbot, no_dialogs):
+    dialog = open_export(processed, qtbot)
+    dialog.x_label.setText("$x^$")  # math text with a missing superscript
+    with qtbot.waitSignal(dialog.renderer.failed, timeout=WAIT_MS):
+        dialog.flush()
+    assert dialog.preview.message().startswith("The preview could not be drawn:")
+    dialog.x_label.setText("B (T)")
+    redraw(dialog, qtbot)
+    assert dialog.preview.message() == ""
+
+
 def test_figure_state_reflects_the_window(processed, qtbot):
     w = processed
     c = w.controller
