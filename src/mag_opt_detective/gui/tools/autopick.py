@@ -172,22 +172,29 @@ def _where(fmap: FieldMap, target: Target) -> dict:
     return where
 
 
-def prominence_for(fmap: FieldMap, target: Target, options: Options) -> float:
+def prominence_for(
+    fmap: FieldMap, target: Target, options: Options, where: dict | None = None
+) -> float:
     """The prominence a search uses: the typed one, else the automatic one of the map (Track)
-    or of the box or region (Detect)."""
+    or of the box or region (Detect; *where* as made by :func:`_where`, made if None)."""
     if options.prominence is not None:
         return options.prominence
     smooth, feature = _smoothing(options), options.feature
     if target.box is None:
         return picking.auto_prominence(fmap, feature, smooth=smooth)
-    return picking.auto_prominence(fmap, feature, smooth=smooth, **_where(fmap, target))
+    where = _where(fmap, target) if where is None else where
+    return picking.auto_prominence(fmap, feature, smooth=smooth, **where)
 
 
-def search(fmap: FieldMap, target: Target, options: Options) -> list[Track]:
+def search(
+    fmap: FieldMap, target: Target, options: Options, where: dict | None = None
+) -> list[Track]:
     """The lines for *target* on *fmap* (display unit); ValueError when a click finds no line
-    (see :func:`core.picking.track`)."""
+    (see :func:`core.picking.track`). *where*: see :func:`prominence_for`."""
     smooth = _smoothing(options)
-    prominence = prominence_for(fmap, target, options)
+    if target.box is not None and where is None:
+        where = _where(fmap, target)
+    prominence = prominence_for(fmap, target, options, where)
     if target.seed is not None:
         b, e_cm1 = target.seed
         e = float(from_cm1(e_cm1, fmap.unit))
@@ -206,7 +213,7 @@ def search(fmap: FieldMap, target: Target, options: Options) -> list[Track]:
     return picking.detect(
         fmap,
         feature=options.feature,
-        **_where(fmap, target),
+        **where,
         smooth=smooth,
         prominence=prominence,
         max_jump=options.window,
@@ -368,12 +375,13 @@ class AutoPick(QObject):
         return replace(target, region=None) if self.region.is_box() else target
 
     def region_edited(self, live: bool = False) -> None:
-        """Search the region again after it was moved or reshaped (*live*: while it still is)."""
+        """Search the region again after it was moved or reshaped (*live*: while it still is),
+        unless it is where it was searched last."""
         self._live.stop()
         target = self.region_target()
         if target is None or self.target is None or self.target.box is None:
             return
-        if target != self.target or not live:
+        if target != self.target:
             self.target = target
             self.search_again(live=live)
 
@@ -410,9 +418,11 @@ class AutoPick(QObject):
         started = time.perf_counter()
         try:
             with _busy(0 if live else searched_size(fmap, self.target)):
-                self.prominence_used = prominence_for(fmap, self.target, options)
+                target = self.target
+                where = None if target.box is None else _where(fmap, target)  # the mask once
+                self.prominence_used = prominence_for(fmap, target, options, where)
                 options = replace(options, prominence=self.prominence_used)
-                tracks = search(fmap, self.target, options)
+                tracks = search(fmap, target, options, where)
         except ValueError as exc:
             seed = self.target.seed
             if seed is None or "within" not in str(exc):

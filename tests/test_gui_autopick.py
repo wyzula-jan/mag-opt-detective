@@ -608,6 +608,19 @@ def test_a_click_after_esc_over_the_dropped_region(shown, qtbot, monkeypatch):
     assert reported == []
 
 
+def test_the_mask_is_made_once_per_search(picked, monkeypatch):
+    tool = picked.autopick
+    tool.bar.mode.set_value("detect")
+    tool.bar.shape.set_value("ellipse")
+    made = []
+    original = autopick.picking.polygon_mask
+    monkeypatch.setattr(
+        autopick.picking, "polygon_mask", lambda *a, **k: made.append(1) or original(*a, **k)
+    )
+    tool.draw_region(ELLIPSE_BOX)
+    assert tool.prominence_used is not None and len(made) == 1  # automatic prominence too
+
+
 def test_a_region_on_a_map_with_uneven_fields(picked):
     """The mask is made on the map's own fields: a library map with gaps between them."""
     c, tool = picked.controller, picked.autopick
