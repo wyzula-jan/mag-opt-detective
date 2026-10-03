@@ -22,6 +22,7 @@ from mag_opt_detective.export import (
     FigureState,
     FigureStyle,
     JournalPreset,
+    layout_problem,
     rasterize,
     render,
     save,
@@ -70,9 +71,12 @@ class FigureJob:
         )
 
 
-def draw(job: FigureJob) -> np.ndarray:
-    """The figure as an RGBA array at the job's dpi (worker thread)."""
-    return rasterize(job.figure(), job.dpi)
+def draw(job: FigureJob) -> tuple[np.ndarray, str]:
+    """The figure as an RGBA array at the job's dpi, and what does not fit into it ("" if
+    everything does; :func:`export.layout_problem`) (worker thread)."""
+    fig = job.figure()
+    rgba = rasterize(fig, job.dpi)
+    return rgba, layout_problem(fig)
 
 
 def write(job: FigureJob, path: Path) -> Path:
@@ -103,7 +107,7 @@ class FigureRenderer(QObject):
     anything is drawn or waiting.
     """
 
-    previewReady = Signal(QImage)
+    previewReady = Signal(QImage, str)  # the image, what does not fit into it
     saved = Signal(str)
     failed = Signal(str, str)  # "preview" or "save", message
     busyChanged = Signal(bool)
@@ -160,7 +164,8 @@ class FigureRenderer(QObject):
                 logger.error("Drawing the figure failed", exc_info=exc)
             self.failed.emit(kind, error_text(exc))
         elif kind == "preview":
-            self.previewReady.emit(to_image(future.result(), ratio))
+            rgba, problem = future.result()
+            self.previewReady.emit(to_image(rgba, ratio), problem)
         else:
             self.saved.emit(str(future.result()))
         self._next()

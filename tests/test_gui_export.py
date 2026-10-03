@@ -817,6 +817,21 @@ def test_labels_of_a_row_are_in_line(processed, qtbot):
         assert max(centres) - min(centres) <= 1  # the controls on one band
 
 
+@pytest.mark.filterwarnings("ignore:constrained_layout not applied")  # reported inline
+def test_a_figure_too_small_for_its_labels_is_warned_about(processed, qtbot, no_dialogs):
+    dialog = open_export(processed, qtbot)
+    assert not dialog.messages.texts("warn")
+    dialog.colorbar_position.set_value("top")
+    dialog.height_field.edit.setText("12")
+    redraw(dialog, qtbot)
+    warning = "Too small for the labels and the colour bar: make the figure taller."
+    assert warning in dialog.messages.texts("warn")
+    assert dialog.save_button.isEnabled()  # a warning: the figure can still be saved
+    dialog.height_field.edit.setText("60")
+    redraw(dialog, qtbot)
+    assert warning not in dialog.messages.texts("warn")
+
+
 def test_save_uses_the_colour_range_and_style(processed, qtbot, tmp_path, monkeypatch):
     dialog = open_export(processed, qtbot)
     dialog.levels_mode.set_value("fixed")
@@ -836,7 +851,7 @@ def test_save_uses_the_colour_range_and_style(processed, qtbot, tmp_path, monkey
         saved = np.asarray(image)
     qtbot.waitUntil(dialog.is_idle, timeout=WAIT_MS)
     # matplotlib draws on the export thread only (its settings are global)
-    fig, rgba = executor().submit(lambda: (job.figure(), draw(job))).result()
+    fig, (rgba, _problem) = executor().submit(lambda: (job.figure(), draw(job))).result()
     np.testing.assert_array_equal(saved, rgba[..., :3])  # the file has the settings
     ax, cax = fig.axes
     assert cax.get_xlim() == (0.96, 1.04) and cax.get_position().y0 > ax.get_position().y1

@@ -385,6 +385,7 @@ class ExportDialog(QDialog):
         self._snapshot_counts = (0, 0, 0)  # model curves, point curves, points
         self._fixed: dict[str, tuple[float, float]] = {}  # level key -> levels (cm^-1 based)
         self._shown_levels: tuple | None = None  # (key, unit) of the fixed levels shown
+        self._layout_problem = ""  # what does not fit in the last drawing
 
         self.setWindowTitle("Journal figure")
         self.setWindowFlag(Qt.WindowType.WindowContextHelpButtonHint, False)
@@ -1136,6 +1137,8 @@ class ExportDialog(QDialog):
         if self._preview_error:
             items.append(("err", self._preview_error))
         items += [("warn", text) for text in size.warnings]
+        if self._layout_problem:
+            items.append(("warn", self._layout_problem))
         if self._note is not None:
             items.append(self._note)
         self.messages.set_items(items)
@@ -1284,8 +1287,10 @@ class ExportDialog(QDialog):
         ratio = self.devicePixelRatioF()
         self.renderer.preview(self.job(self.preview.wanted_dpi() * ratio, state), ratio)
 
-    def _on_preview(self, image: QImage) -> None:
+    def _on_preview(self, image: QImage, problem: str) -> None:
+        self._layout_problem = problem
         self.preview.set_image(image)
+        self._update_form()
         self.previewUpdated.emit()
 
     def _on_busy(self, busy: bool) -> None:
