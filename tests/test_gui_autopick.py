@@ -452,6 +452,29 @@ def test_the_region_moves_and_reshapes_by_drags_and_searches_while_it_changes(
     assert vb.viewRange() != shown_range and tool.target == target
 
 
+def test_the_round_handle_turns_the_box_as_drawn_on_screen(shown, qtbot, monkeypatch):
+    w, tool = shown, shown.autopick
+    view, viewport = w.plots.map.view, w.plots.map.view.viewport()
+    tool.bar.mode.set_value("detect")
+    tool.bar.shape.set_value("rotated")
+    tool.draw_region([(2.0, 500.0), (6.0, 800.0)])
+    roi = tool.region.roi
+    turn = next(h["item"] for h in roi.handles if h["type"] == "r")
+    centre = view.mapFromScene(roi.sceneBoundingRect().center())
+    grab = view.mapFromScene(turn.scenePos())
+    arm = grab.x() - centre.x()  # px from the centre to the round handle (on the right)
+    assert arm > 50 and abs(grab.y() - centre.y()) <= 1
+    calls = counting(monkeypatch)
+    drag(qtbot, viewport, [grab, grab - QPoint(0, arm // 2), grab - QPoint(0, arm)])
+    assert roi.angle() == pytest.approx(45.0, abs=2.0)  # turned on screen as the mouse went
+    assert calls and tool.target.region is not None
+    width = roi.size()[0]
+    side = view.mapFromScene(roi.mapToScene(QPointF(width, 0))) - view.mapFromScene(
+        roi.mapToScene(QPointF(0, 0))
+    )  # the bottom side of the box, on screen
+    assert math.degrees(math.atan2(-side.y(), side.x())) == pytest.approx(45.0, abs=3.0)
+
+
 def test_a_loop_drawn_with_the_mouse_becomes_a_polygon(shown, qtbot):
     w, tool = shown, shown.autopick
     viewport = w.plots.map.view.viewport()
@@ -591,6 +614,13 @@ def test_discard_escape_and_other_tools_clear_the_preview(shown):
     w.plot_area.set_current_view("stacked")
     assert tools.active() == "navigate"
     assert preview(w) == [] and not tool.region.outline_visible() and tool.region.roi is None
+    w.plot_area.set_current_view("map")
+    tools.set_active("autopick")
+    tool.detect_in((1.0, 7.0), (300.0, 1100.0))
+    assert tool.region.roi is not None
+    w.plots.map.view.setFocus()
+    QTest.keyClick(w.plots.map.view, Qt.Key.Key_Escape)  # Esc drops the region too
+    assert tools.active() == "navigate" and tool.region.roi is None
 
 
 def test_a_new_result_drops_the_preview_and_the_status_follows_the_curve(picked):
