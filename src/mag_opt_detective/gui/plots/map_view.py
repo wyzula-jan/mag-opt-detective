@@ -20,7 +20,12 @@ from mag_opt_detective.gui.plots.base import (
     set_range,
 )
 from mag_opt_detective.gui.plots.colors import PlotColors
-from mag_opt_detective.gui.plots.colorscale import ColorScale, HistogramScale, make_scale
+from mag_opt_detective.gui.plots.colorscale import (
+    ColorScale,
+    HistogramScale,
+    make_scale,
+    same_values,
+)
 
 
 class ColorMapPlot(PlotView):
@@ -42,6 +47,7 @@ class ColorMapPlot(PlotView):
         self._fmap: FieldMap | None = None
         self._cells: tuple[AxisCells, AxisCells] | None = None  # (field, energy) as drawn
         self._auto_levels = True
+        self._follow_levels = False  # the scale's value axis follows the levels (auto-scale)
         self._margins = (0, 0)
         self.plot.setLabel("bottom", FIELD_LABEL)
         self.plot.setLabel("left", "Energy")
@@ -89,6 +95,7 @@ class ColorMapPlot(PlotView):
         old.widget.hide()
         old.widget.deleteLater()
         new.set_colormap(old.colormap())
+        new.set_follow_levels(self._follow_levels)
         new.set_levels(lo, hi, auto_range=self._auto_levels)
         self._scale = new
         self._install_scale(new)
@@ -99,6 +106,16 @@ class ColorMapPlot(PlotView):
         scale.levelsEdited.connect(self._on_scale_edited)
         self._scale_layout.addWidget(scale.widget)
         self._align_scale()
+
+    def scale_follows_levels(self) -> bool:
+        return self._follow_levels
+
+    def set_scale_follows_levels(self, follow: bool) -> None:
+        """Auto-scale the colour scale's value axis to the levels whenever they change
+        (*follow*), or keep it still: then it is fitted only to new data (see
+        :class:`HistogramScale`)."""
+        self._follow_levels = bool(follow)
+        self._scale.set_follow_levels(follow)
 
     def set_scale_visible(self, visible: bool) -> None:
         """Show or hide the colour scale (exports follow)."""
@@ -212,7 +229,8 @@ class ColorMapPlot(PlotView):
         set_range(self.plot, x_range, y_range)
 
     def _show(self, fmap: FieldMap, levels: Range, cmap: str) -> None:
-        self._fmap = fmap
+        old, self._fmap = self._fmap, fmap
+        new_data = old is None or not same_values(old.values, fmap.values)
         self._unit = unit_text(fmap.unit)
         self.plot.setLabel("left", energy_label(fmap.unit))
         scale = self._scale
@@ -230,7 +248,7 @@ class ColorMapPlot(PlotView):
         with scale.quiet():  # the histogram re-reads the levels from the new image
             self.image.setImage(values, autoLevels=False, levels=(lo, hi))
             self.image.setRect(QRectF(x.start, y.start, x.span, y.span))
-            scale.set_levels(lo, hi, auto_range=self._auto_levels)
+            scale.set_levels(lo, hi, auto_range=self._auto_levels, fit=new_data)
 
     def clear_map(self) -> None:
         self._fmap = None

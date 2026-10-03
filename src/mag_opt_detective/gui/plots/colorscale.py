@@ -29,12 +29,62 @@ from mag_opt_detective.gui.plots.colors import PlotColors
 
 Levels = tuple[float, float]
 
+TAILS = (0.5, 99.5)  # percentiles of the values a histogram is fitted to (with the levels)
+MAX_VALUES = 400_000  # larger maps are subsampled for a histogram
+
+
+# ---------------------------------------------------------------------- histogram ranges
+def sample_values(values: np.ndarray | None, limit: int = MAX_VALUES) -> np.ndarray:
+    """The finite *values* (flat), subsampled to at most about *limit*."""
+    finite = np.empty(0) if values is None else np.asarray(values, dtype=float).ravel()
+    finite = finite[np.isfinite(finite)]
+    if finite.size > limit:
+        finite = finite[:: finite.size // limit + 1]
+    return finite
+
+
+def tails(values: np.ndarray) -> Levels | None:
+    """The 0.5th and 99.5th percentile of the finite *values*, None without any."""
+    sample = sample_values(values)
+    if not sample.size:
+        return None
+    lo, hi = np.percentile(sample, TAILS)
+    return float(lo), float(hi)
+
+
+def fit_range(levels: Levels, data: Levels | None, pad: float = 0.08) -> Levels:
+    """Histogram range that shows the bulk of the *data* (its tails) and the *levels*."""
+    lo, hi = levels
+    if data is not None:
+        lo, hi = min(data[0], lo), max(data[1], hi)
+    pad = pad * (hi - lo) or 0.5
+    return lo - pad, hi + pad
+
+
+def widened(view: Levels, levels: Levels, margin: float = 0.05) -> Levels:
+    """*view*, widened just enough to show *levels* (with a *margin* of the new span)."""
+    (v0, v1), (lo, hi) = view, levels
+    if v0 <= lo and hi <= v1:
+        return view
+    pad = margin * (max(v1, hi) - min(v0, lo))
+    return min(v0, lo - pad), max(v1, hi + pad)
+
+
+def same_values(a: np.ndarray | None, b: np.ndarray | None) -> bool:
+    """Whether *a* and *b* hold the same values (NaN equal to NaN)."""
+    if a is None or b is None or a is b:
+        return a is b
+    return a.shape == b.shape and bool(np.array_equal(a, b, equal_nan=True))
+
 
 class ColorScale(QObject):
     """Shows and edits the levels and colour map of an attached ImageItem.
 
     :attr:`levelsEdited` fires only when the user changes the levels, never for
     :meth:`set_levels`. Each scale lives in its own :attr:`widget`.
+
+    A scale whose value axis can move (the histogram) keeps it still when only the levels
+    change, unless it follows them (:meth:`set_follow_levels`, auto-scale).
     """
 
     levelsEdited = Signal(float, float)
@@ -44,6 +94,7 @@ class ColorScale(QObject):
         super().__init__(parent)
         self._cmap = "grey"
         self._quiet = 0
+        self._follow = False
 
     @property
     def widget(self) -> QWidget:
@@ -68,12 +119,24 @@ class ColorScale(QObject):
     def set_colormap(self, name: str) -> None:
         raise NotImplementedError
 
-    def set_levels(self, lo: float, hi: float, auto_range: bool = False) -> None:
-        """Set the levels without emitting; *auto_range*: they were taken from the data."""
+    def set_levels(self, lo: float, hi: float, auto_range: bool = False, fit: bool = False) -> None:
+        """Set the levels without emitting; *auto_range*: they were taken from the data;
+        *fit*: the image shows new data (fit the value axis to it again)."""
         raise NotImplementedError
 
     def levels(self) -> Levels:
         raise NotImplementedError
+
+    def follows_levels(self) -> bool:
+        return self._follow
+
+    def set_follow_levels(self, follow: bool) -> None:
+        """Auto-scale: fit the value axis to the levels whenever they change (*follow*), or
+        keep it still while only the levels change."""
+        self._follow = bool(follow)
+
+    def fit(self) -> None:
+        """Fit the value axis to the data and the levels."""
 
     def image(self) -> pg.ImageItem | None:
         """The attached image, if any."""
@@ -109,19 +172,27 @@ def _alpha(color: QColor, alpha: float) -> QColor:
 
 
 class HistogramScale(ColorScale):
-    """pyqtgraph's HistogramLUTItem (histogram, level region and gradient)."""
+    """pyqtgraph's HistogramLUTItem (histogram, level region and gradient).
+
+    Its value axis stays where it is when only the levels change (a region drag, typed
+    levels), widened just enough to show them; it is fitted to the data and the levels for
+    new data, on :meth:`fit` and on a double-click. Following the levels (auto-scale), it is
+    fitted to them on every change instead (the whole histogram for levels from the data).
+    """
 
     style = "histogram"
     WIDTH = 116
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self._auto = False  # the levels were taken from the data
         self._view = pg.GraphicsLayoutWidget()
         self._view.ci.setContentsMargins(0, 0, 9, 0)
         self._view.setFixedWidth(self.WIDTH)
         self.hist = pg.HistogramLUTItem()
         self._view.addItem(self.hist)
         self.hist.sigLevelChangeFinished.connect(self._on_level_change_finished)
+        self._view.scene().sigMouseClicked.connect(self._on_click)
         self.set_colormap(self._cmap)
 
     @property
@@ -131,24 +202,60 @@ class HistogramScale(ColorScale):
     def _on_level_change_finished(self, *_args) -> None:
         self._user_edited(*self.levels())
 
+    def _on_click(self, event) -> None:
+        if event.double() and event.button() == Qt.MouseButton.LeftButton:
+            self.fit()
+
     def set_colormap(self, name: str) -> None:
         self._cmap = name
         gradient = self.hist.gradient
         gradient.setColorMap(colormap(name))
         gradient.showTicks(False)  # the stops come from the colour map, not from editing
 
-    def set_levels(self, lo: float, hi: float, auto_range: bool = False) -> None:
+    def set_levels(self, lo: float, hi: float, auto_range: bool = False, fit: bool = False) -> None:
         with self.quiet():
             self.hist.setLevels(lo, hi)
-        if auto_range:
-            self.hist.autoHistogramRange()
+        self._auto = auto_range
+        if self._follow:
+            self._fit_levels()
+        elif fit:
+            self.fit()
         else:
-            pad = 0.1 * abs(hi - lo)
-            self.hist.setHistogramRange(lo - pad, hi + pad)
+            self._show_levels()
 
     def levels(self) -> Levels:
         lo, hi = self.hist.getLevels()
         return float(lo), float(hi)
+
+    def set_follow_levels(self, follow: bool) -> None:
+        super().set_follow_levels(follow)
+        if self._follow:
+            self._fit_levels()
+        else:  # keep the view where it is now
+            self.hist.vb.enableAutoRange(pg.ViewBox.YAxis, False)
+
+    def fit(self) -> None:
+        image = self.hist.imageItem()
+        data = None if image is None or image.image is None else tails(image.image)
+        self.hist.vb.enableAutoRange(pg.ViewBox.XAxis, True)  # the counts (after "View All")
+        self.hist.setHistogramRange(*fit_range(self.levels(), data), padding=0)
+
+    def _fit_levels(self) -> None:
+        """Auto-scale: the whole histogram for levels from the data, else the levels."""
+        if self._auto:
+            self.hist.autoHistogramRange()
+        else:
+            lo, hi = self.levels()
+            pad = 0.1 * abs(hi - lo)
+            self.hist.setHistogramRange(lo - pad, hi + pad)
+
+    def _show_levels(self) -> None:
+        """Keep the value axis still (no auto-range), widened only to show the levels."""
+        self.hist.vb.enableAutoRange(pg.ViewBox.YAxis, False)  # it would follow the region
+        view = tuple(self.hist.getHistogramRange())
+        wide = widened(view, self.levels())
+        if wide != view:
+            self.hist.setHistogramRange(*wide, padding=0)
 
     def image(self) -> pg.ImageItem | None:
         return self.hist.imageItem()
@@ -159,6 +266,8 @@ class HistogramScale(ColorScale):
         with self.quiet():
             self.hist.setImageItem(image)  # also auto-levels from the image ...
             self.hist.setLevels(lo, hi)  # ... so put the levels back
+        if not self._follow:
+            self.fit()  # new data for this scale
 
     def detach(self) -> None:
         hist = self.hist
@@ -463,8 +572,8 @@ class BarScale(ColorScale):
         if self._image is not None:
             self._image.setLookupTable(self._lut)
 
-    def set_levels(self, lo: float, hi: float, auto_range: bool = False) -> None:
-        self.bar.set_levels(lo, hi)
+    def set_levels(self, lo: float, hi: float, auto_range: bool = False, fit: bool = False) -> None:
+        self.bar.set_levels(lo, hi)  # the bar's value axis always follows the levels
         if self._image is not None:
             self._image.setLevels((lo, hi))
 

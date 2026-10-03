@@ -50,6 +50,7 @@ from mag_opt_detective.gui.inspector.view import NumberSpin, load_json, to_pair,
 from mag_opt_detective.gui.kit import CollapsibleSection, SegmentedControl
 from mag_opt_detective.gui.kit._common import set_style_property
 from mag_opt_detective.gui.kit.range_control import ORDER_ERROR, decimals_for
+from mag_opt_detective.gui.plots.colorscale import fit_range, sample_values, tails, widened
 from mag_opt_detective.gui.theme import current_tokens
 
 Pair = tuple[float, float]
@@ -212,6 +213,11 @@ class LevelHistogram(QWidget):
     ``levelsChanging`` fires while a level is dragged, ``levelsChosen`` once it is let go;
     setting levels from the program emits neither. With a symmetric centre, dragging one end
     mirrors the other; dragging the region shifts both.
+
+    The value range shows the bulk of the values and the levels. It stays where it is when
+    only the levels change (widened just enough to show them) and is fitted again for other
+    values, on :meth:`fit` and on a double-click; following the levels (auto-scale), it is
+    fitted on every change.
     """
 
     levelsChanging = Signal(float, float)
@@ -219,7 +225,6 @@ class LevelHistogram(QWidget):
 
     BINS = 72
     HEIGHT = 78
-    MAX_VALUES = 400_000  # larger maps are subsampled for the histogram
     STRIP = (-0.2, 0.11)  # y and height of the colour strip (bars span 0 to 1)
 
     def __init__(self, parent: QWidget | None = None):
@@ -229,10 +234,11 @@ class LevelHistogram(QWidget):
         self._values = np.empty(0)
         self._tails: Pair = (0.0, 1.0)  # 0.5th and 99.5th percentile
         self._levels: Pair = (0.0, 1.0)
-        self._range: Pair | None = None
+        self._range: Pair | None = None  # None: fit it at the next levels
         self._centre: float | None = None
         self._cmap = "grey"
         self._quiet = 0
+        self._follow = False
 
         self.view = pg.GraphicsLayoutWidget()
         self.view.setFrameShape(QFrame.Shape.NoFrame)
@@ -255,6 +261,7 @@ class LevelHistogram(QWidget):
             self.plot.addItem(item)
         self.region.sigRegionChanged.connect(self._on_changing)
         self.region.sigRegionChangeFinished.connect(self._on_finished)
+        self.view.scene().sigMouseClicked.connect(self._on_click)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(1, 1, 1, 1)
@@ -264,32 +271,44 @@ class LevelHistogram(QWidget):
 
     # --- data --------------------------------------------------------------------------
     def set_values(self, values: np.ndarray | None) -> None:
-        """The map values to count (None: no map)."""
-        finite = np.empty(0) if values is None else np.asarray(values, dtype=float).ravel()
-        finite = finite[np.isfinite(finite)]
-        if finite.size > self.MAX_VALUES:
-            finite = finite[:: finite.size // self.MAX_VALUES + 1]
+        """The map values to count (None: no map); other values fit the range again."""
+        finite = sample_values(values)
+        if np.array_equal(finite, self._values):
+            return
         self._values = finite
-        if finite.size:
-            lo, hi = np.percentile(finite, [0.5, 99.5])
-            self._tails = (float(lo), float(hi))
         self._range = None
+        if finite.size:
+            self._tails = tails(finite)
 
     def levels(self) -> Pair:
         return self._levels
+
+    def value_range(self) -> Pair | None:
+        """The values shown, left to right (None before any levels)."""
+        return self._range
+
+    def follows_levels(self) -> bool:
+        return self._follow
+
+    def set_follow_levels(self, follow: bool) -> None:
+        """Auto-scale: fit the range to the values and the levels whenever they change
+        (*follow*), or keep it still while only the levels change."""
+        self._follow = bool(follow)
+        if self._follow:
+            self.fit()
+
+    def fit(self) -> None:
+        """Fit the range to the bulk of the values and the levels."""
+        self._show_range(fit_range(self._levels, self._tails))
 
     def set_levels(self, lo: float, hi: float, centre: float | None = None) -> None:
         """Show levels *lo* - *hi* (and the *centre* of symmetric levels) without emitting."""
         self._levels = (float(lo), float(hi))
         self._centre = centre
-        a, b = min(self._tails[0], lo), max(self._tails[1], hi)
-        pad = 0.08 * (b - a) or 0.5
-        rng = (a - pad, b + pad)
-        if rng != self._range:
-            self._range = rng
-            self._count()
-            self.plot.setXRange(*rng, padding=0)
-            self.plot.setYRange(self.STRIP[0] - 0.03, 1.08, padding=0)
+        if self._follow or self._range is None:
+            self.fit()
+        else:
+            self._show_range(widened(self._range, self._levels))
         self._quiet += 1
         try:
             self.region.setRegion(self._levels)
@@ -304,6 +323,19 @@ class LevelHistogram(QWidget):
         if name != self._cmap:
             self._cmap = name
             self._paint_levels()
+
+    def _show_range(self, rng: Pair) -> None:
+        if rng == self._range:
+            return
+        self._range = rng
+        self._count()
+        self.plot.setXRange(*rng, padding=0)
+        self.plot.setYRange(self.STRIP[0] - 0.03, 1.08, padding=0)
+        self._paint_levels()
+
+    def _on_click(self, event) -> None:
+        if event.double() and event.button() == Qt.MouseButton.LeftButton:
+            self.fit()
 
     def _count(self) -> None:
         rng = self._range or (0.0, 1.0)
