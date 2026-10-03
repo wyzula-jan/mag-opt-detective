@@ -1,4 +1,5 @@
 import os
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -9,6 +10,30 @@ from helpers import sweep_name, write_text
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 DATA_DIR = Path(__file__).resolve().parents[1] / "Data_to_test"
+
+
+@pytest.fixture(autouse=True)
+def _delete_closed_widgets():
+    """Delete the widgets a test closed, and the menus pyqtgraph leaves without a parent.
+
+    Qt deletes closed widgets only when an event loop next runs, so they would pile up until
+    some later test first waits (and spends seconds deleting them), and a theme change would
+    restyle them all. pyqtgraph's view and colour-map menus and colour dialogs have no parent
+    and outlive their window unless deleted here.
+    """
+    yield
+    if "PySide6.QtWidgets" not in sys.modules:  # a test without Qt
+        return
+    from PySide6.QtCore import QEvent
+    from PySide6.QtWidgets import QApplication, QColorDialog, QMenu
+
+    if QApplication.instance() is None:
+        return
+    for widget in QApplication.topLevelWidgets():
+        orphan = widget.parent() is None and not widget.isVisible()
+        if orphan and isinstance(widget, QMenu | QColorDialog):
+            widget.deleteLater()
+    QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
 
 
 @pytest.fixture

@@ -31,10 +31,12 @@ def errors(monkeypatch):
 
 @pytest.fixture
 def window(qtbot, errors):
+    """A main window without settings; closed and deleted after the test (see conftest)."""
     w = MainWindow()
     qtbot.addWidget(w)
     yield w
     w.close()
+    w.deleteLater()
 
 
 def load_sweep(window, sweep) -> None:

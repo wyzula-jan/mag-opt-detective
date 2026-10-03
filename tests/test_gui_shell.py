@@ -64,17 +64,22 @@ def test_rail_switches_and_closes_the_side_panel(shown):
     assert w.side_panel.is_open() and w.current_panel() == "points"
 
 
+def settle(qtbot, panel: SlidePanel) -> None:
+    """Wait for *panel*'s slide to end; the limit is generous so a busy machine cannot fail it."""
+    qtbot.waitUntil(lambda: not panel.is_animating(), timeout=30_000)
+
+
 def test_inspector_and_log_toggles(shown, qtbot):
     w = shown
     w.plot_area.inspector_button.click()
-    qtbot.waitUntil(lambda: not w.inspector_panel.is_animating())
+    settle(qtbot, w.inspector_panel)
     assert not w.inspector_panel.is_open()
     assert w.body_splitter.sizes()[2] == 0
     w.plot_area.inspector_button.click()
     assert w.inspector_panel.is_open()
     w.log_button.click()
     assert w.log_panel.is_open() and w.log_button.isChecked()
-    qtbot.waitUntil(lambda: not w.log_panel.is_animating())
+    settle(qtbot, w.log_panel)
     assert w.stage_splitter.sizes()[1] == w.log_panel.open_size()
     w.log_drawer.close_button.click()
     assert not w.log_panel.is_open() and not w.log_button.isChecked()
@@ -164,10 +169,11 @@ def test_colour_scale_style_switch_applies_to_every_map(shown, sweep, errors, qt
     assert w.plots.map.levels() == pytest.approx((0.95, 1.05))
     width = w.plots.map.scale.widget.width()
     assert w.plot_area.map_scale.maximumWidth() == width < HistogramScale.WIDTH
-    qtbot.waitUntil(lambda: w.plot_area.map_splitter.sizes()[1] == width)
+    qtbot.waitUntil(lambda: w.plot_area.map_splitter.sizes()[1] == width, timeout=30_000)
     w.plot_area.scale_style_button.click()
     assert all(isinstance(plot.scale, HistogramScale) for plot in maps)
-    qtbot.waitUntil(lambda: w.plot_area.map_splitter.sizes()[1] == HistogramScale.WIDTH)
+    scale_width = HistogramScale.WIDTH
+    qtbot.waitUntil(lambda: w.plot_area.map_splitter.sizes()[1] == scale_width, timeout=30_000)
     assert not errors
 
 
@@ -178,7 +184,7 @@ def test_show_and_hide_all_colour_scales(shown, sweep, qtbot):
     area = w.plot_area
     panels = area.scale_panels()
     area.scales_button.click()
-    qtbot.waitUntil(lambda: not any(p.is_animating() for p in panels.values()))
+    qtbot.waitUntil(lambda: not any(p.is_animating() for p in panels.values()), timeout=30_000)
     assert not any(p.is_open() for p in panels.values())
     assert not w.plots.map.scale_visible()  # exported images match the screen
     assert len(w.plots.map._export_parts(100)) == 1
@@ -200,10 +206,10 @@ def test_a_click_on_the_handle_toggles_the_scale(shown, sweep, qtbot):
     panel = w.plot_area.map_scale
     center = QPoint(handle.width() // 2, handle.height() // 2)
     QTest.mouseClick(handle, Qt.MouseButton.LeftButton, pos=center)
-    qtbot.waitUntil(lambda: not panel.is_animating())
+    settle(qtbot, panel)
     assert not panel.is_open() and not w.plots.map.scale_visible()
     QTest.mouseClick(splitter.handle(1), Qt.MouseButton.LeftButton, pos=center)
-    qtbot.waitUntil(lambda: not panel.is_animating())
+    settle(qtbot, panel)
     assert panel.is_open() and w.plots.map.scale_visible()
 
 

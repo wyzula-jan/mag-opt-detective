@@ -29,14 +29,6 @@ MEV = 8.0656  # cm-1 per meV
 THZ = 33.35641  # cm-1 per THz
 
 
-@pytest.fixture(autouse=True)
-def delete_closed_windows():
-    """Delete this test's windows now: closed windows otherwise pile up until some later test
-    first runs an event loop, which then spends seconds deleting them all."""
-    yield
-    QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
-
-
 def models_of(window):
     return inspector_page(window, "models").models
 
