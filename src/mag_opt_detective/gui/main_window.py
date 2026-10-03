@@ -471,8 +471,7 @@ class MainToolbar(QWidget):
         self.per_unit.setText("per unit")
         self.per_unit.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
         self.per_unit.setToolTip(
-            "Divide by the real step: d/dE per energy unit or d/dB per tesla.\n"
-            "Off: per data point, as in the old versions."
+            "Divide by the real step: d/dE per energy unit or d/dB per tesla.\nOff: per data point."
         )
         self.unit = _segmented([(u.value, t, f"Show energies in {t}") for u, t in UNITS], "Unit")
         self.unit.setToolTip("Energy unit of the plots, ranges, points and exports")
@@ -1095,7 +1094,7 @@ class MainWindow(QMainWindow):
             f"numpy {np.__version__}, scipy {scipy.__version__}, pyqtgraph {pg.__version__}<br><br>"
             "Free software under the GNU GPL v3; commercial licences on request. If you use it "
             "for an analysis in a publication, please cite "
-            "it (see CITATION.cff in the repository).",
+            "it with this version (see CITATION.cff in the repository).",
         ).exec()
 
     def event(self, event) -> bool:
