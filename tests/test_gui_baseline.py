@@ -351,38 +351,76 @@ def test_live_coalesces_a_drag(processed, qtbot):
     np.testing.assert_allclose(shown_image(w), fresh_result(w).ratio.values)
 
 
-def test_live_apply_rules(qtbot):
-    calls = []
-    live = LiveApply(lambda: calls.append(1))
-    for _ in range(20):  # a burst: once at once, then once when the interval is over
+class FakeClock:
+    """The time for LiveApply, moved by the test (and by the runs it makes take *cost*)."""
+
+    def __init__(self):
+        self.now = 100.0
+        self.cost = 0.0
+        self.calls = 0
+
+    def __call__(self) -> float:
+        return self.now
+
+    def run(self):
+        self.calls += 1
+        self.now += self.cost
+
+
+def test_live_apply_coalesces_a_burst(qtbot):
+    clock = FakeClock()
+    live = LiveApply(clock.run, clock=clock)
+    for _ in range(20):  # at once, then once the interval is over
         live.request()
-    assert len(calls) == 1 and live.is_pending()
-    qtbot.waitUntil(lambda: len(calls) == 2, timeout=2000)
-    assert not live.is_pending() and not live.slow
+    assert clock.calls == 1 and live.is_pending()
+    qtbot.waitUntil(lambda: clock.calls == 2, timeout=2000)
+    assert not live.is_pending() and not live.slow and live.runs == 2
     live.flush()  # nothing waits
-    assert len(calls) == 2
-
-    def slow():
-        calls.append(1)
-        time.sleep(1.5 * LiveApply.SLOW)
-
-    calls.clear()
-    live = LiveApply(slow)
-    live.request()
-    assert len(calls) == 1 and live.slow and live.last_duration > LiveApply.SLOW
-    live.request(dragging=True)
-    qtbot.wait(3 * LiveApply.INTERVAL)
-    assert len(calls) == 1 and live.is_pending()  # waits for the end of the drag
-    live.flush()
-    assert len(calls) == 2 and not live.is_pending()
-    live.request()  # typed: once the typing pauses
-    live.request()
-    assert len(calls) == 2
-    qtbot.waitUntil(lambda: len(calls) == 3, timeout=3000)
+    assert clock.calls == 2
     live.request()
     live.cancel()
-    qtbot.wait(2 * LiveApply.SETTLE)
-    assert len(calls) == 3 and not live.is_pending()
+    qtbot.wait(2 * LiveApply.INTERVAL)
+    assert clock.calls == 2 and not live.is_pending()
+
+
+def test_live_apply_is_slow_with_hysteresis(qtbot):
+    clock = FakeClock()
+    live = LiveApply(clock.run, clock=clock)
+    clock.cost = 0.06  # a run longer than SLOW ...
+    live.request()
+    assert live.slow and live.gap() == pytest.approx(120)
+    live.request(dragging=True)  # ... makes a drag wait for its end
+    qtbot.wait(2 * LiveApply.INTERVAL)
+    assert clock.calls == 1 and live.is_pending()
+    clock.cost = 0.04  # between FAST and SLOW: still slow
+    live.flush()
+    assert clock.calls == 2 and live.slow
+    live.request()  # typed: once the typing pauses
+    live.request()
+    assert clock.calls == 2
+    qtbot.waitUntil(lambda: clock.calls == 3, timeout=3000)
+    clock.cost = 0.02  # below FAST: fast again
+    live.request(dragging=True)
+    live.flush()
+    assert not live.slow and clock.calls == 4
+    clock.cost = 0.04  # between FAST and SLOW: still fast
+    clock.now += 1.0
+    live.request(dragging=True)
+    assert clock.calls == 5 and not live.slow
+
+
+def test_live_apply_counts_only_runs_that_did_something(qtbot):
+    clock = FakeClock()
+
+    def nothing():
+        clock.now += 1.0
+        return False
+
+    live = LiveApply(nothing, clock=clock)
+    live.request()
+    assert live.runs == 0 and not live.slow and not live.is_pending()
+    live.request()  # not held back by a run that did nothing
+    assert live.runs == 0
 
 
 def test_live_logs_the_region_once_it_rests(processed, qtbot, caplog):

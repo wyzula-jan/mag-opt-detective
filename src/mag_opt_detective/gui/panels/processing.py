@@ -309,30 +309,46 @@ def default_region(lo: float, hi: float, width: float) -> tuple[float, float]:
 class LiveApply(QObject):
     """Runs *apply* for a stream of changes (the baseline region dragged or typed).
 
-    The first change runs it at once; later ones at most every INTERVAL ms, counted from the
-    end of the last run, so the window keeps time to follow the mouse. While the region is
-    dragged and a run took longer than SLOW seconds, it waits until the drag ends
-    (:meth:`flush`); typed changes then wait until the typing pauses (SETTLE ms).
+    The first change runs it at once. Later ones wait INTERVAL ms, or twice as long as the
+    last run took if that is longer, counted from its end, so the window keeps at least half
+    of the time to follow the mouse. A run longer than SLOW seconds makes it slow: changes made
+    while the region is dragged then wait until the drag ends (:meth:`flush`), and typed ones
+    until the typing pauses (SETTLE ms). It is fast again only after a run shorter than FAST
+    seconds, so a map that takes about SLOW to update behaves the same in every drag.
+
+    *apply* returns False when it had nothing to do; such a run does not count. *clock* gives
+    the time in seconds (tests may pass their own).
     """
 
     INTERVAL = 100  # ms
     SETTLE = 300  # ms
-    SLOW = 0.1  # s
+    SLOW = 0.05  # s
+    FAST = 0.03  # s
 
-    def __init__(self, apply: Callable[[], object], parent: QObject | None = None):
+    def __init__(
+        self,
+        apply: Callable[[], object],
+        parent: QObject | None = None,
+        clock: Callable[[], float] = time.perf_counter,
+    ):
         super().__init__(parent)
         self._apply = apply
+        self._clock = clock
         self._timer = QTimer(self)
         self._timer.setSingleShot(True)
         self._timer.timeout.connect(self.flush)
         self._pending = False
-        self._done = -math.inf  # time.perf_counter() at the end of the last run
-        self.slow = False  # the last run took longer than SLOW
-        self.runs = 0  # how many times *apply* ran
+        self._done = -math.inf  # clock() at the end of the last run
+        self.slow = False  # see the class docstring
+        self.runs = 0  # how many times *apply* did something
         self.last_duration = 0.0  # s, of the last run
 
     def is_pending(self) -> bool:
         return self._pending
+
+    def gap(self) -> float:
+        """How long (ms) a change waits after the end of the last run while not slow."""
+        return max(self.INTERVAL, 2000 * self.last_duration)
 
     def request(self, dragging: bool = False) -> None:
         """A change: run now, or as soon as the rules above allow."""
@@ -345,7 +361,7 @@ class LiveApply(QObject):
             return
         if self._timer.isActive():
             return
-        wait = self.INTERVAL - (time.perf_counter() - self._done) * 1000
+        wait = self.gap() - (self._clock() - self._done) * 1000
         if wait <= 0:
             self.flush()
         else:
@@ -357,14 +373,13 @@ class LiveApply(QObject):
         if not self._pending:
             return
         self._pending = False
-        start = time.perf_counter()
-        try:
-            self._apply()
-        finally:
-            self._done = time.perf_counter()
-            self.last_duration = self._done - start
-            self.slow = self.last_duration > self.SLOW
-            self.runs += 1
+        start = self._clock()
+        if self._apply() is False:
+            return
+        self._done = self._clock()
+        self.last_duration = self._done - start
+        self.slow = self.last_duration > (self.FAST if self.slow else self.SLOW)
+        self.runs += 1
 
     def cancel(self) -> None:
         self._timer.stop()
@@ -561,8 +576,11 @@ def install(window) -> None:
     log_timer.timeout.connect(log_live)
     applying = False
 
-    def run_live() -> None:
+    def run_live() -> bool:
+        """Apply the region if it still needs it; whether the map was drawn again."""
         nonlocal applying
+        if not live_wanted():  # e.g. applied by the controller (settle_baseline) or a Process
+            return False
         applying = True
         try:
             changed = apply_live(window, show_live_note)
@@ -570,6 +588,7 @@ def install(window) -> None:
             applying = False
         if changed:
             log_timer.start()  # once the region rests: one line in the log, not one per step
+        return changed is not False
 
     live = LiveApply(run_live, panel)
     panel.live = live
@@ -585,8 +604,9 @@ def install(window) -> None:
     def follow_settings() -> None:
         if live_wanted():
             live.request(dragging=any(region.is_dragging() for region in regions.values()))
-        elif not panel.baseline_live.isChecked() or not c.can_apply_baseline():
+        else:  # off, nothing to apply it to, or applied already
             live.cancel()
+            show_live_note("")
 
     def apply_now() -> None:
         follow_settings()
