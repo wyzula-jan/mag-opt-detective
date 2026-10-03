@@ -517,6 +517,7 @@ class ExportDialog(QDialog):
             c.rangesChanged,
             c.selectionChanged,
             c.pointsChanged,
+            c.overlaysChanged,
         ):
             signal.connect(self._follow_window)
         c.unitChanged.connect(self._follow_window)

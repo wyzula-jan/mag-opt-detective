@@ -357,6 +357,19 @@ def test_preview_follows_changes_and_the_window(processed, qtbot, no_dialogs):
     assert w.controller.result is result
 
 
+def test_preview_follows_model_curves_shown_in_the_window(processed, qtbot, no_dialogs):
+    """A model shown or edited in the inspector redraws the open export window at once."""
+    w = processed
+    dialog = open_export(w, qtbot)
+    assert not dialog.models.isEnabled()
+    with qtbot.waitSignal(dialog.previewUpdated, timeout=WAIT_MS):
+        add_model(w, n=2)
+        w.controller.notify_overlays()  # as the inspector does
+    assert dialog.models.isEnabled()
+    assert dialog.models_row.description_label.text() == "2 curves from the window"
+    assert len(dialog.figure_state().curves) == 2
+
+
 def test_a_label_that_cannot_be_drawn_is_reported_inline(processed, qtbot, no_dialogs):
     dialog = open_export(processed, qtbot)
     dialog.x_label.setText("$x^$")  # math text with a missing superscript
