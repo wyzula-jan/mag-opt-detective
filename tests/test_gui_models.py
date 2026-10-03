@@ -358,7 +358,13 @@ def test_fit_zeeman_branches_to_picked_points(window, sweep, tmp_path, errors):
     assert texts[:3] == ["E₀ (Branch 1)", texts[1], "cm⁻¹"]
     value, sigma = ms.format_with_sigma(result.values["e0_0"] * MEV, result.stderr["e0_0"] * MEV)
     assert texts[1] == f"{value} ± {sigma}"
-    assert "dof 56 · 60 points" in area.stats.text()
+    report = ms.fit_report(entry, result, window.controller.unit)
+    assert report.chi2 == pytest.approx(result.chi2 * MEV**2, rel=1e-4)  # (cm-1)^2
+    assert area.stats.text().splitlines() == [
+        f"χ² {report.chi2:.3g} (cm⁻¹)²",
+        f"reduced χ² {report.reduced_chi2:.3g} (cm⁻¹)²",
+        "dof 56 · 60 points",
+    ]
     preview = models.preview_data(entry)
     assert len(preview) == 2
     np.testing.assert_allclose(

@@ -58,7 +58,11 @@ from mag_opt_detective.gui.panels.common import (
 from mag_opt_detective.gui.theme import current_tokens
 
 DELTA_SPAN = 200.0  # meV: the half-gap slider's end
-DIRAC_FORMULA = "E = √(2eħv²Bn + Δ²) + √(2eħv²B(n+1) + Δ²), n = 0 … N-1"
+# no-break spaces: the formula wraps only between its terms
+DIRAC_FORMULA = (
+    "E\u00a0=\u00a0√(2eħv²Bn\u00a0+\u00a0Δ²)\u00a0+ √(2eħv²B(n+1)\u00a0+\u00a0Δ²), "
+    "n\u00a0=\u00a00\u00a0…\u00a0N-1"
+)
 EXPRESSION_HINT = (
     "One branch per line in B (T); # starts its label. Constants muB, hbar, kB, e, c, pi; "
     "sqrt, exp, log, tanh, hypot, …"

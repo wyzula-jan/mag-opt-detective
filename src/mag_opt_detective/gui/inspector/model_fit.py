@@ -296,9 +296,10 @@ class FitArea(QWidget):
             grid.addWidget(number, row, 1)
             grid.addWidget(muted_label(display_unit(text, unit), 0.88), row, 2)
         squared = "(cm⁻¹)²" if unit is Unit.CM1 else f"{UNIT_TEXT.get(unit, str(unit))}²"
-        self.stats.setText(
-            f"χ² {report.chi2:.3g} {squared} · reduced χ² {report.reduced_chi2:.3g} {squared}"
-            f" · dof {report.dof} · {report.n_points} points"
+        self.stats.setText(  # a line each: a wrapped line would split an item
+            f"χ² {report.chi2:.3g} {squared}\n"
+            f"reduced χ² {report.reduced_chi2:.3g} {squared}\n"
+            f"dof {report.dof} · {report.n_points} points"
         )
 
     def show_error(self, message: str | None, panel: str | None = None) -> None:
