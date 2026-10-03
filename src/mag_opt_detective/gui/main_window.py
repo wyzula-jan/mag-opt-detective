@@ -588,6 +588,7 @@ class MainWindow(QMainWindow):
         self.splitters: dict[str, QSplitter] = {}
         self._rail_buttons: dict[str, _RailButton] = {}
         self._panel = ""
+        self._status_chips: list[QWidget] = []
         self.infobar = InfoBar()
 
         self._create_actions()
@@ -939,6 +940,13 @@ class MainWindow(QMainWindow):
         """Add a file action (e.g. a load dialog) to the File menu, before Process."""
         self._file_menu.insertAction(self._file_anchor, action)
         self.addAction(action)
+
+    def add_status_chip(self, widget: QWidget) -> None:
+        """Show *widget* in the status bar after the state ("Processed 12:34") and the chips
+        added before it, e.g. the baseline of the map shown. Give it no minimum width (let it
+        shrink to nothing): the window must stay usable at 1100 px."""
+        self.statusBar().insertWidget(1 + len(self._status_chips), widget)
+        self._status_chips.append(widget)
 
     def set_cursor_text(self, text: str) -> None:
         self._cursor_label.setText(text)
