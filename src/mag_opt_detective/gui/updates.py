@@ -26,8 +26,8 @@ from concurrent.futures import Future
 from datetime import datetime
 from functools import partial
 
-from PySide6.QtCore import QObject, QTimer, QUrl, Signal
-from PySide6.QtGui import QAction, QDesktopServices
+from PySide6.QtCore import QObject, QTimer, Signal
+from PySide6.QtGui import QAction
 
 from mag_opt_detective import __version__
 from mag_opt_detective import updates as feed
@@ -50,16 +50,11 @@ CHECKING = "Asking GitHub for the newest release."
 NEWEST = "There is no newer release on GitHub."
 
 
-def open_url(url: str) -> None:
-    """Open *url* in the browser; OSError if no browser opens it."""
-    if not QDesktopServices.openUrl(QUrl(url)):
-        raise OSError(f"no browser opened {url}")
-
-
 @user_action("Open the release")
 def open_release(window, url: str) -> None:
-    """Open a release page or file of this repository (the notice's buttons)."""
-    open_url(url)
+    """Open a release page or file of this repository (the notice's buttons) as the Help
+    menu's links open theirs: without a web browser the error bar offers to copy it."""
+    window._open_link("Open the release", url)
 
 
 class ActionSetting:
@@ -302,7 +297,9 @@ def install(window) -> None:
     The daily check itself starts only with :meth:`UpdateChecker.check_at_startup`.
     """
     check = QAction("Check for &updates…", window)
+    check.setStatusTip("Ask GitHub now whether a newer version has been released")
     at_startup = QAction("Check for updates at s&tartup", window)
+    at_startup.setStatusTip("Ask GitHub once a day, a few seconds after the start")
     at_startup.setCheckable(True)
     at_startup.setChecked(True)
     for name, action in (("check_updates", check), ("check_updates_at_startup", at_startup)):

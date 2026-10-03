@@ -25,7 +25,7 @@ import gui_helpers
 from gui_helpers import infobar_text, load_sweep, process
 from mag_opt_detective import app
 from mag_opt_detective import updates as feed
-from mag_opt_detective.gui import icons, plot_panel, theme, updates
+from mag_opt_detective.gui import icons, links, plot_panel, theme, updates
 from mag_opt_detective.gui.main_window import MainWindow
 from mag_opt_detective.gui.settings import PREFIX
 
@@ -122,6 +122,7 @@ def test_the_help_menu_checks_for_updates(window, stored):
         assert actions[start - 1].isSeparator()
         assert actions[start : start + 3] == [check, at_startup, w.commands["about"]]
         assert check.text() == "Check for &updates…"
+        assert check.statusTip() and at_startup.statusTip()
         assert at_startup.isCheckable() and at_startup.isChecked()
     assert stored.commands["check_updates_at_startup"].isEnabled()
     # nothing would remember it without settings (as View > Reset settings)
@@ -152,12 +153,17 @@ def test_a_newer_version_shows_a_notice(qtbot, stored, opened):
     assert opened == [PAGE, PAGE] and stored.updates.notice() is None
 
 
-def test_a_link_no_browser_opens_is_reported(qtbot, stored, errors, monkeypatch):
+def test_a_link_no_browser_opens_offers_its_address(qtbot, stored, errors, monkeypatch):
+    """As the Help menu's links: the error bar offers to copy the address."""
     monkeypatch.setattr(QDesktopServices, "openUrl", lambda url: False)
     check(qtbot, stored)
+    QApplication.clipboard().clear()
     button(stored, "Release notes").click()
-    assert errors == [f"no browser opened {PAGE}"]
-    assert infobar_text(stored) == f"Can't open the release: No browser opened {PAGE}"
+    assert errors == [links.NO_BROWSER]
+    assert infobar_text(stored) == f"Can't open the release: {links.NO_BROWSER}"
+    assert stored.infobar.action_button.text() == "Copy address"
+    stored.infobar.action_button.click()
+    assert QApplication.clipboard().text() == PAGE
 
 
 def test_an_app_bundle_downloads_the_archive_for_its_system(qtbot, stored, opened, monkeypatch):
