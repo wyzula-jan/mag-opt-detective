@@ -13,7 +13,16 @@ import sys
 from pathlib import Path
 
 import numpy as np
-from PySide6.QtCore import QRect, QRectF, QRegularExpression, QSignalBlocker, QSize, Qt, Signal
+from PySide6.QtCore import (
+    QItemSelectionModel,
+    QRect,
+    QRectF,
+    QRegularExpression,
+    QSignalBlocker,
+    QSize,
+    Qt,
+    Signal,
+)
 from PySide6.QtGui import (
     QColor,
     QFont,
@@ -328,6 +337,17 @@ class PointsView(QTableView):
         header.setSectionResizeMode(model.REMOVE, QHeaderView.ResizeMode.Fixed)
         header.resizeSection(model.REMOVE, 30)
         self.clicked.connect(self._on_click)
+
+    def show_points(self, field: np.ndarray, energy_cm1: np.ndarray, keep: bool = True) -> None:
+        """Show the points; with *keep* the selected fields stay selected if the rows change."""
+        model, selection = self.model(), self.selectionModel()
+        selected = {model.field_at(index.row()) for index in selection.selectedRows()}
+        if model.set_points(field, energy_cm1) and keep and selected:  # a reset deselects
+            flags = QItemSelectionModel.SelectionFlag.Select
+            flags |= QItemSelectionModel.SelectionFlag.Rows
+            for row in range(len(model)):
+                if model.field_at(row) in selected:
+                    selection.select(model.index(row, 0), flags)
 
     def _on_click(self, index) -> None:
         if index.column() == CurvePointsModel.REMOVE:
@@ -692,7 +712,10 @@ def install(window) -> None:
             return np.array([]), np.array([])
         return table.points(name)
 
+    table_curve = c.curve  # the curve in the table: its selection is kept across edits
+
     def sync() -> None:
+        nonlocal table_curve
         table = c.points
         curves = [
             (name, points_of(name)[0].size, curve_color(i))
@@ -708,7 +731,8 @@ def install(window) -> None:
                 name.setText(c.curve)
             panel.show_name_problem(None)
         b, e = points_of(c.curve)
-        panel.model.set_points(b, e)
+        panel.table.show_points(b, e, keep=c.curve == table_curve)
+        table_curve = c.curve
         panel.count_label.setText("" if table is None else f"{b.size} of {table.field.size} fields")
         panel.empty_label.setText(NO_TABLE if table is None else EMPTY)
         panel.table_stack.setCurrentWidget(panel.table if b.size else panel.empty_label)

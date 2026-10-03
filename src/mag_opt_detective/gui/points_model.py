@@ -38,13 +38,20 @@ class CurvePointsModel(QAbstractTableModel):
                 self.dataChanged.emit(self.index(0, self.ENERGY), last)
             self.headerDataChanged.emit(Qt.Orientation.Horizontal, self.ENERGY, self.ENERGY)
 
-    def set_points(self, field: np.ndarray, energy_cm1: np.ndarray) -> None:
-        """Show the points (*field* in T, *energy_cm1* in cm^-1), in any order."""
+    def set_points(self, field: np.ndarray, energy_cm1: np.ndarray) -> bool:
+        """Show the points (*field* in T, *energy_cm1* in cm^-1), in any order.
+
+        Returns False (and leaves the model alone) if exactly these points are shown already.
+        """
         order = np.argsort(field, kind="stable")
+        field = np.asarray(field, dtype=float)[order]
+        energy = np.asarray(energy_cm1, dtype=float)[order]
+        if np.array_equal(field, self._field) and np.array_equal(energy, self._energy):
+            return False
         self.beginResetModel()
-        self._field = np.asarray(field, dtype=float)[order]
-        self._energy = np.asarray(energy_cm1, dtype=float)[order]
+        self._field, self._energy = field, energy
         self.endResetModel()
+        return True
 
     def field_at(self, row: int) -> float:
         return float(self._field[row])

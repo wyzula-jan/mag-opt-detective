@@ -125,6 +125,25 @@ def test_points_table_in_the_display_unit_with_a_remove_button_per_row(shown, er
     assert not errors
 
 
+def test_the_table_keeps_its_selection_across_edits(processed):
+    w = processed
+    c, table = w.controller, w.panels["points"].table
+    c.record_points([0.5, 1.5, 2.0], [300.0, 400.0, 500.0], unit="cm-1")
+    table.selectRow(1)
+
+    def selected() -> list[float]:
+        return [table.model().field_at(i.row()) for i in table.selectionModel().selectedRows()]
+
+    assert selected() == [1.5]
+    c.record_point(1.0, 350.0)  # a row above it
+    assert selected() == [1.5]
+    c.rename_curve("CR")
+    assert selected() == [1.5]
+    c.add_curve()  # another curve: nothing selected
+    c.set_curve("CR")
+    assert selected() == []
+
+
 def test_a_unit_switch_changes_the_table_but_not_the_points(processed):
     w = processed
     c, panel = w.controller, w.panels["points"]
