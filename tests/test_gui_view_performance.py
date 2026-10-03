@@ -5,6 +5,7 @@ import json
 import math
 import time
 
+import numpy as np
 import pyqtgraph as pg
 import pytest
 from PySide6.QtCore import QPoint, QPointF, QSettings, Qt
@@ -14,9 +15,11 @@ from PySide6.QtWidgets import QApplication
 
 import gui_helpers
 from gui_helpers import inspector_page, load_sweep, process, set_unit
+from mag_opt_detective.core.spectra import FieldMap
 from mag_opt_detective.gui import plot_panel
 from mag_opt_detective.gui.inspector.view import GESTURE_MS
 from mag_opt_detective.gui.main_window import MainWindow
+from mag_opt_detective.gui.plots import StackedPlot
 
 window, errors = gui_helpers.window, gui_helpers.errors  # shared fixtures
 
@@ -265,3 +268,38 @@ def test_a_range_slider_keeps_its_extent_while_dragged(shown, qtbot):
     assert slider.extent() == (100.0, 1300.0)  # kept until the key is released
     qtbot.keyRelease(slider, Qt.Key.Key_Left, Qt.KeyboardModifier.ShiftModifier)
     qtbot.waitUntil(lambda: slider.extent() == pytest.approx((100.0, 1288.0)))
+
+
+# ---------------------------------------------------------------------- stacked redraw
+def test_a_stacked_redraw_reuses_its_traces(qtbot):
+    energy = np.linspace(100.0, 1000.0, 50)
+    first = FieldMap(energy, np.array([0.5, 1.0, 1.5]), np.ones((50, 3)))
+    second = FieldMap(energy, np.array([1.0, 2.0, 4.0]), np.cos(energy / 90.0)[:, None] + [0, 1, 2])
+    stacked = StackedPlot()
+    qtbot.addWidget(stacked)
+    stacked.set_map(first, 0.5)
+    curves = stacked.curves()
+    redrawn = []
+    stacked.tracesChanged.connect(lambda: redrawn.append(True))
+    stacked.set_map(second, 2.0)  # a new result of the same shape: the same items
+    assert all(a is b for a, b in zip(stacked.curves(), curves, strict=True))
+    assert stacked.plot.listDataItems() == curves and redrawn == [True]
+    for k, curve in enumerate(curves):
+        np.testing.assert_allclose(curve.getData()[1], second.values[:, k] + 2.0 * k)
+
+    stacked.set_trace_options(color_by_field=True, cmap="grey")  # new pens, the same items
+    fresh = StackedPlot()
+    qtbot.addWidget(fresh)
+    fresh.set_trace_options(color_by_field=True, cmap="grey")
+    fresh.set_map(second, 2.0)
+    assert all(a is b for a, b in zip(stacked.curves(), curves, strict=True))
+    for ours, theirs in zip(stacked.curves(), fresh.curves(), strict=True):
+        assert pg.mkPen(ours.opts["pen"]).color() == pg.mkPen(theirs.opts["pen"]).color()
+        np.testing.assert_array_equal(ours.getData()[1], theirs.getData()[1])
+
+    stacked.set_trace_options(every=2)  # another number of traces: built again
+    assert len(stacked.curves()) == 2 and not set(stacked.curves()) & set(curves)
+    assert stacked.plot.listDataItems() == stacked.curves()
+    np.testing.assert_allclose(stacked.curves()[1].getData()[1], second.values[:, 2] + 2.0)
+    stacked.clear_map()
+    assert stacked.curves() == [] and stacked.plot.listDataItems() == []

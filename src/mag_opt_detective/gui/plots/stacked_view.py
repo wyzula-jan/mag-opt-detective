@@ -24,6 +24,8 @@ class StackedPlot(PlotView):
     By default every field gets a trace in its own hue; see :meth:`set_trace_options`.
     Emits :attr:`cursorMoved` ``(energy, y, None)``, and :attr:`tracesChanged` whenever the
     traces are drawn again or cleared, so markers placed with :meth:`trace_y` can follow.
+    Drawing as many traces as before reuses their items (new data and pens), which is much
+    faster than building them again.
     """
 
     tracesChanged = Signal()
@@ -61,7 +63,6 @@ class StackedPlot(PlotView):
     def set_map(
         self, fmap: FieldMap, offset: float, y_range: Range = None, x_range: Range = None
     ) -> None:
-        self.clear_map()
         self._fmap = fmap
         self._offset = float(offset)
         self.plot.setLabel("bottom", energy_label(fmap.unit))
@@ -82,13 +83,20 @@ class StackedPlot(PlotView):
 
     def _draw(self) -> None:
         fmap = self._fmap
-        self._remove_curves()
         if fmap is None:
+            self._remove_curves()
             return
-        self._shown = np.arange(0, fmap.field.size, self._every)
-        for k, (j, pen) in enumerate(zip(self._shown, self._pens(fmap, self._shown), strict=True)):
-            curve = self.plot.plot(fmap.energy, fmap.values[:, j] + k * self._offset, pen=pen)
-            self._curves.append(curve)
+        shown = np.arange(0, fmap.field.size, self._every)
+        reuse = len(self._curves) == shown.size
+        if not reuse:
+            self._remove_curves()
+        for k, (j, pen) in enumerate(zip(shown, self._pens(fmap, shown), strict=True)):
+            y = fmap.values[:, j] + k * self._offset
+            if reuse:
+                self._curves[k].setData(fmap.energy, y, pen=pen)
+            else:
+                self._curves.append(self.plot.plot(fmap.energy, y, pen=pen))
+        self._shown = shown
         self.tracesChanged.emit()
 
     def _remove_curves(self) -> None:
