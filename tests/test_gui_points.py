@@ -345,6 +345,41 @@ def test_pick_toggle_follows_the_tool_and_shows_a_hint(shown):
     assert panel.pick_button.text() == "Pick on the map"  # a click shows the map
 
 
+def test_auto_pick_from_the_points_panel(shown):
+    w = shown
+    tools, panel, area = w.tools, w.panels["points"], w.plot_area
+    button = panel.autopick_button
+    assert button.text() == "Auto-pick" and "(W)" in button.toolTip()
+    hint = panel.autopick_hint.text()
+    assert "Track" in hint and "Detect" in hint and not panel.autopick_hint.isHidden()
+    assert not button.isChecked()
+    area.set_current_view("stacked")
+    button.click()  # Auto-pick works on the map: it is shown first
+    assert area.current_view() == "map" and tools.active() == "autopick"
+    assert button.isChecked() and tools.tool("autopick").button.isChecked()
+    assert not panel.pick_button.isChecked() and w.autopick.bar.isVisible()
+    panel.pick_button.click()  # one tool at a time: the toggles follow
+    assert tools.active() == "pick" and not button.isChecked()
+    w.plots.map.view.setFocus()
+    QTest.keyClick(w.plots.map.view, Qt.Key.Key_W)  # the shortcut and the plot toolbar too
+    assert button.isChecked() and not panel.pick_button.isChecked()
+    tools.tool("navigate").button.click()
+    assert not button.isChecked()
+    button.click()
+    assert button.isChecked()
+    button.click()  # off again: back to pan and zoom
+    assert tools.active() == "navigate" and not button.isChecked()
+
+
+def test_the_empty_table_points_to_pick_and_auto_pick(processed):
+    panel = processed.panels["points"]
+    assert panel.table_stack.currentWidget() is panel.empty_label
+    text = panel.empty_label.text()
+    assert "Pick (P)" in text and "Auto-pick (W)" in text
+    processed.controller.record_point(1.0, 400.0)
+    assert panel.table_stack.currentWidget() is panel.table
+
+
 def test_tool_registry_routes_clicks_with_modifiers(processed):
     w = processed
     tools, clicks = w.tools, []

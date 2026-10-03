@@ -3,8 +3,10 @@
 Picked energies are kept in cm^-1 by the controller; the table, the markers and the files use
 the display unit. The Pick tool (P) works on the map, where a click records the current
 curve's point at the nearest field and Alt-click removes the nearest point, and on the stacked
-plot, where a click near a trace records at that trace's field. Every point edit is a step of
-``controller.points_undo``, undone with Edit > Undo (Ctrl+Z) and redone with Ctrl+Shift+Z.
+plot, where a click near a trace records at that trace's field. The panel also turns on the
+Auto-pick tool (W, ``gui/tools/autopick.py``), which finds whole lines on the map. Every point
+edit is a step of ``controller.points_undo``, undone with Edit > Undo (Ctrl+Z) and redone with
+Ctrl+Shift+Z.
 """
 
 from __future__ import annotations
@@ -77,10 +79,16 @@ from mag_opt_detective.gui.theme import current_tokens
 from mag_opt_detective.gui.widgets import FlowLayout, open_file, save_file
 
 PICK = "pick"
+AUTOPICK = "autopick"  # registered by gui/tools/autopick.py
 ALT = Qt.KeyboardModifier.AltModifier
 ALT_TEXT = "⌥" if sys.platform == "darwin" else "Alt"
 REMOVE_RADIUS = 12.0  # px: Alt-click removes the current curve's point this close to it
-EMPTY = "No points yet. Turn on picking and click the map."
+EMPTY = "No points yet. Click the map with Pick (P), or let Auto-pick (W) find whole lines."
+AUTOPICK_HINT = "Track follows a line you click; Detect finds every line in a region you draw."
+AUTOPICK_TIP = (
+    "Find transitions automatically (W). Track: click a line on the map and it is followed "
+    "field by field. Detect: draw a region on the map and every line inside it is found."
+)
 NO_TABLE = "No point table yet. Process a sweep (or import points), then pick."
 PICK_LABELS = {"map": "Pick on the map", "stacked": "Pick on the stacked plot"}  # by view
 
@@ -118,12 +126,12 @@ class PickButton(QPushButton):
 
     ICON, GAP = 16, 6
 
-    def __init__(self, text: str, key: str, parent=None):
+    def __init__(self, text: str, key: str, parent=None, icon: str = "crosshair"):
         super().__init__(text, parent)
         self._key = key
         self.setCheckable(True)
         self.setMinimumHeight(30)
-        icons.set_icon(self, "crosshair", None, on_color="accent-fg")
+        icons.set_icon(self, icon, None, on_color="accent-fg")
         self.setProperty("kit", "button")  # the kit's button look and focus border while off
         self.toggled.connect(
             lambda on: set_style_property(self, "kit", "primary" if on else "button")
@@ -409,6 +417,11 @@ class PointsPanel(QWidget):
         self.pick_button = PickButton(PICK_LABELS["map"], "P")
         self.pick_button.setToolTip("Pick points: a click records, Alt-click removes (P)")
         self.pick_button.setAccessibleName(PICK_LABELS["map"])
+        self.autopick_button = PickButton("Auto-pick", "W", icon="wand-sparkles")
+        self.autopick_button.setToolTip(AUTOPICK_TIP)
+        self.autopick_button.setAccessibleName("Auto-pick")
+        self.autopick_hint = _hint(AUTOPICK_HINT)
+        self.autopick_hint.setToolTip(AUTOPICK_TIP)
 
         self.chips = CurveChips()
         self.column_name = QLineEdit()
@@ -461,7 +474,12 @@ class PointsPanel(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(14, 12, 14, 16)
         layout.setSpacing(16)
-        layout.addWidget(self.pick_button)
+        tools = QVBoxLayout()
+        tools.setSpacing(6)
+        tools.addWidget(self.pick_button)
+        tools.addWidget(self.autopick_button)
+        tools.addWidget(self.autopick_hint)
+        layout.addLayout(tools)
 
         curves = QVBoxLayout()
         curves.setSpacing(7)
@@ -664,19 +682,22 @@ def install(window) -> None:
     install_undo(window)
     hint = PickHint(window.plot_area.plot_box, window.infobar)
 
-    # the pick toggle <-> the tool (on the Reference tab it shows the map first)
-    def on_pick_button(checked: bool) -> None:
+    # the pick toggles <-> the tools (where a tool does not work they show the map first)
+    def on_tool_button(name: str, checked: bool) -> None:
+        if name not in tools.names():
+            checked = False  # not installed (yet)
         if checked:
-            if tools.view() not in tools.tool(PICK).views:
+            if tools.view() not in tools.tool(name).views:
                 window.plot_area.set_current_view("map")
-            tools.set_active(PICK)
-        elif tools.active() == PICK:
+            tools.set_active(name)
+        elif tools.active() == name:
             tools.set_active(tools.default())
         sync_tool()
 
     def sync_tool(*_args) -> None:
         picking = tools.active() == PICK
         panel.pick_button.setChecked(picking)
+        panel.autopick_button.setChecked(tools.active() == AUTOPICK)
         label = PICK_LABELS.get(tools.view(), PICK_LABELS["map"])  # Reference: shows the map
         if panel.pick_button.text() != label:
             panel.pick_button.setText(label)
@@ -688,7 +709,8 @@ def install(window) -> None:
             hint.set_text(f"Picking {curve} · {where} · {ALT_TEXT}-click to remove · Esc to stop")
         hint.setVisible(picking)
 
-    panel.pick_button.clicked.connect(on_pick_button)
+    panel.pick_button.clicked.connect(lambda checked: on_tool_button(PICK, checked))
+    panel.autopick_button.clicked.connect(lambda checked: on_tool_button(AUTOPICK, checked))
     tools.toolChanged.connect(sync_tool)
 
     # markers
