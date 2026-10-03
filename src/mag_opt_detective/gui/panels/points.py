@@ -124,7 +124,10 @@ class PickButton(QPushButton):
         self.setCheckable(True)
         self.setMinimumHeight(30)
         icons.set_icon(self, "crosshair", None, on_color="accent-fg")
-        self.toggled.connect(lambda on: set_style_property(self, "kit", "primary" if on else None))
+        self.setProperty("kit", "button")  # the kit's button look and focus border while off
+        self.toggled.connect(
+            lambda on: set_style_property(self, "kit", "primary" if on else "button")
+        )
 
     def _key_size(self) -> QSize:
         metrics = self.fontMetrics()

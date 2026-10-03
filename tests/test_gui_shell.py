@@ -361,6 +361,7 @@ def test_keyboard_focus_and_hover_show_on_tabs_and_buttons(shown, qtbot):
         shown.panels["points"].export_button,
         shown.panels["library"].load_button,
         shown.plot_area.empty.action_button,
+        shown.panels["points"].pick_button,  # while off; filled (primary) while picking
     )
     assert all(button.property("kit") == "button" for button in buttons)
     sheet = theme.build_stylesheet(theme.tokens_for(False))
