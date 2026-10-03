@@ -1027,6 +1027,8 @@ class MainWindow(QMainWindow):
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
+        if not self._shown:  # start on the plot, not with a focus ring on the first button
+            self.plots.map.view.setFocus(Qt.FocusReason.OtherFocusReason)
         self._shown = True
 
     def closeEvent(self, event) -> None:

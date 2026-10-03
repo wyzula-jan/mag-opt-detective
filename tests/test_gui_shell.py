@@ -345,6 +345,7 @@ def test_tab_follows_the_layout_of_the_areas(shown, sweep):
 
 def test_keyboard_focus_and_hover_show_on_tabs_and_buttons(shown, qtbot):
     tabs = shown.plot_area.tabs
+    qtbot.waitUntil(lambda: shown.plots.map.view.hasFocus())  # no button starts ringed
     shown.toolbar.open_button.setFocus()
     qtbot.waitUntil(lambda: shown.toolbar.open_button.hasFocus())
     plain = tabs.grab().toImage()
