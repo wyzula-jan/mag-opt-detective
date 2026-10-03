@@ -10,6 +10,7 @@ always agree. Levels of per-unit energy derivatives are saved per cm^-1.
 from __future__ import annotations
 
 import json
+import math
 
 import numpy as np
 import pyqtgraph as pg
@@ -48,7 +49,7 @@ from mag_opt_detective.gui.controller import (
 from mag_opt_detective.gui.inspector.view import NumberSpin, load_json, to_pair, update_sections
 from mag_opt_detective.gui.kit import CollapsibleSection, SegmentedControl
 from mag_opt_detective.gui.kit._common import set_style_property
-from mag_opt_detective.gui.kit.range_control import ORDER_ERROR
+from mag_opt_detective.gui.kit.range_control import ORDER_ERROR, decimals_for
 from mag_opt_detective.gui.theme import current_tokens
 
 Pair = tuple[float, float]
@@ -384,6 +385,14 @@ class LevelHistogram(QWidget):
 
 
 # ---------------------------------------------------------------------- level fields
+def level_digits(value: float, span: float) -> int:
+    """Significant digits (4 to 6) that show *value* to about 1/1000 of *span*."""
+    if not (math.isfinite(value) and math.isfinite(span)) or value == 0 or span <= 0:
+        return 4
+    needed = decimals_for(span) + math.floor(math.log10(abs(value))) + 1
+    return min(6, max(4, needed))
+
+
 class LevelFields(QWidget):
     """Two number fields for the colour levels and a note; ``edited(lo, hi)`` fires when the
     user changes a field to a valid pair, a reversed pair is refused inline."""
@@ -422,10 +431,12 @@ class LevelFields(QWidget):
         return self.lo.value(), self.hi.value()
 
     def set_levels(self, lo: float, hi: float) -> None:
-        """Show *lo* and *hi* (clears a refused edit), without emitting."""
+        """Show *lo* and *hi* (clears a refused edit), without emitting: four significant
+        digits as the notes, more (up to six) where the range needs them."""
         step = (hi - lo) / 100 if hi > lo else None
-        self.lo.set_quietly(lo, step)
-        self.hi.set_quietly(hi, step)
+        for field, value in ((self.lo, lo), (self.hi, hi)):
+            field.digits = level_digits(value, hi - lo)
+            field.set_quietly(value, step)
         self._set_error("")
 
     def set_note(self, text: str) -> None:

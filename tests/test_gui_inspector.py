@@ -592,7 +592,17 @@ def test_typed_levels_are_checked(processed, qtbot):
     assert c.view.levels["Ratio"] == (0.0025, 1.1)
     assert fields.lo.text() == "0.0025"
     fields.lo.setValue(1.25e-7)  # tiny levels keep their digits
-    assert fields.lo.value() == 1.25e-7 and fields.lo.text() == "1.25e-07"
+    assert fields.lo.value() == 1.25e-7 and fields.lo.text() == "1.25e-7"
+
+
+def test_level_fields_show_the_digits_of_the_notes(processed):
+    """Four significant digits, as the notes and the status bar; more for a narrow range."""
+    fields = colour_page(processed).fields
+    fields.set_levels(-0.00583551, 0.00412345)  # a derivative map
+    assert (fields.lo.text(), fields.hi.text()) == ("-0.005836", "0.004123")
+    fields.set_levels(0.999851234, 1.000123456)
+    assert (fields.lo.text(), fields.hi.text()) == ("0.999851", "1.00012")
+    assert fields.levels() == (0.999851234, 1.000123456)  # shown rounded, kept as they are
 
 
 # ---------------------------------------------------------------------- traces

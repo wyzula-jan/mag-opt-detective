@@ -26,7 +26,7 @@ from PySide6.QtWidgets import QAbstractSpinBox, QDoubleSpinBox, QLabel, QVBoxLay
 from mag_opt_detective.core.spectra import FieldMap
 from mag_opt_detective.core.units import Unit, convert_range
 from mag_opt_detective.gui.controller import VIEW_RANGES, AppController, ViewState
-from mag_opt_detective.gui.display import format_range, unit_text
+from mag_opt_detective.gui.display import format_number, format_range, unit_text
 from mag_opt_detective.gui.kit import RangeControl
 from mag_opt_detective.gui.widgets import parse_float
 
@@ -52,10 +52,12 @@ _PARTIAL_NUMBER = re.compile(r"[+-]?(\d+\.?\d*|\.\d*)?([eE][+-]?\d*)?")
 # ---------------------------------------------------------------------- shared helpers
 class NumberSpin(QDoubleSpinBox):
     """Number field (C locale, no arrows) that shows six significant digits of any magnitude
-    and accepts scientific notation; the wheel changes it only while it has the focus."""
+    (or :attr:`digits`, as :func:`format_number`) and accepts scientific notation; the wheel
+    changes it only while it has the focus."""
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
+        self.digits: int | None = None
         self.setLocale(QLocale.c())
         self.setDecimals(30)  # keeps tiny values (derivative levels) instead of rounding to 0
         self.setRange(-1e300, 1e300)
@@ -64,7 +66,7 @@ class NumberSpin(QDoubleSpinBox):
         self.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
 
     def textFromValue(self, value: float) -> str:
-        return f"{value:.6g}"
+        return f"{value:.6g}" if self.digits is None else format_number(value, self.digits)
 
     def valueFromText(self, text: str) -> float:
         value = parse_float(text)
