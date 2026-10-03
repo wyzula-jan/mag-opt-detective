@@ -287,6 +287,12 @@ def test_custom_expression_validates_as_you_type(window, sweep, errors):
     editor.code.edit.setPlainText("E0 + g*muB*B")  # g comes back as it was
     assert editor.rows["g"].value.text() == "2" and editor.rows["g"].fixed.isChecked()
     assert ms.params(entry)["E0"].lo == 10.0
+    assert "h" not in entry.memory  # never set by the user: forgotten
+    text = "E0 + amplitude*B"
+    for end in range(1, len(text) + 1):  # typed letter by letter
+        editor.code.edit.setPlainText(text[:end])
+    saved = [p["name"] for p in ms.entry_to_dict(entry)["params"]]
+    assert sorted(saved) == ["E0", "amplitude", "g"]  # not E, a, am, ...; g was set
 
     editor.code.edit.setPlainText("foo(B)")
     assert editor.message.text() == "Line 1, column 1: unknown function foo"
@@ -682,7 +688,7 @@ def test_models_are_remembered(qtbot, tmp_path):
     assert z.color == ms.MODEL_COLORS[3]
     assert x.text == "E0 + a*B" and x.unit is Unit.THZ and not x.expanded
     assert ms.params(x)["a"].value == 0.25 and ms.params(x)["a"].fixed
-    assert ms.params(x)["E0"].hi == 5.0
+    assert ms.params(x)["E0"].hi == 5.0 and x.edited == {"E0", "a"}
     assert x.fit.assignment == "sorted"
     zcard2 = card_of(w2, z)
     assert zcard2.editor.rows[0].e0.text() == "12"  # shown in meV, the restored unit

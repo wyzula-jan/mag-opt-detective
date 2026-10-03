@@ -66,7 +66,8 @@ class ModelEntry:
     text: str = ""  # custom: the text in the editor (may be invalid)
     unit: Unit = Unit.MEV  # custom: the output unit of the expression
     error: ExpressionError | None = None  # custom: why the text is invalid
-    memory: dict[str, Param] = field(default_factory=dict)  # custom: every parameter seen
+    memory: dict[str, Param] = field(default_factory=dict)  # custom: current and edited
+    edited: set[str] = field(default_factory=set)  # custom: parameters the user set
     fit: FitSetup = field(default_factory=FitSetup)
 
     @property
@@ -270,8 +271,10 @@ def set_branch(entry: ModelEntry, index: int, **changes) -> None:
 def set_expression(entry: ModelEntry, text: str) -> ExpressionError | None:
     """Use *text* as the expression of a custom entry; returns the error if it is invalid.
 
-    Parameters keep their value, bounds and fixed flag while their name stays, and get them
-    back when a name returns. An invalid text leaves the model as it was (not drawn).
+    Parameters keep their value, bounds and fixed flag while their name stays; those the user
+    set (:attr:`ModelEntry.edited`) get them back when their name returns, others are
+    forgotten (names typed on the way, as "a", "am", "amp"). An invalid text leaves the model
+    as it was (not drawn).
     """
     entry.text = text
     if not text.strip():
@@ -291,6 +294,10 @@ def set_expression(entry: ModelEntry, text: str) -> ExpressionError | None:
         if old is not None and old is not p:
             p.value, p.lo, p.hi, p.fixed = old.value, old.lo, old.hi, old.fixed
         entry.memory[p.name] = p
+    current = {p.name for p in entry.model.params}
+    entry.memory = {
+        name: p for name, p in entry.memory.items() if name in current or name in entry.edited
+    }
     return None
 
 
@@ -514,6 +521,7 @@ def entry_to_dict(entry: ModelEntry) -> dict:
                 "fixed": p.fixed,
                 "lo": _bound(p.lo),
                 "hi": _bound(p.hi),
+                "edited": p.name in entry.edited,
             }
             for p in entry.memory.values()
         ]
@@ -569,6 +577,8 @@ def entry_from_dict(data: Mapping) -> ModelEntry:
                 entry.memory[name] = Param(
                     name, _number(p["value"]), lo, hi, _bool(p.get("fixed", False))
                 )
+                if _bool(p.get("edited", True)):
+                    entry.edited.add(name)
             set_expression(entry, str(data.get("text", "")))
     except (KeyError, TypeError, IndexError, AttributeError) as exc:
         raise ValueError(f"invalid model: {exc}") from exc

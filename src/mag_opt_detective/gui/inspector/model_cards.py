@@ -511,10 +511,12 @@ class ExpressionEditor(QWidget):
 
     def _on_value(self, name: str, value) -> None:
         ms.params(self.entry)[name].value = float(value)
+        self.entry.edited.add(name)
         self.owner.edited(self.entry)
 
     def _on_fixed(self, name: str, fixed: bool) -> None:
         ms.params(self.entry)[name].fixed = fixed
+        self.entry.edited.add(name)
 
     def _on_bound(self, name: str, which: str, value) -> None:
         row = self.rows[name]
@@ -528,6 +530,7 @@ class ExpressionEditor(QWidget):
         p = ms.params(self.entry)[name]
         p.lo = -float("inf") if lo is None else float(lo)
         p.hi = float("inf") if hi is None else float(hi)
+        self.entry.edited.add(name)
 
 
 EDITORS = {ms.DIRAC: DiracEditor, ms.ZEEMAN: ZeemanEditor, ms.CUSTOM: ExpressionEditor}

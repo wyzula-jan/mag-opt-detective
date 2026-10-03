@@ -459,6 +459,8 @@ class Models(QObject):
         if item is None:
             return
         apply(entry.model, item[0])
+        if entry.kind == ms.CUSTOM:
+            entry.edited.update(item[0].free)  # fitted values are remembered as typed ones
         card = self.cards[entry]
         card.refresh()
         card.fit_area.refresh()
