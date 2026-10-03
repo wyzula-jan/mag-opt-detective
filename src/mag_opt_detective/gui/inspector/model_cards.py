@@ -28,6 +28,7 @@ from mag_opt_detective.gui.display import unit_text
 from mag_opt_detective.gui.inspector import model_state as ms
 from mag_opt_detective.gui.inspector.model_widgets import (
     FIELD_HEIGHT,
+    VELOCITY_UNIT,
     CodeBox,
     ColorSwatch,
     IconButton,
@@ -41,6 +42,7 @@ from mag_opt_detective.gui.inspector.model_widgets import (
     fixed_range,
     muted_label,
     nice_ceil,
+    subscript,
     tool_button,
 )
 from mag_opt_detective.gui.kit import SegmentedControl, Switch
@@ -139,25 +141,27 @@ def stack(*widgets: QWidget, spacing: int = 8) -> QVBoxLayout:
 
 # ---------------------------------------------------------------------- Dirac
 class DiracEditor(QWidget):
-    """Fermi velocity, half-gap (display unit) and number of transitions as parameter rows."""
+    """Fermi velocity v, half-gap Δ (display unit) and number of transitions N as parameter
+    rows (the formula under them names the symbols)."""
 
     def __init__(self, entry: ms.ModelEntry, owner: Owner, parent=None):
         super().__init__(parent)
         self.entry, self.owner = entry, owner
         mode = owner.slider_mode
         self.velocity = ParamRow(
-            "Velocity v",
-            "×10⁵ m/s",
+            "v",
+            VELOCITY_UNIT,
             name="Fermi velocity v",
+            digits=5,
             minimum=0.0,
             mode=mode,
             range_for=fixed_range(*VELOCITY_SPAN),
             floor=1.0,
         )
-        self.delta = ParamRow("Half-gap Δ", "meV", name="Half-gap Δ", minimum=0.0, mode=mode)
+        self.delta = ParamRow("Δ", "meV", name="Half-gap Δ", minimum=0.0, mode=mode)
         most = ms.DIRAC_MAX_LINES
         self.n_lines = ParamRow(
-            "Transitions N",
+            "N",
             name="Transitions shown",
             integer=True,
             minimum=1,
@@ -262,9 +266,10 @@ class BranchRow(QWidget):
         self.m.setFixedWidth(self.m.caption.sizeHint().width() + room + 14)
         self.form = FormButton()
         self.remove = tool_button("x", "Remove branch", "faint")
-        self.e0 = ParamRow("E₀", name="E₀", digits=5, mode=mode)
-        self.e0.setToolTip("Energy at zero field")
-        self.g = ParamRow("g", name="g factor", mode=mode, range_for=fixed_range(*G_SPAN), floor=1)
+        self.e0 = ParamRow("E₀", name="E₀, the energy at zero field", digits=5, mode=mode)
+        self.g = ParamRow(
+            "g", name="g factor", mode=mode, range_for=fixed_range(*G_SPAN), floor=1.0
+        )
         head = QHBoxLayout()
         head.setContentsMargins(0, 0, 0, 0)
         head.setSpacing(4)
@@ -348,10 +353,15 @@ class ZeemanEditor(QWidget):
             row.m.set_value(branch.m)
             row.form.set_form(branch.form)
             row.remove.setEnabled(len(branches) > 1)
-            row.e0.field.edit.setAccessibleName(f"E₀ of {branch.label}")
-            row.e0.slider.setAccessibleName(f"E₀ of {branch.label}")
-            row.g.field.edit.setAccessibleName(f"g factor of {branch.label}")
-            row.g.slider.setAccessibleName(f"g factor of {branch.label}")
+            for widget, text in (
+                (row.label.edit, f"Branch {i + 1} label"),
+                (row.m.edit, f"Branch {i + 1} m, the multiplier of g μB B"),
+                (row.e0.field.edit, f"E₀ of {branch.label}"),
+                (row.e0.slider, f"E₀ of {branch.label}"),
+                (row.g.field.edit, f"g factor of {branch.label}"),
+                (row.g.slider, f"g factor of {branch.label}"),
+            ):
+                widget.setAccessibleName(text)
         self._refresh_couplings()
 
     def _build_rows(self, n: int) -> None:
@@ -385,7 +395,7 @@ class ZeemanEditor(QWidget):
             self.couplings = {}
             for i, j in pairs:
                 row = ParamRow(
-                    f"Δ {i + 1}–{j + 1}",
+                    f"Δ{subscript(i + 1, j + 1)}",
                     unit_text(unit),
                     name=f"Coupling Δ {i + 1}–{j + 1}",
                     digits=5,

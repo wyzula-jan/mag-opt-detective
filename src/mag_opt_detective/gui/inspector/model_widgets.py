@@ -214,10 +214,18 @@ class NumberField(UnitField):
 
 
 # ---------------------------------------------------------------------- parameter rows
-LINE_GAP = 2  # caption line to slider (narrow rows)
+LINE_GAP = 2  # caption line to slider (rows too narrow for one line)
 CAPTION_SCALE = 0.94
-WIDE_CAPTIONS = ("Transitions N", "Half-gap Δ", "Velocity v")  # what the caption column holds
-WIDEST_NUMBERS = (("-0000.00", "cm⁻¹"), ("0.00000", "×10⁵ m/s"))  # (number, unit) to fit
+SYMBOLS = ("Δ₁₂", "E₀")  # the widest captions of the built-in models (symbols)
+WIDEST_NUMBERS = (("-0000.00", "cm⁻¹"), ("0.0000", "10⁵ m/s"))  # (number, unit) to fit
+VELOCITY_UNIT = "10⁵ m/s"
+SUBSCRIPTS = str.maketrans("0123456789", "₀₁₂₃₄₅₆₇₈₉")
+
+
+def subscript(*numbers: int) -> str:
+    """``₁₂`` for (1, 2); ``₁,₁₀`` once a number has two digits."""
+    texts = [str(n).translate(SUBSCRIPTS) for n in numbers]
+    return ("," if any(n >= 10 for n in numbers) else "").join(texts)
 
 
 @dataclass(frozen=True)
@@ -226,8 +234,8 @@ class Columns:
 
     label: int
     value: int
-    gap: int = 8
-    slider: int = 110  # the narrowest slider of a one-line row
+    gap: int = 6
+    slider: int = 56  # the narrowest slider of a one-line row
 
     def wide_width(self) -> int:
         """The narrowest row that holds caption, slider and field on one line."""
@@ -239,14 +247,16 @@ _COLUMNS: dict[str, Columns] = {}
 
 def columns(widget: QWidget) -> Columns:
     """The shared columns for *widget*'s font: the number field fits an energy in any unit and
-    the velocity with its unit, the caption column the built-in captions."""
+    the velocity with its unit, the caption column the symbols of the built-in parameters
+    (longer names are elided). Caption, slider and field fit one line of the narrowest
+    inspector."""
     key = widget.font().key()
     if key not in _COLUMNS:
         caption = QFontMetrics(scaled_font(widget, CAPTION_SCALE))
         mono = QFontMetrics(mono_font())
         unit = QFontMetrics(scaled_font(widget, UNIT_SCALE))
         room = max(mono.horizontalAdvance(n) + unit.horizontalAdvance(u) for n, u in WIDEST_NUMBERS)
-        label = max(caption.horizontalAdvance(text) for text in WIDE_CAPTIONS) + 4
+        label = max(caption.horizontalAdvance(text) for text in SYMBOLS) + 4
         _COLUMNS[key] = Columns(label, room + FIELD_PADDING)
     return _COLUMNS[key]
 
@@ -338,15 +348,18 @@ class SliderMode(QObject):
 
 
 class ParamRow(QWidget):
-    """One parameter on the shared :func:`columns`: caption, slider and number field.
+    """One parameter on the shared :func:`columns`: caption (a symbol; *name* is its tooltip
+    and the accessible name), slider and number field.
 
-    Wide enough, all three sit on one line; narrower, the caption and the field share the
-    first line and the slider takes the whole second line, so nothing is squeezed. The field is
-    right-aligned with its unit inside; the slider moves the value live (``valueEdited(value,
-    True)`` while dragging, then ``(value, False)`` on release) and typing in the field emits
-    ``(value, False)``. In the range mode the slider spans *range_for(value)* (re-derived when
-    a value falls outside it or the unit changes); the relative span is taken of at least
-    *floor*. :meth:`set_value` is silent.
+    The three sit on one line; only in a row narrower than :meth:`Columns.wide_width` do the
+    caption and the field share the first line and the slider take a second, so nothing is
+    squeezed. The field is right-aligned with its unit inside. The slider changes the value
+    live (``valueEdited(value, True)`` while dragging or for each key press) and commits it
+    once on release (``(value, False)``); typing in the field emits ``(value, False)``.
+
+    In the range mode the slider spans *range_for(value)* (re-derived when a value falls
+    outside it or the unit changes); the relative span is taken of at least *floor*.
+    :meth:`set_value` is silent.
     """
 
     valueEdited = Signal(float, bool)
@@ -376,6 +389,7 @@ class ParamRow(QWidget):
         self.caption.setProperty("kit", "muted")
         self.caption.setFont(mono_font(0.88) if mono else scaled_font(self, CAPTION_SCALE))
         self.caption.setToolTip(name)
+        self.caption.setAccessibleName(name)
         self.field = NumberField(
             unit,
             name=f"{name} value",
@@ -387,6 +401,7 @@ class ParamRow(QWidget):
         self.caption.setBuddy(self.field.edit)
         self.slider = NudgeSlider()
         self.slider.setAccessibleName(name)
+        self.slider.setToolTip(name)
         self.slider.set_bounds(minimum, maximum)
         self.slider.set_floor(floor)
         if integer:
@@ -402,6 +417,7 @@ class ParamRow(QWidget):
             lambda: self.valueEdited.emit(self.slider.value(), False)
         )
         self.field.valueEdited.connect(self._on_field)
+        self._order_tabs()
 
     # --- values --------------------------------------------------------------------------
     def value(self) -> float | None:
@@ -433,7 +449,7 @@ class ParamRow(QWidget):
 
     def _on_slider(self, value: float) -> None:
         self.field.set_value(value)
-        self.valueEdited.emit(value, self.slider.is_dragging())
+        self.valueEdited.emit(value, True)  # committed by editingFinished
 
     def _on_field(self, value) -> None:
         if value is None:
@@ -484,7 +500,15 @@ class ParamRow(QWidget):
             self.slider.setGeometry(0, FIELD_HEIGHT + LINE_GAP, width, slider_height)
         if wide != self._wide:
             self._wide = wide
+            self._order_tabs()
             self.updateGeometry()
+
+    def _order_tabs(self) -> None:
+        """Tab follows what is drawn: slider then field on one line, field then slider on two."""
+        if self._wide:
+            QWidget.setTabOrder(self.slider, self.field.edit)
+        else:
+            QWidget.setTabOrder(self.field.edit, self.slider)
 
 
 class CodeBox(QWidget):

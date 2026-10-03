@@ -30,6 +30,7 @@ from mag_opt_detective.gui.display import UNIT_TEXT
 from mag_opt_detective.gui.inspector import model_state as ms
 from mag_opt_detective.gui.inspector.model_widgets import (
     FIELD_HEIGHT,
+    VELOCITY_UNIT,
     CurveDot,
     TableBox,
     mono_label,
@@ -102,7 +103,7 @@ def choices(entry: ms.ModelEntry) -> list[tuple[str, int | None]]:
 def display_unit(text: str, unit: Unit) -> str:
     if text == str(unit):
         return UNIT_TEXT.get(unit, text)
-    return "×10⁵ m/s" if text == "1e5 m/s" else text
+    return VELOCITY_UNIT if text == "1e5 m/s" else text
 
 
 class FitArea(QWidget):

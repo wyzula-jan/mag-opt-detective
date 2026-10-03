@@ -6,8 +6,8 @@ import threading
 
 import numpy as np
 import pytest
-from PySide6.QtCore import QPoint, QSettings, Qt
-from PySide6.QtWidgets import QApplication, QStyle
+from PySide6.QtCore import QEvent, QPoint, QSettings, Qt, QTimer
+from PySide6.QtWidgets import QApplication, QLineEdit, QMenu, QStyle, QWidget
 
 import gui_helpers
 from gui_helpers import inspector_page, load_sweep, process, save_to, set_unit
@@ -20,9 +20,9 @@ from mag_opt_detective.core.zeeman import MU_B, Form, branch_energy
 from mag_opt_detective.gui.controller import AppController
 from mag_opt_detective.gui.inspector import model_state as ms
 from mag_opt_detective.gui.inspector import models as models_module
-from mag_opt_detective.gui.inspector.model_widgets import FIELD_HEIGHT, ParamRow
+from mag_opt_detective.gui.inspector.model_widgets import FIELD_HEIGHT, ParamRow, columns
 from mag_opt_detective.gui.kit.nudge_slider import jog_fraction
-from mag_opt_detective.gui.main_window import INSPECTOR_MIN_WIDTH, MainWindow
+from mag_opt_detective.gui.main_window import INSPECTOR_MIN_WIDTH, INSPECTOR_WIDTH, MainWindow
 from mag_opt_detective.gui.settings import PREFIX
 
 window, errors = gui_helpers.window, gui_helpers.errors  # shared fixtures
@@ -211,6 +211,8 @@ def test_zeeman_branches_and_couplings(window, errors):
 
     editor.add_button.click()
     assert [r.label.edit.text() for r in editor.rows] == ["Branch 1", "Branch 2"]
+    assert editor.rows[1].label.edit.accessibleName() == "Branch 2 label"
+    assert editor.rows[1].m.edit.accessibleName().startswith("Branch 2 m")
     assert editor.coupled.isEnabled() and editor.coupling_box.isHidden()
     editor.coupled.setChecked(True)
     assert zeeman.model.coupled and not editor.coupling_box.isHidden()
@@ -849,12 +851,17 @@ def param_rows(window) -> list[ParamRow]:
 
 
 @pytest.mark.parametrize(
-    ("size", "inspector"), [((1100, 800), None), ((1400, 900), "narrowest"), ((1400, 900), 480)]
+    ("size", "inspector", "width"),
+    [
+        ((1100, 800), None, INSPECTOR_MIN_WIDTH),  # the inspector cannot be wider here
+        ((1400, 900), None, INSPECTOR_WIDTH),
+        ((1400, 900), INSPECTOR_MIN_WIDTH, INSPECTOR_MIN_WIDTH),
+        ((1400, 900), 480, 480),
+    ],
 )
-def test_value_fields_share_one_column(window, sweep, qtbot, size, inspector, errors):
-    """In every card the number fields share x and width (the same column in every card), at
-    1100 px, with the inspector dragged to its narrowest and wide; captions sit level with
-    their fields, and the slider moves under them when the inspector is narrow."""
+def test_value_fields_share_one_column(window, sweep, qtbot, size, inspector, width, errors):
+    """Every parameter is one line (symbol, slider, field) at the default inspector widths
+    and wider, and the number fields share x and width in every card: the same column."""
     shown_window(window, qtbot, size)
     load_sweep(window, sweep)
     process(window)
@@ -862,38 +869,82 @@ def test_value_fields_share_one_column(window, sweep, qtbot, size, inspector, er
     if inspector is not None:
         splitter = window.body_splitter
         sizes = splitter.sizes()
-        width = INSPECTOR_MIN_WIDTH if inspector == "narrowest" else inspector
-        splitter.setSizes([sizes[0], sum(sizes) - sizes[0] - width, width])
+        splitter.setSizes([sizes[0], sum(sizes) - sizes[0] - inspector, inspector])
     settle(qtbot)
-    width = INSPECTOR_MIN_WIDTH if inspector in (None, "narrowest") else inspector
     assert window.inspector_panel.width() == width
     section = window.inspector["models"]
     rows = param_rows(window)
     assert len(rows) == 3 + 6 + 3 + 5  # Dirac v, Δ, N; E₀ and g of 3 branches; Δij; custom
-    qtbot.waitUntil(  # the new rows are laid out (one line or two)
+    qtbot.waitUntil(  # the new rows are laid out
         lambda: all(r.height() == r.heightForWidth(r.width()) for r in rows), timeout=5000
     )
     boxes = {(r.field.mapTo(section, QPoint(0, 0)).x(), r.field.width()) for r in rows}
     assert len(boxes) == 1, boxes
-    wide = inspector == 480
+    custom = card_of(window, models_of(window).entries[2]).editor.param_rows_shown()
+    smallest = columns(rows[0]).slider
     for row in rows:
         field, caption, slider = row.field.geometry(), row.caption.geometry(), row.slider.geometry()
+        assert row.is_wide() and row.height() == FIELD_HEIGHT  # caption | slider | field
         assert field.height() == FIELD_HEIGHT and caption.center().y() == field.center().y()
-        assert row.is_wide() == wide
-        if wide:  # caption | slider | field on one line
-            assert caption.right() < slider.left() and slider.right() < field.left()
-            assert abs(slider.center().y() - field.center().y()) <= 1
-        else:  # caption and field, the slider under them across the row
-            assert slider.top() > field.bottom() and slider.width() == row.width()
+        assert caption.right() < slider.left() and slider.right() < field.left()
+        assert abs(slider.center().y() - field.center().y()) <= 1
+        assert slider.width() >= smallest
         edit = row.field.edit
         assert edit.width() >= edit.fontMetrics().horizontalAdvance(edit.text())
-        caption = row.caption
-        assert caption.width() >= caption.fontMetrics().horizontalAdvance(caption.text())
-    # captions share their column too (wide: the slider column starts in one place)
+        text = row.caption.text()
+        if row in custom:  # a long name is elided; the tooltip has it whole
+            assert row.caption.toolTip() == text
+        else:  # the symbols show whole, the full names are tooltips and accessible names
+            assert caption.width() >= row.caption.fontMetrics().horizontalAdvance(text)
+            assert len(text) <= 3 and len(row.slider.accessibleName()) > len(text)
+    assert {r.caption.text() for r in rows} >= {"v", "Δ", "N", "E₀", "g", "Δ₁₂", "Δ₂₃"}
+    # the captions and the sliders share their columns too
     assert len({r.slider.mapTo(section, QPoint(0, 0)).x() for r in rows}) == 1
     scrollbar = window.style().pixelMetric(QStyle.PixelMetric.PM_ScrollBarExtent)
     assert section.minimumSizeHint().width() <= INSPECTOR_MIN_WIDTH - scrollbar
     assert not errors
+
+
+def tab_chain(start: QWidget, count: int) -> list[QWidget]:
+    """The next *count* widgets Tab reaches from *start*."""
+    found, widget = [], start
+    while len(found) < count:
+        widget = widget.nextInFocusChain()
+        if widget.focusPolicy() & Qt.FocusPolicy.TabFocus and widget.isVisible():
+            found.append(widget)
+    return found
+
+
+def test_a_row_too_narrow_for_one_line_puts_the_slider_under(qtbot):
+    """Below caption + the smallest slider + field the slider takes a line of its own (and Tab
+    follows what is drawn: slider then field on one line, field then slider on two)."""
+    box = QWidget()
+    qtbot.addWidget(box)
+    first = QLineEdit(box)
+    row = ParamRow("g", name="g factor", parent=box)
+    last = QLineEdit(box)
+    row.set_value(2.0)
+    one_line = columns(row).wide_width()
+    assert one_line <= 200  # fits the 208 px of the narrowest inspector
+    for width, wide in ((one_line, True), (one_line - 1, False)):
+        row.setGeometry(0, 30, width, row.heightForWidth(width))
+        box.show()
+        qtbot.waitExposed(box)
+        assert row.is_wide() == wide and row.height() == row.heightForWidth(width)
+        field, slider = row.field.geometry(), row.slider.geometry()
+        if wide:
+            assert slider.right() < field.left() and row.height() == FIELD_HEIGHT
+            order = [first, row.slider, row.field.edit, last]
+        else:
+            assert slider.top() > field.bottom() and slider.width() == width
+            order = [first, row.field.edit, row.slider, last]
+        assert tab_chain(first, 3) == order[1:]
+        box.hide()
+
+
+def release(qtbot, slider) -> None:
+    x = round(slider.handle_x())
+    qtbot.mouseRelease(slider, Qt.MouseButton.LeftButton, pos=QPoint(x, slider.height() // 2))
 
 
 def drag_by(qtbot, slider, offsets, release=True) -> None:
@@ -933,8 +984,9 @@ def test_g_has_a_slider_that_drags_the_zeeman_curve(window, sweep, qtbot, errors
     assert row.g.slider.handle_offset() == 0.0 and p["g_0"].value == pytest.approx(2.2)
 
     # E₀ is dragged in the display unit (cm⁻¹) and kept in meV
-    drag_by(qtbot, row.e0.slider, [-0.5])
-    expected = e0 * (1 - 0.1 * jog_fraction(0.5))
+    drag_by(qtbot, row.e0.slider, [-0.5], release=False)
+    expected = e0 * (1 + 0.1 * jog_fraction(row.e0.slider.handle_offset()))
+    release(qtbot, row.e0.slider)
     assert p["e0_0"].value == pytest.approx(expected, rel=2e-3)
     assert float(row.e0.field.text()) == pytest.approx(p["e0_0"].value * MEV, rel=1e-4)
     assert row.e0.slider.value() == pytest.approx(p["e0_0"].value * MEV, rel=1e-6)
@@ -949,7 +1001,8 @@ def test_g_has_a_slider_that_drags_the_zeeman_curve(window, sweep, qtbot, errors
     assert slider.mode() == "range" and slider.range() == (0.0, 10.0)
     assert slider.handle_x() == pytest.approx(slider.x_for(2.2))
     qtbot.mouseClick(slider, Qt.MouseButton.LeftButton, pos=QPoint(round(slider.x_for(5)), 10))
-    assert p["g_0"].value == pytest.approx(5.0, abs=0.05)
+    step = 10.0 / (slider.track()[1] - slider.track()[0])  # a pixel
+    assert p["g_0"].value == pytest.approx(5.0, abs=step)
     assert float(row.g.field.text()) == pytest.approx(p["g_0"].value)
     field, energy = models.curve_data()["zeeman"][0]
     np.testing.assert_allclose(
@@ -1059,8 +1112,9 @@ def test_a_unit_switch_keeps_values_suffixes_and_sliders(window, sweep, qtbot, e
             edit = row.field.edit
             assert edit.width() >= edit.fontMetrics().horizontalAdvance(edit.text()), name
     assert ms.params(zeeman)["e0_0"].value == pytest.approx(20.0)  # kept in meV
-    hi = zeditor.rows[0].e0.slider.range()[1]
-    assert hi >= sweep["x"][-1]  # E₀ spans the processed map (cm⁻¹ now)
+    energy = window.controller.result.ratio.energy  # cm⁻¹, as shown now
+    top = float(np.nanmax(energy))
+    assert zeditor.rows[0].e0.slider.range()[1] >= top  # E₀ spans the processed map
     assert not errors
 
 
@@ -1072,4 +1126,44 @@ def test_the_fit_area_takes_the_place_of_its_button(window, errors):
     assert card.fit_button.isHidden() and not card.fit_area.isHidden()
     card.fit_area.close_button.click()
     assert not card.fit_button.isHidden() and card.fit_area.isHidden()
+    assert not errors
+
+
+def test_a_key_press_commits_the_value_once(window, sweep, qtbot, monkeypatch, errors):
+    shown_window(window, qtbot)
+    load_sweep(window, sweep)
+    process(window)
+    models = models_of(window)
+    zeeman = add(window, "zeeman")
+    row = card_of(window, zeeman).editor.rows[0].g
+    commits, draws = [], []
+    row.valueEdited.connect(lambda value, live: None if live else commits.append(value))
+    original = models.draw
+    monkeypatch.setattr(models, "draw", lambda: (draws.append(1), original())[1])
+    window.activateWindow()
+    row.slider.setFocus(Qt.FocusReason.OtherFocusReason)
+    qtbot.waitUntil(row.slider.hasFocus)
+    qtbot.keyClick(row.slider, Qt.Key.Key_Right)  # live on the press, committed on release
+    assert commits == [pytest.approx(2.02)] and len(draws) == 1
+    assert ms.params(zeeman)["g_0"].value == pytest.approx(2.02)
+    qtbot.keyClick(row.slider, Qt.Key.Key_Left, Qt.KeyboardModifier.ShiftModifier)
+    assert len(commits) == 2 and len(draws) == 2
+    qtbot.wait(models_module.DRAW_INTERVAL * 3)  # no redraw left waiting
+    assert len(draws) == 2
+    assert not errors
+
+
+def close_menus() -> None:
+    for widget in QApplication.topLevelWidgets():
+        if isinstance(widget, QMenu) and widget.isVisible():
+            widget.close()
+
+
+def test_the_mode_menu_is_deleted_after_use(window, qtbot, errors):
+    page = inspector_page(window, "models")
+    for _ in range(3):
+        QTimer.singleShot(30, close_menus)
+        page.mode_button.click()
+    QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    assert page.mode_button.findChildren(QMenu) == []
     assert not errors

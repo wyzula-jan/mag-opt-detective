@@ -247,7 +247,9 @@ class Models(QObject):
 
     def _choose_slider_mode(self) -> None:
         button = self.page.mode_button
-        self._slider_mode.menu(button).exec(button.mapToGlobal(button.rect().bottomLeft()))
+        menu = self._slider_mode.menu(button)
+        menu.exec(button.mapToGlobal(button.rect().bottomLeft()))
+        menu.deleteLater()
 
     # --- the list -------------------------------------------------------------------------
     def rebuild(self) -> None:
