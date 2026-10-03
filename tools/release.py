@@ -429,6 +429,8 @@ def plan_release(root: Path, args: argparse.Namespace) -> Plan | str:
         else:
             version = format_version(next_version(last, level))
             reason = bump_reason(level, last, commits)
+    if git(root, "tag", "--list", f"v{version}").strip():
+        raise ReleaseError(f"the tag v{version} exists already (not on this branch's history)")
     section = read_notes(args.notes) if args.notes else changelog_section(commits) or NO_CHANGES
     return Plan(
         version, previous, reason, commits, section, new_files(root, version, args.date, section)

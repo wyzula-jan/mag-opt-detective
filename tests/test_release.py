@@ -405,6 +405,19 @@ def test_a_tagged_head_is_refused(released, capsys):
     assert "--first is for the first release only" in capsys.readouterr().err
 
 
+def test_an_existing_tag_of_the_version_is_refused_before_committing(released, capsys):
+    """A v0.1.1 tag off this history (e.g. on another branch) stops the release at once."""
+    commit(released, "fix: a")
+    before = head(released)
+    side = git(released, "commit-tree", "HEAD^{tree}", "-m", "fix: elsewhere").strip()
+    git(released, "tag", "v0.1.1", side)
+    assert run(released) == 1
+    assert "the tag v0.1.1 exists already" in capsys.readouterr().err
+    assert head(released) == before
+    assert git(released, "status", "--porcelain") == ""
+    assert set(release.read_versions(released).values()) == {"0.1.0"}
+
+
 def test_notes_need_level_three_headings(released, capsys):
     commit(released, "fix: a")
     write(released / "bad.md", "## Added\n\n- a\n")
