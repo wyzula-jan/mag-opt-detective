@@ -329,6 +329,7 @@ class PointsView(QTableView):
         self.setMouseTracking(True)
         self.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.setTabKeyNavigation(False)  # Tab leaves the table; the arrow keys move in it
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         font = QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont)
         if self.font().pointSizeF() > 0:

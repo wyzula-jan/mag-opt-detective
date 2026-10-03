@@ -356,11 +356,15 @@ def focus_order(root: QWidget) -> list[QWidget]:
     """The widgets under *root* that take Tab focus, in layout order (as they are seen).
 
     A focusable widget counts as one stop (a spin box, a table, a plot); a scroll area is no
-    stop of its own, only its content.
+    stop of its own, only its content (which is seen once, though also its viewport's child).
     """
     found: list[QWidget] = []
+    seen: set[QWidget] = set()
 
     def visit(widget: QWidget) -> None:
+        if widget in seen:
+            return
+        seen.add(widget)
         takes_tab = bool(widget.focusPolicy() & Qt.FocusPolicy.TabFocus)
         if takes_tab and widget is not root and not isinstance(widget, QScrollArea):
             found.append(widget)
@@ -1021,9 +1025,22 @@ class MainWindow(QMainWindow):
         return chain
 
     def focusNextPrevChild(self, next: bool) -> bool:
-        # widgets made since (file rows, model cards, tools) join the chain where they show
-        self.update_tab_order()
-        return super().focusNextPrevChild(next)
+        """Tab steps along the chain of :meth:`update_tab_order` and wraps at its ends.
+
+        The chain is made again, so widgets made since (file rows, model cards, tools) join
+        where they show. Qt's own step would also stop between the last and the first at
+        widgets left out of the chain (the frame of a segmented control).
+        """
+        chain = self.update_tab_order()
+        current = QApplication.focusWidget()
+        if current not in chain:
+            return super().focusNextPrevChild(next)
+        stops = [w for w in chain if w is current or (w.isVisibleTo(self) and w.isEnabled())]
+        target = stops[(stops.index(current) + (1 if next else -1)) % len(stops)]
+        target.setFocus(
+            Qt.FocusReason.TabFocusReason if next else Qt.FocusReason.BacktabFocusReason
+        )
+        return True
 
     def showEvent(self, event) -> None:
         super().showEvent(event)

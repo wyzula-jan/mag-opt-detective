@@ -119,6 +119,11 @@ def test_points_table_in_the_display_unit_with_a_remove_button_per_row(shown, er
     assert rows(w) == [("0.5", "37.2"), ("2", "41")]
     np.testing.assert_allclose(c.points.points("LL 1")[0], [0.5, 2.0])
     table.setFocus()
+    qtbot.waitUntil(table.hasFocus)
+    table.setCurrentIndex(panel.model.index(0, 0))
+    QTest.keyClick(table, Qt.Key.Key_Tab)  # Tab leaves the table; the arrow keys move in it
+    assert not table.hasFocus()
+    table.setFocus()
     table.selectAll()
     QTest.keyClick(table, Qt.Key.Key_Delete)
     assert rows(w) == [] and panel.table_stack.currentWidget() is panel.empty_label

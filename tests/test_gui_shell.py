@@ -8,7 +8,7 @@ import shiboken6
 from PySide6.QtCore import QEvent, QPoint, Qt
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QComboBox, QToolButton
+from PySide6.QtWidgets import QApplication, QComboBox, QToolButton
 
 import gui_helpers
 from gui_helpers import energy_label, load_sweep, process, shown_image
@@ -341,6 +341,40 @@ def test_tab_follows_the_layout_of_the_areas(shown, sweep):
             walked.append(widget)
         widget = widget.nextInFocusChain()
     assert walked == expected
+
+
+def test_tab_keys_pass_the_file_table_and_wrap(shown, sweep, qtbot):
+    """Real Tab presses from Open sweep… (sweep loaded, Sample panel open) leave the in-field
+    table (the arrow keys move in it) and reach the plot tabs, a tool, the plot, an inspector
+    field and Log, then wrap to Open sweep…; Backtab steps back to Log."""
+    w = shown
+    load_sweep(w, sweep)
+    process(w)
+    assert w.current_panel() == "sample"
+    table = w.panels["sample"].measurement.field_list
+    open_button = w.toolbar.open_button
+    open_button.setFocus(Qt.FocusReason.TabFocusReason)
+    qtbot.waitUntil(open_button.hasFocus)
+    targets = [
+        table,
+        w.plot_area.tabs,
+        w.tools.tool("navigate").button,
+        w.plots.map.view,
+        view_page(w).field.lo_spin,
+        w.log_button,
+        open_button,
+    ]
+    reached = []
+    for _ in range(200):
+        QTest.keyClick(QApplication.focusWidget(), Qt.Key.Key_Tab)
+        focus = QApplication.focusWidget()
+        if focus in targets and focus not in reached:
+            reached.append(focus)
+        if focus is open_button:
+            break
+    assert reached == targets
+    QTest.keyClick(open_button, Qt.Key.Key_Backtab)
+    assert QApplication.focusWidget() is w.log_button
 
 
 def test_keyboard_focus_and_hover_show_on_tabs_and_buttons(shown, qtbot):

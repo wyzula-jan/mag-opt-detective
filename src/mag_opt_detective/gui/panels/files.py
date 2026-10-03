@@ -292,6 +292,7 @@ class FileTable(QTableView):
         self.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.setFrameShape(QTableView.Shape.NoFrame)
+        self.setTabKeyNavigation(False)  # Tab leaves the table; the arrow keys move in it
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.setAccessibleName("In-field files")
         self.setToolTip("Delete or Backspace removes the selected files")
