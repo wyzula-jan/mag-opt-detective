@@ -353,6 +353,15 @@ class _Overlay(QObject):
         child.raise_()
 
 
+class _PlotBackground(QWidget):
+    """A page filled with the plot background (around the controls above a plot)."""
+
+    def paintEvent(self, event) -> None:
+        painter = QPainter(self)
+        painter.fillRect(self.rect(), current_tokens()["plot-bg"])
+        painter.end()
+
+
 def scale_width(plot: ColorMapPlot) -> int:
     """The (fixed) width of the plot's colour scale."""
     widget = plot.scale.widget
@@ -383,7 +392,6 @@ class PlotArea(QWidget):
             label = KIND_LABELS[kind]
             self.ref_kind.add_option(kind.value, label, f"Show the reference {label}")
         self.ref_kind.setAccessibleName("Reference map")
-        self.ref_kind.hide()
 
         head = QWidget()
         head.setFixedHeight(40)
@@ -391,7 +399,6 @@ class PlotArea(QWidget):
         row.setContentsMargins(4, 0, 8, 0)
         row.setSpacing(6)
         row.addWidget(self.tabs)
-        row.addWidget(self.ref_kind)
         row.addWidget(self.description, stretch=1)
         row.addLayout(self.tools_row)
 
@@ -404,7 +411,19 @@ class PlotArea(QWidget):
         self.stack = QStackedWidget()
         self.stack.addWidget(self.map_splitter)
         self.stack.addWidget(self.stacked)
-        self.stack.addWidget(self.reference_splitter)
+        # the reference map: which one (R(B)/R(0) or data) in a row above it, so the plot head
+        # is no wider on this tab (the window keeps fitting 1100 px with both side panels)
+        reference_page = _PlotBackground()
+        ref_layout = QVBoxLayout(reference_page)
+        ref_layout.setContentsMargins(0, 0, 0, 0)
+        ref_layout.setSpacing(0)
+        options = QHBoxLayout()
+        options.setContentsMargins(10, 6, 10, 2)
+        options.addWidget(self.ref_kind)
+        options.addStretch(1)
+        ref_layout.addLayout(options)
+        ref_layout.addWidget(self.reference_splitter, stretch=1)
+        self.stack.addWidget(reference_page)
         self.tabs.currentChanged.connect(self.stack.setCurrentIndex)
 
         # the plots; strips (the Auto-pick options) go above them and push them down
