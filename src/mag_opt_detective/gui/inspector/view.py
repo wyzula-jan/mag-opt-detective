@@ -292,10 +292,13 @@ class ViewRanges:
             self.c.set_ranges(**changes)
 
     def on_click(self, view: str, event) -> None:
-        """A double-click in the data area of plot *view* fits it to the data."""
+        """A double-click in the data area of plot *view* fits it to the data, unless the
+        active tool takes the clicks there (Pick)."""
         if not (event.double() and event.button() == Qt.MouseButton.LeftButton):
             return
-        if view not in self._applied:
+        tools = self.window.tools
+        tool = tools.tool(tools.active())
+        if view not in self._applied or (tool.on_click is not None and view in tool.views):
             return
         vb = self.window.plots[view].plot.vb
         if vb.sceneBoundingRect().contains(event.scenePos()):

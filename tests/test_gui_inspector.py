@@ -202,6 +202,20 @@ def test_wheel_and_double_click_on_the_plot(shown, sweep):
     assert shown_range(w, "map") == [(0.5, 2.0), (100.0, 1000.0)]
 
 
+def test_double_click_fits_only_while_panning_or_zooming(processed):
+    w, c = processed, processed.controller
+    vb = w.plots.map.plot.vb
+    w.tools.set_active("pick")
+    c.set_ranges(field_range=(1.0, 1.5))
+    w.plots.map.plot.scene().sigMouseClicked.emit(Click(vb.sceneBoundingRect().center()))
+    assert c.view.field_range == (1.0, 1.5)  # the clicks belong to Pick
+    for tool in ("zoom", "navigate"):
+        w.tools.set_active(tool)
+        c.set_ranges(field_range=(1.0, 1.5))
+        w.plots.map.plot.scene().sigMouseClicked.emit(Click(vb.sceneBoundingRect().center()))
+        assert c.view.field_range is None
+
+
 def test_pan_or_zoom_on_an_empty_plot_keeps_the_ranges(shown, sweep, qtbot):
     w, c = shown, shown.controller
     pan(w, "map", dx=0.3, dy=0.2)  # nothing processed yet
