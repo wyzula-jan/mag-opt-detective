@@ -342,6 +342,9 @@ def test_map_markers_current_filled_others_open_in_curve_colours(processed):
     assert current.points()[0].brush().color().name() == CURVE_COLORS[1]
     np.testing.assert_allclose(current_marker_energies(w), [400.0, 500.0])
     stacked = w.plots.stacked.layer("points")
+    assert stacked.point_data() == []  # drawn when the Stacked tab is shown
+    w.plot_area.set_current_view("stacked")
+    assert [len(x) for x, _y in stacked.point_data()] == [1, 1, 2]
     panel.markers.set_value("current")
     assert [len(x) for x, _y in layer.point_data()] == [2]
     assert [len(x) for x, _y in stacked.point_data()] == [2]
@@ -349,11 +352,18 @@ def test_map_markers_current_filled_others_open_in_curve_colours(processed):
     assert layer.point_data() == [] and stacked.point_data() == []
     panel.markers.set_value("all")
     assert [len(x) for x, _y in stacked.point_data()] == [1, 1, 2]
+    c.add_curve()  # one ring group per curve, each in one pen
+    c.record_point(0.5, 600.0)
+    assert [len(x) for x, _y in layer.point_data()] == [3, 1, 2, 1]
+    _outline, first, second, _current = scatters(layer)
+    assert {p.pen().color().name() for p in second.points()} == {CURVE_COLORS[1]}
+    assert first.points()[0].pen().color().name() == CURVE_COLORS[0]
 
 
-def test_stacked_markers_sit_on_their_traces(processed):
+def test_stacked_markers_sit_on_their_traces(processed, monkeypatch):
     w = processed
     c, stacked = w.controller, w.plots.stacked
+    w.plot_area.set_current_view("stacked")
     c.record_points([0.5, 1.0, 2.0], [300.0, 400.0, 500.0], unit="cm-1")
     c.add_curve()
     c.record_point(1.5, 700.0)
@@ -374,6 +384,19 @@ def test_stacked_markers_sit_on_their_traces(processed):
     check([(0, 300.0)], [(2, 700.0)])
     set_unit(w, "meV")
     check([(0, 300.0 / MEV)], [(2, 700.0 / MEV)])
+    w.plot_area.set_current_view("map")  # edits on another tab: drawn on coming back
+    c.record_point(0.5, 80.0)
+    stacked.set_trace_options(every=1)
+    w.plot_area.set_current_view("stacked")
+    check([(0, 300.0 / MEV), (1, 400.0 / MEV), (3, 500.0 / MEV)], [(0, 80.0), (2, 700.0 / MEV)])
+
+    placed = []  # the curves whose points did not change are not placed again
+    trace_y = stacked.trace_y
+    monkeypatch.setattr(stacked, "trace_y", lambda j, e: placed.append(j) or trace_y(j, e))
+    c.set_curve("LL 1")
+    assert placed == []
+    c.record_point(1.5, 450.0)
+    assert sorted(placed) == [0, 1, 2, 3]
 
 
 def test_pick_and_markers_on_the_field_step_ratio(processed, errors):

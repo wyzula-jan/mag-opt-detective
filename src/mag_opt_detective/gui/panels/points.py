@@ -57,6 +57,7 @@ from mag_opt_detective.gui.points_view import (
     SHOW_MODES,
     STACKED_SIZE,
     PickHint,
+    StackedPositions,
     curve_color,
     draw_markers,
     map_markers,
@@ -653,19 +654,35 @@ def install(window) -> None:
 
     panel.pick_button.clicked.connect(on_pick_button)
     tools.toolChanged.connect(sync_tool)
-    window.plot_area.tabs.currentChanged.connect(sync_tool)
 
     # markers
     def draw_map() -> None:
         sets = map_markers(c, panel.markers.value())
         draw_markers(window.plots.map.layer("points"), sets, MAP_SIZE)
 
-    def draw_stacked() -> None:
-        stacked = window.plots.stacked
-        sets = stacked_markers(c, stacked, panel.markers.value())
-        draw_markers(stacked.layer("points"), sets, STACKED_SIZE)
+    stacked_stale = False
+    positions = StackedPositions()  # placed anew when the traces change
 
-    window.plots.stacked.tracesChanged.connect(draw_stacked)
+    def draw_stacked() -> None:
+        """Markers on the stacked plot, drawn when its tab is shown (they take longer)."""
+        nonlocal stacked_stale
+        stacked_stale = window.plot_area.current_view() != "stacked"
+        if not stacked_stale:
+            stacked = window.plots.stacked
+            sets = stacked_markers(c, stacked, panel.markers.value(), positions)
+            draw_markers(stacked.layer("points"), sets, STACKED_SIZE)
+
+    def on_traces() -> None:
+        positions.clear()
+        draw_stacked()
+
+    def on_tab(_index: int) -> None:
+        if stacked_stale:
+            draw_stacked()
+        sync_tool()
+
+    window.plot_area.tabs.currentChanged.connect(on_tab)
+    window.plots.stacked.tracesChanged.connect(on_traces)
     panel.markers.valueChanged.connect(lambda _value: (draw_map(), draw_stacked()))
 
     # state -> widgets

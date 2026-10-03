@@ -60,15 +60,18 @@ def shown_curves(controller, mode: str) -> list[tuple[str, QColor, bool]]:
 
 
 def draw_markers(layer: OverlayLayer, sets: list[MarkerSet], size: float) -> None:
-    """Open rings for the other curves, then the current curve filled (the last group)."""
+    """Open rings for the other curves, then the current curve filled (the last group).
+
+    Each group has one pen: with a pen per marker pyqtgraph renders every marker anew.
+    """
     layer.clear()
-    others = [s for s in sets if not s.current]
+    others = [s for s in sets if not s.current and s.x.size]
     if others:
         x = np.concatenate([s.x for s in others])
         y = np.concatenate([s.y for s in others])
         layer.add_points(x, y, size=size, pen=pg.mkPen(OUTLINE, width=4), brush=None)
-        pens = [pg.mkPen(s.color, width=2) for s in others for _ in range(s.x.size)]
-        layer.add_points(x, y, size=size, pen=pens, brush=None)
+        for s in others:
+            layer.add_points(s.x, s.y, size=size, pen=pg.mkPen(s.color, width=2), brush=None)
     for s in sets:
         if s.current:
             pen = pg.mkPen(OUTLINE, width=1.5)
@@ -82,16 +85,6 @@ def map_markers(controller, mode: str) -> list[MarkerSet]:
         b, e = controller.points.points(name)
         sets.append(MarkerSet(b, from_cm1(e, controller.unit), color, current))
     return sets
-
-
-def field_index(field: np.ndarray, b: float) -> int | None:
-    """Index of the value of *field* that *b* lies on (within half the smallest step)."""
-    if field.size == 0:
-        return None
-    j = int(np.abs(field - b).argmin())
-    steps = np.diff(np.unique(field))
-    tolerance = steps.min() / 2 if steps.size else 1e-9 * max(1.0, abs(float(b)))
-    return j if abs(field[j] - b) <= tolerance else None
 
 
 def stacked_field(controller) -> np.ndarray | None:
@@ -108,25 +101,83 @@ def stacked_field(controller) -> np.ndarray | None:
         return None
 
 
-def stacked_markers(controller, stacked: StackedPlot, mode: str) -> list[MarkerSet]:
+def field_indices(field: np.ndarray, b: np.ndarray) -> np.ndarray:
+    """Index of the value of *field* each *b* lies on (within half the smallest step), or -1."""
+    b = np.asarray(b, dtype=float)
+    if field.size == 0:
+        return np.full(b.shape, -1)
+    order = np.argsort(field, kind="stable")
+    ordered = field[order]
+    k = np.searchsorted(ordered, b)
+    below, above = np.clip(k - 1, 0, field.size - 1), np.clip(k, 0, field.size - 1)
+    nearest = np.where(np.abs(ordered[above] - b) < np.abs(ordered[below] - b), above, below)
+    steps = np.diff(np.unique(field))
+    tolerance = steps.min() / 2 if steps.size else 1e-9 * np.maximum(1.0, np.abs(b))
+    return np.where(np.abs(ordered[nearest] - b) <= tolerance, order[nearest], -1)
+
+
+def on_traces(
+    stacked: StackedPlot, field: np.ndarray, b: np.ndarray, energy: np.ndarray
+) -> tuple[np.ndarray, np.ndarray]:
+    """(energy, trace y) of the points (*b*, *energy* in the display unit) on shown traces."""
+    x, y = [], []
+    for j, e in zip(field_indices(field, b), energy, strict=True):
+        yk = stacked.trace_y(int(j), float(e)) if j >= 0 else None
+        if yk is not None:
+            x.append(float(e))
+            y.append(yk)
+    return np.array(x), np.array(y)
+
+
+class StackedPositions:
+    """Marker positions on the stacked plot per curve, kept while its points stay the same.
+
+    :meth:`clear` it whenever the traces are drawn again (``StackedPlot.tracesChanged``):
+    then the curves are placed anew, otherwise only the curves whose points changed.
+    """
+
+    def __init__(self):
+        self._kept: dict[str, tuple[tuple, np.ndarray, np.ndarray]] = {}
+
+    def clear(self) -> None:
+        self._kept.clear()
+
+    def get(
+        self, controller, stacked: StackedPlot, field: np.ndarray, name: str
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Positions of curve *name*'s points; *field* is :func:`stacked_field`."""
+        b, e = controller.points.points(name)
+        key = (b.tobytes(), e.tobytes(), controller.unit)
+        kept = self._kept.get(name)
+        if kept is None or kept[0] != key:
+            x, y = on_traces(stacked, field, b, from_cm1(e, controller.unit))
+            kept = self._kept[name] = (key, x, y)
+        return kept[1], kept[2]
+
+    def forget_others(self, names: list[str]) -> None:
+        """Drop the positions of the curves not in *names* (deleted or renamed)."""
+        for name in set(self._kept) - set(names):
+            del self._kept[name]
+
+
+def stacked_markers(
+    controller, stacked: StackedPlot, mode: str, positions: StackedPositions | None = None
+) -> list[MarkerSet]:
     """Markers on the stacked plot: each point on its field's trace (energy, trace y).
 
     Points on traces that are not shown (every n-th spectrum) or outside them are left out.
+    *positions* keeps the placed curves between calls (see :class:`StackedPositions`).
     """
     field = stacked_field(controller)
-    if field is None:
+    if field is None or controller.points is None:
         return []
-    sets = []
-    for name, color, current in shown_curves(controller, mode):
-        b, e = controller.points.points(name)
-        x, y = [], []
-        for bk, ek in zip(b, from_cm1(e, controller.unit), strict=True):
-            j = field_index(field, bk)
-            yk = None if j is None else stacked.trace_y(j, float(ek))
-            if yk is not None:
-                x.append(float(ek))
-                y.append(yk)
-        sets.append(MarkerSet(np.array(x), np.array(y), color, current))
+    if positions is None:
+        positions = StackedPositions()
+    sets = [
+        MarkerSet(*positions.get(controller, stacked, field, name), color, current)
+        for name, color, current in shown_curves(controller, mode)
+    ]
+    positions.forget_others(controller.points.names)
     return sets
 
 
