@@ -52,10 +52,12 @@ field (e.g. a Landau-level transition), Alt-click removes the point. Picking als
 the stacked plot, by clicking a trace. Curves are chips in the Points panel, with a table of
 their points, import and export, and Ctrl+Z / Ctrl+Shift+Z to undo and redo every edit.
 
-**Auto-pick** (W). *Track* follows a clicked line field by field in both directions; *Detect*
-finds every line in a dragged box. Options: maxima, minima or rising / falling inflection
-points, the search window, Savitzky–Golay smoothing and the prominence. The lines found are
-a preview until **Accept** puts them into the current curve (one undo step).
+**Auto-pick** (W, or the Points panel). *Track* follows a clicked line field by field in both
+directions; *Detect* finds every line in a region drawn on the map: a box, a rotated box, an
+ellipse or a freehand polygon, which stays there to be moved and reshaped. Options: maxima,
+minima or rising / falling inflection points, the search window, Savitzky–Golay smoothing and
+the prominence. The lines found are a preview until **Accept** puts them into the current
+curve (one undo step).
 
 **Models and fitting** (inspector › Models).
 - **Massive Dirac** interband transitions (Fermi velocity, half-gap Δ).

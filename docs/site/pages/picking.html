@@ -1,6 +1,6 @@
 <!--
 title: Picking points
-description: Record transition energies by hand on the map or the stacked plot, remove and undo them, and let auto-pick track a line or detect every line in a box.
+description: Record transition energies by hand on the map or the stacked plot, remove and undo them, and let auto-pick track a line or detect every line in a region you draw.
 -->
 <h1>Picking points</h1>
 <p>Picked points are the transition energies you read off the map: for each curve, such as a Landau-level transition, one energy per field. They are what <a href="models.html">models are fitted to</a>, and they can be exported as a table.</p>
@@ -14,6 +14,8 @@ description: Record transition energies by hand on the map or the stacked plot, 
 </figure>
 <p>The first Process creates a point table with a row for every field of the map. The <b>Points</b> panel shows it:</p>
 <dl class="terms">
+  <dt>Pick on the map / Auto-pick</dt>
+  <dd>Turn on <a href="#manual">picking by hand</a> (<kbd>P</kbd>) or <a href="#autopick">auto-pick</a> (<kbd>W</kbd>); the line below says what the two auto-pick modes do. With no points yet, the table points to both.</dd>
   <dt>Curves</dt>
   <dd>Each curve is a chip with its colour and number of points. Click a chip to make it the current curve, <b>New</b> to start another one; type in the name field to rename the current curve, and the bin button deletes it.</dd>
   <dt>Points</dt>
@@ -46,13 +48,24 @@ description: Record transition energies by hand on the map or the stacked plot, 
   <img src="images/autopick-light.png" width="1400" height="900" loading="lazy" decoding="async" alt="Auto-pick in Detect mode on the R(B)/R(0) map: the options strip above the map with Track and Detect, Max, Min, Rising and Falling, the window, smoothing and prominence; a dashed box on the map with five lines found in it, and the line that continues LL 2 marked with diamonds.">
   <figcaption>Detect in a box from 3 to 12 T: five lines found, and the one that continues the curve LL 2 chosen (diamonds). Accept puts its points into LL 2.</figcaption>
 </figure>
-<p>The <b>Auto-pick</b> tool (<kbd>W</kbd>, the wand in the plot toolbar) finds the points of a line for you. It works on the map, on whatever map is shown: plot kind, derivative and unit. A strip of options opens above the map.</p>
+<p>The <b>Auto-pick</b> tool (<kbd>W</kbd>, the wand in the plot toolbar, or <b>Auto-pick</b> in the Points panel) finds the points of a line for you. It works on the map, on whatever map is shown: plot kind, derivative and unit. A strip of options opens above the map.</p>
 
 <h3 id="track">Track</h3>
 <p>Click a line. Auto-pick finds the feature nearest to the click and follows the line field by field in both directions, predicting each next energy from the last three points. It bridges up to two fields where the line fades, and stops where it is lost for longer.</p>
 
 <h3 id="detect">Detect</h3>
-<p>Drag a box on the map. Every line inside it is found and drawn as a thin line. The line that continues the current curve's points is chosen, or else the longest one; it carries diamonds. Click another line to choose it instead. Panning still works with the middle mouse button, and zooming with the wheel.</p>
+<p>Choose a <b>Shape</b> and draw a region on the map. Every line inside it is found and drawn as a thin line. The line that continues the current curve's points is chosen, or else the longest one; it carries diamonds. Click another line to choose it instead.</p>
+<dl class="terms">
+  <dt>Box</dt>
+  <dd>Drag a box. Its corners resize it.</dd>
+  <dt>Rotated</dt>
+  <dd>Drag a box, then turn it with its round handle, for example along a sloping line, so that a line next to it stays out.</dd>
+  <dt>Ellipse</dt>
+  <dd>Drag the box around the ellipse. The square handle resizes it and the round one turns it.</dd>
+  <dt>Polygon</dt>
+  <dd>Draw a loop around the lines with the mouse button held down. It becomes a polygon with a handle on each corner: a click on an edge adds a corner, a right-click on a corner removes it.</dd>
+</dl>
+<p>Only the lines inside the region count, not those elsewhere in the box around it. The region stays on the map: drag it to move it, or drag a handle to reshape it, and the search runs again while it changes. A drag beside the region draws a new one. Panning still works with the middle mouse button, and zooming with the wheel.</p>
 
 <h3 id="options">Options</h3>
 <dl class="terms">
@@ -65,7 +78,7 @@ description: Record transition energies by hand on the map or the stacked plot, 
   <dt>Prominence</dt>
   <dd>How much a feature must stand out to count. Empty means automatic, from the noise of the searched spectra; the value used is shown in the field. Raise it if noise is picked, lower it if a weak line is missed.</dd>
 </dl>
-<p>Changing an option searches again at once, from the same click or box. The status line says what was found, e.g. <i>5 lines found: 31 points for LL 2 on the one with diamonds</i>, or why nothing was found and what to change.</p>
+<p>Changing an option searches again at once, from the same click or region. The status line says what was found, e.g. <i>5 lines found: 31 points for LL 2 on the one with diamonds</i>, or why nothing was found and what to change.</p>
 
 <h3 id="accept">Accept or discard</h3>
-<p>What auto-pick finds is only a preview until you press <b>Accept</b>: then the points go into the current curve, replacing its points at the same fields and keeping the others, as one undo step. <b>Discard</b>, <kbd>Esc</kbd>, another tool or another tab drop the preview. A unit switch converts the preview without searching again.</p>
+<p>What auto-pick finds is only a preview until you press <b>Accept</b>: then the points go into the current curve, replacing its points at the same fields and keeping the others, as one undo step. <b>Discard</b>, <kbd>Esc</kbd>, the other mode, another tool or another tab drop the preview and the region. A unit switch converts the preview and the region without searching again.</p>
