@@ -104,15 +104,17 @@ saves journal figures in every format and exits with 0. The spec also writes
 workflow builds and smoke-tests the bundles on Linux, macOS and Windows for pull requests
 and pushes to `main` that touch the packaging, and for every new version when the *Release*
 workflow calls it; only the *Release* workflow publishes them (see Releases). The README
-screenshots are rendered by `docs/make_screenshots.py` (synthetic data only).
+screenshots are rendered with the docs site's by `python docs/make_screenshots.py`
+(synthetic data only; see Docs site).
 
 ## Docs site
 
 The documentation and download site lives in `docs/site/` (see its README): page fragments,
 one layout and a standard-library build script, `python docs/site/build.py`.
-`tests/test_site.py` builds it and checks its links and images. Its screenshots come from
-`python docs/make_screenshots.py --site`. The *Docs site* workflow deploys it to GitHub Pages
-and runs only when started by hand.
+`tests/test_site.py` builds it and checks its links and images. Its screenshots and the
+README's, each in light and dark, come from `python docs/make_screenshots.py` (run it after a
+UI change). The *Docs site* workflow deploys it to GitHub Pages and runs only when started
+by hand.
 
 ## Branches and the task board
 
