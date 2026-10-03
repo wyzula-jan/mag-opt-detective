@@ -420,10 +420,10 @@ def plan_release(root: Path, args: argparse.Namespace) -> Plan | str:
                 raise ReleaseError(f"--version {args.version} is not after {previous}")
             version, reason = args.version, "set with --version"
         elif level is None:
+            count = f"{len(commits)} commit" + ("s" if len(commits) > 1 else "")
             return (
-                f"No release: the {len(commits)} commits since {previous} are "
-                f"{describe_types(commits)}; only feat, fix, perf, revert or a breaking "
-                "change makes a release."
+                f"No release: {count} since {previous} ({describe_types(commits)}), and "
+                "only feat, fix, perf, revert or a breaking change makes a release."
             )
         else:
             version = format_version(next_version(last, level))

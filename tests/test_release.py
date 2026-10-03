@@ -340,11 +340,13 @@ def test_version_1_0_0_is_set_by_hand_then_breaking_changes_bump_the_major(relea
 def test_no_release_without_a_feat_fix_or_perf(released, capsys):
     before = head(released)
     commit(released, "docs: a")
+    assert run(released) == 0
+    assert capsys.readouterr().out.startswith("No release: 1 commit since v0.1.0 (1 docs), and")
     commit(released, "test(gui): b")
     commit(released, "chore: c")
     assert run(released) == 0
     out = capsys.readouterr().out
-    assert out.startswith("No release: the 3 commits since v0.1.0 are ")
+    assert out.startswith("No release: 3 commits since v0.1.0 (")
     assert "1 docs" in out and "1 test" in out
     assert head(released) != before  # the new commits, but no release commit
     assert head(released).endswith(" chore: c")
