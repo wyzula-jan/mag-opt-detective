@@ -434,6 +434,51 @@ def test_nudge_slider_whole_numbers(qtbot, nudge):
     assert [a.isEnabled() for a in menu.actions()] == [True, False, False, False]
 
 
+def test_nudge_slider_set_value_during_a_relative_drag(qtbot, nudge):
+    """A value shown anew mid-drag (e.g. in another unit) goes on from there, without a jump."""
+    nudge.set_mode("relative", 10.0)
+    jog(qtbot, nudge, 0.5, release=False)
+    shown = nudge.value() * 8.0656  # the same value in cm-1
+    nudge.set_value(shown)
+    y = nudge.height() // 2
+    x = round(nudge.handle_x())
+    qtbot.mouseMove(nudge, QPoint(x + 1, y))
+    assert nudge.value() == pytest.approx(shown, rel=0.01)  # a pixel further, not 3 % away
+    qtbot.mouseRelease(nudge, Qt.MouseButton.LeftButton, pos=QPoint(x + 1, y))
+
+
+def test_nudge_slider_keeps_a_value_set_beyond_its_bounds(qtbot, nudge):
+    nudge.set_mode("relative", 10.0)
+    nudge.set_bounds(minimum=0.0)
+    nudge.set_value(-5.0)  # e.g. typed: kept, and not pulled up to 0 by a drag
+    jog(qtbot, nudge, 0.5)
+    assert -5.0 < nudge.value() < -4.5
+    start = nudge.value()
+    jog(qtbot, nudge, -1.0)  # further out: held where it was
+    assert nudge.value() == start
+
+
+def test_nudge_slider_context_menus_are_deleted(qtbot, nudge):
+    from PySide6.QtCore import QEvent, QTimer
+    from PySide6.QtGui import QContextMenuEvent
+    from PySide6.QtWidgets import QApplication, QMenu
+
+    def close_menus():
+        for widget in QApplication.topLevelWidgets():
+            if isinstance(widget, QMenu) and widget.isVisible():
+                widget.close()
+
+    nudge.show()
+    qtbot.waitExposed(nudge)
+    at = QPoint(10, 10)
+    for _ in range(3):
+        QTimer.singleShot(30, close_menus)
+        event = QContextMenuEvent(QContextMenuEvent.Reason.Mouse, at, nudge.mapToGlobal(at))
+        QApplication.sendEvent(nudge, event)
+    QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    assert nudge.findChildren(QMenu) == []
+
+
 def test_nudge_slider_mode_menu_and_settings(qtbot, nudge):
     menu = nudge.mode_menu()
     texts = [a.text() for a in menu.actions()]

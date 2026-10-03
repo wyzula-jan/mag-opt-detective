@@ -106,7 +106,7 @@ class NudgeSlider(QWidget):
         self._step: float | None = None
         self._drag = False
         self._grab = 0.0  # press x minus the handle's x
-        self._origin = 0.0  # relative: the value at the press
+        self._origin = 0.0  # the value at the press (relative: what the drag changes)
         self._offset = 0.0  # relative: the handle from the centre, -1 … 1 of the half track
         self._changed = False
         self._key_changed = False
@@ -124,8 +124,8 @@ class NudgeSlider(QWidget):
     def set_value(self, value: float) -> None:
         """Show *value* without emitting (a relative drag goes on around it)."""
         value = float(value)
-        if self._drag and self._mode == RELATIVE:
-            self._origin = value - self._jog(self._origin, self._offset)
+        if self._drag and self._mode == RELATIVE:  # the handle stays: the drag goes on from here
+            self._origin = value - self._jog(value, self._offset)
         self._value = value
         self._describe()
         self.update()
@@ -142,7 +142,8 @@ class NudgeSlider(QWidget):
         return self._minimum, self._maximum
 
     def set_bounds(self, minimum: float | None = None, maximum: float | None = None) -> None:
-        """Hard limits of the value in both modes (None: open)."""
+        """Limits of the value in both modes (None: open). A value set beyond them is kept; a
+        drag or key moves it only back towards them."""
         self._minimum = -math.inf if minimum is None else float(minimum)
         self._maximum = math.inf if maximum is None else float(maximum)
 
@@ -195,7 +196,8 @@ class NudgeSlider(QWidget):
         self.update()
 
     def mode_menu(self) -> QMenu:
-        """The modes as a menu (also the context menu); a choice emits ``modeChanged``."""
+        """The modes as a menu (the context menu, deleted once closed); a choice emits
+        ``modeChanged``."""
         menu = QMenu(self)
         group = QActionGroup(menu)
         choices = [(RANGE, self._span)] + [(RELATIVE, span) for span in SPANS]
@@ -262,12 +264,15 @@ class NudgeSlider(QWidget):
 
     # --- changes -------------------------------------------------------------------------
     def _clean(self, value: float, resolution: float) -> float:
-        """*value* kept in the bounds and rounded (to the step, else to *resolution*)."""
+        """*value* rounded (to the step, else to *resolution*) and kept in the bounds; a value
+        already beyond a bound (typed) may stay there, but not move further out."""
         if self._step:
             value = round(value / self._step) * self._step
         else:
             value = _quantize(value, resolution)
-        return min(max(value, self._minimum), self._maximum)
+        start = self._origin if self._drag else self._value
+        low, high = min(self._minimum, start), max(self._maximum, start)
+        return min(max(value, low), high)
 
     def _apply(self, value: float) -> bool:
         """Store a user change and emit it; False (silent) if nothing changed."""
@@ -339,8 +344,8 @@ class NudgeSlider(QWidget):
         x = event.position().x()
         self._drag = True
         self._changed = False
+        self._origin = self._value  # the value at the press
         if self._mode == RELATIVE:
-            self._origin = self._value
             self._grab = x - self.centre_x()
         elif abs(x - self.handle_x()) <= self.HANDLE / 2 + 2:
             self._grab = x - self.handle_x()
@@ -389,7 +394,9 @@ class NudgeSlider(QWidget):
         if len(self._modes) < 2:
             event.ignore()
             return
-        self.mode_menu().exec(event.globalPos())
+        menu = self.mode_menu()
+        menu.exec(event.globalPos())
+        menu.deleteLater()
         event.accept()
 
     # --- keyboard ----------------------------------------------------------------------
@@ -465,7 +472,8 @@ class NudgeSlider(QWidget):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         cy = self.height() / 2
-        groove = QRectF(self.MARGIN, cy - self.GROOVE / 2, self.width() - 2 * self.MARGIN, 4)
+        width = self.width() - 2 * self.MARGIN
+        groove = QRectF(self.MARGIN, cy - self.GROOVE / 2, width, self.GROOVE)
         p.setPen(QPen(pal.color(group, QPalette.ColorRole.Midlight), 1))
         p.setBrush(pal.color(group, QPalette.ColorRole.AlternateBase))
         p.drawRoundedRect(groove.adjusted(0.5, 0.5, -0.5, -0.5), 2, 2)
@@ -485,7 +493,8 @@ class NudgeSlider(QWidget):
             p.setPen(Qt.PenStyle.NoPen)
             p.setBrush(fill)
             left, right = sorted((start, x))
-            p.drawRoundedRect(QRectF(left, cy - self.GROOVE / 2, right - left, 4), 2, 2)
+            bar = QRectF(left, cy - self.GROOVE / 2, right - left, self.GROOVE)
+            p.drawRoundedRect(bar, 2, 2)
         if self._mode == RELATIVE and self._drag and self._value != self._origin:
             self._paint_hint(p, group, x)
 
