@@ -5,9 +5,9 @@ is fixed. Editing a range control, panning or zooming a plot, double-clicking it
 tool change them through :meth:`AppController.set_ranges` / :meth:`~AppController.fit_ranges`,
 which redraw nothing: this module puts the ranges on the plots, also after every redraw, so
 they survive level drags and unit switches. The energy range is shared by all three plots, the
-field range by the map and the reference. This module also shows the inspector sections that
-belong to the plot on screen (``window.inspector_views``) and holds the number field and map
-cache the other inspector sections use.
+field range by the map and the reference; a plot without data keeps nothing. This module also
+shows the inspector sections that belong to the plot on screen (``window.inspector_views``) and
+holds the number field and map cache the other inspector sections use.
 """
 
 from __future__ import annotations
@@ -221,7 +221,7 @@ class ViewRanges:
         self.page = page
         self.c: AppController = window.controller
         self.maps: ShownMaps = window.shown_maps
-        self._applied: dict[str, tuple[Pair, Pair]] = {}
+        self._applied: dict[str, tuple[Pair, Pair]] = {}  # ranges put on the plots with data
 
     # --- what is shown -----------------------------------------------------------------
     def effective(self) -> dict[str, tuple[Pair, Pair]]:
@@ -242,10 +242,10 @@ class ViewRanges:
         return out
 
     def apply(self) -> None:
-        """Put the ranges on the plots."""
-        for name, (x, y) in self.effective().items():
+        """Put the ranges on the plots that show data."""
+        self._applied = self.effective()
+        for name, (x, y) in self._applied.items():
             self.window.plots[name].plot.vb.setRange(xRange=x, yRange=y, padding=0)
-            self._applied[name] = (x, y)
 
     def sync_controls(self) -> None:
         """Show the ranges of the plot on screen in the controls (without emitting)."""
@@ -277,13 +277,16 @@ class ViewRanges:
 
     # --- user changes on the plots -----------------------------------------------------
     def on_manual(self, view: str) -> None:
-        """A pan or zoom on plot *view*: the axes it moved become fixed."""
+        """A pan or zoom on plot *view*: the axes it moved become fixed (on a plot with data;
+        an empty one keeps nothing)."""
+        applied = self._applied.get(view)
+        if applied is None:
+            return
         vb = self.window.plots[view].plot.vb
         moved = tuple((float(lo), float(hi)) for lo, hi in vb.viewRange())
-        applied = self._applied.get(view)
         changes = {}
         for i, name in enumerate(VIEW_RANGES[view]):
-            if applied is None or not _same(applied[i], moved[i]):
+            if not _same(applied[i], moved[i]):
                 changes[name] = moved[i]
         if changes:
             self.c.set_ranges(**changes)
@@ -291,6 +294,8 @@ class ViewRanges:
     def on_click(self, view: str, event) -> None:
         """A double-click in the data area of plot *view* fits it to the data."""
         if not (event.double() and event.button() == Qt.MouseButton.LeftButton):
+            return
+        if view not in self._applied:
             return
         vb = self.window.plots[view].plot.vb
         if vb.sceneBoundingRect().contains(event.scenePos()):

@@ -71,6 +71,19 @@ def map_values(window) -> np.ndarray:
     return window.controller.current_map().values
 
 
+def wheel(window, view: str) -> None:
+    """One wheel tick (zoom in) over the middle of plot *view*, as Qt delivers it."""
+    plot = window.plots[view]
+    centre = plot.view.mapFromScene(plot.plot.vb.sceneBoundingRect().center())
+    viewport = plot.view.viewport()
+    event = QWheelEvent(
+        QPointF(centre), QPointF(viewport.mapToGlobal(centre)), QPoint(0, 0), QPoint(0, 120),
+        Qt.MouseButton.NoButton, Qt.KeyboardModifier.NoModifier, Qt.ScrollPhase.NoScrollPhase,
+        False,
+    )  # fmt: skip
+    QApplication.sendEvent(viewport, event)
+
+
 # ---------------------------------------------------------------------- view ranges
 def test_ranges_start_on_auto_and_fit_the_data(processed, sweep, errors):
     w = processed
@@ -175,14 +188,7 @@ def test_wheel_and_double_click_on_the_plot(shown, sweep):
     process(w)
     plot = w.plots.map
     vb = plot.plot.vb
-    centre = plot.view.mapFromScene(vb.sceneBoundingRect().center())
-    viewport = plot.view.viewport()
-    wheel = QWheelEvent(
-        QPointF(centre), QPointF(viewport.mapToGlobal(centre)), QPoint(0, 0), QPoint(0, 120),
-        Qt.MouseButton.NoButton, Qt.KeyboardModifier.NoModifier, Qt.ScrollPhase.NoScrollPhase,
-        False,
-    )  # fmt: skip
-    QApplication.sendEvent(viewport, wheel)
+    wheel(w, "map")
     assert c.view.field_range is not None and c.view.energy_range is not None
     lo, hi = c.view.energy_range
     assert 100.0 < lo < hi < 1000.0
@@ -193,6 +199,27 @@ def test_wheel_and_double_click_on_the_plot(shown, sweep):
     assert c.view.energy_range is not None
     plot.plot.scene().sigMouseClicked.emit(Click(vb.sceneBoundingRect().center()))
     assert c.view.field_range is None and c.view.energy_range is None
+    assert shown_range(w, "map") == [(0.5, 2.0), (100.0, 1000.0)]
+
+
+def test_pan_or_zoom_on_an_empty_plot_keeps_the_ranges(shown, sweep, qtbot):
+    w, c = shown, shown.controller
+    pan(w, "map", dx=0.3, dy=0.2)  # nothing processed yet
+    w.plots.map.plot.scene().sigMouseClicked.emit(Click(QPointF(200, 200)))
+    assert (c.view.field_range, c.view.energy_range) == (None, None)
+    load_sweep(w, sweep)
+    process(w)
+    assert shown_range(w, "map") == [(0.5, 2.0), (100.0, 1000.0)]
+
+    w.plot_area.set_current_view("reference")  # no reference mode: an empty plot
+    qtbot.waitExposed(w.plots.reference.view)
+    wheel(w, "reference")
+    pan(w, "reference", dx=5.0, dy=-3.0)
+    assert (c.view.field_range, c.view.energy_range) == (None, None)
+    assert view_page(w).field.is_auto() and view_page(w).energy.is_auto()
+    w.plot_area.set_current_view("map")
+    assert shown_range(w, "map") == [(0.5, 2.0), (100.0, 1000.0)]
+    process(w)
     assert shown_range(w, "map") == [(0.5, 2.0), (100.0, 1000.0)]
 
 
