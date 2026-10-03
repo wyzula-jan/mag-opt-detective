@@ -482,6 +482,10 @@ def test_edits_that_change_a_model_drop_its_fit(window, sweep, tmp_path, errors)
     assert area.results.isHidden()
     area.apply_button.click()
     assert ms.params(entry)["E0"].value == 1.0  # nothing stale was written
+    area.fit_button.click()
+    assert models.result(entry) is not None
+    card.editor.code.edit.setPlainText("E0 - g*muB*B")  # the same names, another model
+    assert models.result(entry) is None and area.results.isHidden()
 
     zeeman = add(window, "zeeman")
     zcard = card_of(window, zeeman)

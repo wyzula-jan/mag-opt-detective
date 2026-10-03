@@ -514,11 +514,9 @@ class ExpressionEditor(QWidget):
             self.rows[name] = row
 
     def _on_text(self, text: str) -> None:
-        old = [p.name for p in self.entry.model.params] if self.entry.model is not None else []
         ms.set_expression(self.entry, text)
-        new = [p.name for p in self.entry.model.params] if self.entry.model is not None else []
         self._show_message()
-        self.owner.edited(self.entry, structure=new != old)
+        self.owner.edited(self.entry, structure=True)  # a fit of another expression is void
 
     def _on_unit(self, value: str) -> None:
         ms.set_output_unit(self.entry, value)
