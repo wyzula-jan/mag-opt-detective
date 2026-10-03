@@ -48,6 +48,7 @@ from mag_opt_detective.gui.panels.files import (
     FieldRangeInputs,
     SweepFilesBox,
     breakable,
+    count_text,
     fmt_field,
 )
 from mag_opt_detective.gui.theme import current_tokens
@@ -77,17 +78,16 @@ def field_source_control() -> SegmentedControl:
 
 # ---------------------------------------------------------------------- watching
 NO_WATCH_FOLDER = "Load a sweep folder first, or watch one that may still be empty."
-NOT_WATCHED = "The reference sweep is not watched."
-
-
-def files_text(n: int) -> str:
-    return f"{n} file{'' if n == 1 else 's'}"
+WATCH_TIP = (
+    "Turning it on adds every complete spectrum in the folder that is not listed yet, then "
+    "each new one as it appears. The reference sweep is not watched."
+)
 
 
 def watch_text(status: WatchStatus) -> tuple[str, str]:
     """``(text, Note level)`` of the watching state, e.g.
     ``Watching · 23 files · last update 12:03:10``."""
-    files = files_text(status.files)
+    files = count_text(status.files)
     if status.note:
         return f"{status.note} · {files}", status.level
     text = f"Watching · {files}"
@@ -128,11 +128,11 @@ class WatchBox(QWidget):
         """Show the *folder* that is (or would be) watched and the watching *status*
         (None: not watching)."""
         if folder is None:
-            text, tip = NO_WATCH_FOLDER, NOT_WATCHED
+            text, tip = NO_WATCH_FOLDER, WATCH_TIP
         else:
             name = html.escape(breakable(Path(folder).name or folder))
             text = f"Adds and processes the spectra that appear in <b>{name}</b>."
-            tip = f"{folder}\n{NOT_WATCHED}"
+            tip = f"{folder}\n{WATCH_TIP}"
         self.row.description_label.setText(text)
         self.row.setToolTip(tip)
         self.switch.setEnabled(folder is not None)
@@ -196,7 +196,7 @@ class WatchChip(QWidget):
         name = Path(status.folder).name or status.folder
         if len(name) > self.MAX_NAME:
             name = name[: self.MAX_NAME - 1] + "…"
-        parts = [f"Watching {name}", files_text(status.files)]
+        parts = [f"Watching {name}", count_text(status.files)]
         if status.brief:  # the whole note is in the tooltip and the panel
             parts.append(status.brief)
         elif status.last is not None:
@@ -342,11 +342,14 @@ def _file_kind(path: str) -> str:
     return "OPUS files" if _opus_cache[path] else "text export"
 
 
-def summary(files: SweepFiles, custom: bool, field_values=None) -> str:
-    """Header line of the panel: ``64 spectra · 0.25 – 16 T · text export``."""
+def summary(files: SweepFiles, custom: bool, field_values=None, watched: str | None = None) -> str:
+    """Header line of the panel: ``64 spectra · 0.25 – 16 T · text export``; with the folder
+    *watched* and no files yet ``Watching <folder> · waiting for files``."""
     if not files.field:
         if files.zero:
             return f"{len(files.zero)} zero-field file(s), no in-field files yet"
+        if watched is not None:
+            return f"Watching {Path(watched).name or watched} · waiting for files"
         return "No files yet. Drop a sweep folder below or use Open sweep."
     parts = [f"{len(files.field)} spectr{'um' if len(files.field) == 1 else 'a'}"]
     fields = list(field_values) if custom and field_values is not None else None
@@ -401,6 +404,8 @@ def install(window) -> None:
     show_data_state(window, "sample", lambda state: state_text(c, state))
     WidthWatcher(page, lambda _w: fit_segments(panel.field_source, LABELS, content_width(page)))
 
+    watcher = install_watch(window, panel)
+
     def push_source() -> None:
         c.set_processing(custom_field=panel.custom_field())
 
@@ -412,14 +417,13 @@ def install(window) -> None:
             values = p.sample_field.values() if p.custom_field else None
         except ValueError:
             values = None
-        page.set_subtitle(summary(p.sample_files, p.custom_field, values))
+        page.set_subtitle(summary(p.sample_files, p.custom_field, values, watcher.folder()))
 
     panel.field_source.valueChanged.connect(push_source)
     push_source()
     c.processingChanged.connect(pull)
+    watcher.changed.connect(pull)
     pull()
-
-    install_watch(window, panel)
 
     window.toolbar.open_button.clicked.connect(lambda: open_sweep(window))
     for text, slot, shortcut in (
@@ -435,10 +439,7 @@ def install(window) -> None:
 
         action.triggered.connect(run)
         window.add_file_action(action)
-
-    action = QAction("Watch a folder…", window)
-    action.triggered.connect(lambda _checked=False: choose_watch_folder(window))
-    window.add_file_action(action)
+    add_watch_actions(window, panel.watch, watcher)
 
     # watching is never remembered: it does not resume after a restart
     p = window.persistence
@@ -496,3 +497,24 @@ def install_watch(window, panel: SamplePanel) -> FolderWatcher:
     c.processingChanged.connect(show)
     show()
     return watcher
+
+
+def add_watch_actions(window, box: WatchBox, watcher: FolderWatcher) -> None:
+    """File menu: *Watch a folder…*, and *Watch for new files* (``commands["watch_folder"]``),
+    checkable like the panel's switch."""
+    choose = QAction("Watch a folder…", window)
+    choose.triggered.connect(lambda _checked=False: choose_watch_folder(window))
+    window.add_file_action(choose)
+    toggle = QAction("Watch for new files", window)
+    toggle.setCheckable(True)
+    toggle.triggered.connect(lambda checked: box.switch.setChecked(checked))
+    window.add_file_action(toggle)
+    window.commands["watch_folder"] = toggle
+
+    def show() -> None:
+        toggle.setChecked(watcher.watching())
+        toggle.setEnabled(box.switch.isEnabled())
+
+    for signal in (watcher.changed, window.controller.processingChanged):
+        signal.connect(show)
+    show()

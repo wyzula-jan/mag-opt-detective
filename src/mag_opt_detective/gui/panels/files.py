@@ -413,7 +413,7 @@ class ZeroList(QWidget):
 
 
 # ---------------------------------------------------------------------- the box
-def _count_text(n: int) -> str:
+def count_text(n: int) -> str:
     return "no files" if n == 0 else f"{n} file" + ("s" if n != 1 else "")
 
 
@@ -433,7 +433,7 @@ class _FilesHead(QWidget):
 
     def __init__(self, title: str, *buttons: LinkButton):
         super().__init__()
-        self.count_label = QLabel(_count_text(0))
+        self.count_label = QLabel(count_text(0))
         self.count_label.setProperty("kit", "muted")
         self.count_label.setFont(scaled_font(self.count_label, 0.94))
         row = QHBoxLayout(self)
@@ -445,7 +445,7 @@ class _FilesHead(QWidget):
             row.addWidget(button)
 
     def set_count(self, n: int) -> None:
-        self.count_label.setText(_count_text(n))
+        self.count_label.setText(count_text(n))
 
 
 class SweepFilesBox(QWidget):

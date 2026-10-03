@@ -135,7 +135,8 @@ def test_watch_an_empty_folder_until_a_sweep_arrives(window, clock, sweep, tmp_p
     c = window.controller
     assert window.folder_watch.folder() == str(folder)
     assert c.processing.sample_files == SweepFiles()  # a new sweep
-    assert state_text(window) == "Waiting for in-field spectra · 0 files"
+    assert state_text(window) == "Waiting for in-field spectra · no files"
+    assert window.panel_pages["sample"].subtitle.text() == "Watching running · waiting for files"
 
     spectrum(folder, 0.25)
     arrive(window, clock)
@@ -584,6 +585,22 @@ def test_updates_keep_a_gap_between_them(window, clock, tmp_path, monkeypatch):
     assert fields(window) == [0.5, 1.0]
 
 
+def test_the_file_menu_watches_and_stops(window, tmp_path):
+    action = window.commands["watch_folder"]
+    assert action.isCheckable() and not action.isEnabled()  # no folder yet
+    zero(tmp_path, old=True)
+    spectrum(tmp_path, 0.5, old=True)
+    files = SweepFiles((str(tmp_path / BEFORE),), (str(tmp_path / sweep_name(0.5)),))
+    window.controller.set_processing(sample_files=files)
+    assert action.isEnabled() and not action.isChecked()
+    action.trigger()
+    assert window.folder_watch.watching() and action.isChecked()
+    assert window.panels["sample"].watch.switch.isChecked()
+    assert fields(window) == [0.5]  # listed, not processed yet: processed at once
+    action.trigger()
+    assert not window.folder_watch.watching() and not action.isChecked()
+
+
 # ---------------------------------------------------------------------- stopping
 def test_stop_watching_keeps_the_files_and_the_map(window, clock, tmp_path):
     zero(tmp_path, old=True)
@@ -644,4 +661,5 @@ def test_the_switch_needs_a_folder(window):
         box.row.description_label.text()
         == "Load a sweep folder first, or watch one that may still be empty."
     )
+    assert "adds every complete spectrum in the folder" in box.row.toolTip()
     assert "reference sweep is not watched" in box.row.toolTip()
