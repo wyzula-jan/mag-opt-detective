@@ -18,7 +18,7 @@ from mag_opt_detective.core.pipeline import PlotKind, ReferenceMode
 from mag_opt_detective.core.processing import Axis
 from mag_opt_detective.core.units import Unit
 from mag_opt_detective.gui import display, theme
-from mag_opt_detective.gui.console import Badge
+from mag_opt_detective.gui.console import Badge, LogButton
 from mag_opt_detective.gui.kit import SlidePanel
 from mag_opt_detective.gui.main_window import MainWindow
 from mag_opt_detective.gui.plots import BarScale, HistogramScale
@@ -109,6 +109,7 @@ def test_log_badge_sits_inside_the_button(shown, qtbot):
     assert button.sizeHint().width() >= plain + badge.width()  # room for it after the text
     qtbot.waitUntil(lambda: badge.geometry().right() < button.width())
     assert abs(badge.geometry().center().y() - button.rect().center().y()) <= 1
+    assert badge.x() - (button.text_rect().right() + 1) == LogButton.GAP  # as the mockup
 
 
 def line_colors(console, line: int) -> list[str]:

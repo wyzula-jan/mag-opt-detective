@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import time
 
-from PySide6.QtCore import QObject, QRectF, QSize, Qt, Signal
+from PySide6.QtCore import QObject, QRect, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import QFontDatabase, QIcon, QPainter, QSyntaxHighlighter
 from PySide6.QtWidgets import (
     QHBoxLayout,
@@ -154,9 +154,12 @@ class Badge(QWidget):
 
 class LogButton(QToolButton):
     """Status-bar button that opens the log; a pill after its text counts the unseen errors
-    (inside the button, as the mockup's ``.st-log .n``)."""
+    (inside the button, as the mockup's ``.st-log .n``: icon, text and pill 6 px apart)."""
 
-    BADGE_GAP = 6
+    GAP = 6  # between the icon, the text and the pill
+    BADGE_GAP = GAP
+    PADDING = 6  # the stylesheet's 5 px padding and 1 px border, on each side
+    ICON = 14
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -164,6 +167,7 @@ class LogButton(QToolButton):
         self.setCheckable(True)
         self.setText("Log")
         self.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        self.setIconSize(QSize(self.ICON, self.ICON))
         self.setToolTip("Show or hide the log")
         icons.set_icon(self, "terminal", "muted", on_color="accent")
         self.badge = Badge(self)
@@ -177,35 +181,40 @@ class LogButton(QToolButton):
         self.updateGeometry()
         self._place_badge()
 
-    def _room(self) -> int:
-        """Width kept after the text for the pill (0 without one)."""
-        return 0 if self.badge.isHidden() else self.badge.width() + self.BADGE_GAP
+    def text_rect(self) -> QRect:
+        """Where the text is drawn, after the icon."""
+        x = self.PADDING + self.ICON + self.GAP
+        return QRect(x, 0, self.fontMetrics().horizontalAdvance(self.text()), self.height())
 
     def sizeHint(self) -> QSize:
-        hint = super().sizeHint()
-        return QSize(hint.width() + self._room(), hint.height())
+        width = self.text_rect().right() + 1 + self.PADDING
+        if not self.badge.isHidden():
+            width += self.GAP + self.badge.width()
+        return QSize(width, super().sizeHint().height())
 
     def minimumSizeHint(self) -> QSize:
         return self.sizeHint()
 
     def paintEvent(self, event) -> None:
-        """The button as usual, its icon and text moved left of the pill."""
+        """The button's frame from the style, then the icon, the text (the pill is a child)."""
         option = QStyleOptionToolButton()
         self.initStyleOption(option)
-        painter = QStylePainter(self)
-        room = self._room()
-        if not room:
-            painter.drawComplexControl(QStyle.ComplexControl.CC_ToolButton, option)
-            return
-        label = QStyleOptionToolButton(option)
         option.text, option.icon = "", QIcon()
+        painter = QStylePainter(self)
         painter.drawComplexControl(QStyle.ComplexControl.CC_ToolButton, option)
-        label.rect = option.rect.adjusted(0, 0, -room, 0)
-        painter.drawControl(QStyle.ControlElement.CE_ToolButtonLabel, label)
+        tokens = current_tokens()  # the colours of the stylesheet's kit tool button
+        hovered = bool(option.state & QStyle.StateFlag.State_MouseOver)
+        color = tokens["accent"] if self.isChecked() else tokens["fg" if hovered else "muted"]
+        state = QIcon.State.On if self.isChecked() else QIcon.State.Off
+        box = QRect(self.PADDING, (self.height() - self.ICON) // 2, self.ICON, self.ICON)
+        self.icon().paint(painter, box, Qt.AlignmentFlag.AlignCenter, QIcon.Mode.Normal, state)
+        painter.setPen(color)
+        painter.drawText(self.text_rect(), Qt.AlignmentFlag.AlignVCenter, self.text())
+        painter.end()
 
     def _place_badge(self) -> None:
         badge = self.badge
-        x = self.width() - badge.width() - self.BADGE_GAP
+        x = self.text_rect().right() + 1 + self.GAP
         badge.move(x, (self.height() - badge.height()) // 2)
 
     def resizeEvent(self, event) -> None:
