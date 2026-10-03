@@ -697,6 +697,16 @@ def test_stored_transitions_stay_within_the_limit():
         assert ms.entry_from_dict(data | {"n_lines": stored}).model.n_lines == expected
 
 
+def test_corrupt_stored_parameters_are_rejected():
+    entry = ms.new_entry("custom", [])
+    ms.set_expression(entry, "E0 + a*B")
+    data = ms.entry_to_dict(entry)
+    assert ms.entry_from_dict(data).text == "E0 + a*B"
+    for params in (["E0"], [None], "E0"):
+        with pytest.raises(ValueError, match="invalid model"):
+            ms.entry_from_dict(data | {"params": params})
+
+
 def test_invalid_stored_models_keep_the_defaults(qtbot, tmp_path):
     ini = str(tmp_path / "settings.ini")
     s = QSettings(ini, QSettings.Format.IniFormat)

@@ -570,7 +570,7 @@ def entry_from_dict(data: Mapping) -> ModelEntry:
                     name, _number(p["value"]), lo, hi, _bool(p.get("fixed", False))
                 )
             set_expression(entry, str(data.get("text", "")))
-    except (KeyError, TypeError, IndexError) as exc:
+    except (KeyError, TypeError, IndexError, AttributeError) as exc:
         raise ValueError(f"invalid model: {exc}") from exc
     return entry
 
