@@ -2,11 +2,13 @@
 
     uv run --with pillow python packaging/icons/make_icons.py
 
-artwork-1024.png -> mag-opt-detective.icns (macOS icon grid: 824 px rounded square with
-continuous corners on a 1024 px canvas, soft shadow), mag-opt-detective.ico (rounded square
-filling the canvas, no shadow) and the 512 px window icons in mag_opt_detective/resources.
+icon.svg -> mag-opt-detective.icns (macOS icon grid: 824 px rounded square with continuous
+corners on a 1024 px canvas, soft shadow), mag-opt-detective.ico (rounded square filling the
+canvas, no shadow) and the 512 px window icons in mag_opt_detective/resources.
 """
 
+import io
+import os
 import subprocess
 import tempfile
 from pathlib import Path
@@ -15,10 +17,29 @@ import numpy as np
 from PIL import Image, ImageChops, ImageFilter
 
 HERE = Path(__file__).parent
-ARTWORK = HERE / "artwork-1024.png"
+ARTWORK = HERE / "icon.svg"
 RESOURCES = HERE.parents[1] / "src" / "mag_opt_detective" / "resources"
 CANVAS = 1024
 SUPERSAMPLE = 4
+
+
+def render_svg(path: Path, size: int = CANVAS) -> Image.Image:
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PySide6.QtCore import QBuffer, QByteArray
+    from PySide6.QtGui import QGuiApplication, QImage, QPainter
+    from PySide6.QtSvg import QSvgRenderer
+
+    _app = QGuiApplication.instance() or QGuiApplication([])
+    img = QImage(size, size, QImage.Format.Format_ARGB32)
+    img.fill(0)
+    painter = QPainter(img)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    QSvgRenderer(str(path)).render(painter)
+    painter.end()
+    data = QByteArray()
+    buf = QBuffer(data)
+    img.save(buf, "PNG")
+    return Image.open(io.BytesIO(bytes(data))).convert("RGBA")
 
 
 def rounded_square(size: int, radius: float = 0.225, n: float = 3.26) -> Image.Image:
@@ -70,7 +91,7 @@ def plain_icon(art: Image.Image, fill: float = 0.94) -> Image.Image:
 
 
 def main() -> None:
-    art = Image.open(ARTWORK)
+    art = render_svg(ARTWORK)
     mac = macos_icon(art)
     plain = plain_icon(art)
 
