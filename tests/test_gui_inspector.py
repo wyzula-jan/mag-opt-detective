@@ -57,22 +57,26 @@ def shown_range(window, view: str):
     return [tuple(axis) for axis in window.plots[view].plot.vb.viewRange()]
 
 
-def pan(window, view: str, dx: float = 0.0, dy: float = 0.0, scale=None) -> None:
-    """Move plot *view* as pyqtgraph does on a drag (or zoom with *scale*), then report it."""
+def pan(window, view: str, dx: float = 0.0, dy: float = 0.0, scale=None, end=True) -> None:
+    """Move plot *view* as pyqtgraph does on a drag (or zoom with *scale*), then report it;
+    *end* ends the gesture, as the release of the mouse button does."""
     vb = window.plots[view].plot.vb
     if scale is not None:
         vb.scaleBy(x=scale[0], y=scale[1])
     else:
         vb.translateBy(x=dx or None, y=dy or None)
     vb.sigRangeChangedManually.emit(vb.state["mouseEnabled"])
+    if end:
+        window.view_ranges.finish()
 
 
 def map_values(window) -> np.ndarray:
     return window.controller.current_map().values
 
 
-def wheel(window, view: str) -> None:
-    """One wheel tick (zoom in) over the middle of plot *view*, as Qt delivers it."""
+def wheel(window, view: str, end=True) -> None:
+    """One wheel tick (zoom in) over the middle of plot *view*, as Qt delivers it; *end* ends
+    the gesture at once instead of after a pause."""
     plot = window.plots[view]
     centre = plot.view.mapFromScene(plot.plot.vb.sceneBoundingRect().center())
     viewport = plot.view.viewport()
@@ -82,6 +86,8 @@ def wheel(window, view: str) -> None:
         False,
     )  # fmt: skip
     QApplication.sendEvent(viewport, event)
+    if end:
+        window.view_ranges.finish()
 
 
 # ---------------------------------------------------------------------- view ranges

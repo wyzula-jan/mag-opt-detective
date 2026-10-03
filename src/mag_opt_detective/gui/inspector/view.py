@@ -10,18 +10,31 @@ keeps nothing, and a fixed stacked intensity range fits the data again when anot
 map (level key) is shown. This module also shows the inspector sections that belong to the
 plot on screen (``window.inspector_views``) and holds the number field and map cache the other
 inspector sections use.
+
+A pan or zoom on a plot moves only that plot while it lasts: the View fields follow at most
+every :data:`GESTURE_MS`, and the ranges go into the view state (and onto the other plots) once,
+when the mouse button is released or :data:`GESTURE_MS` after the last wheel step
+(``window.view_ranges.finish()`` does it at once).
 """
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import math
 import re
 
 import numpy as np
-from PySide6.QtCore import QLocale, Qt
+from PySide6.QtCore import QEvent, QLocale, QObject, Qt, QTimer
 from PySide6.QtGui import QValidator, QWheelEvent
-from PySide6.QtWidgets import QAbstractSpinBox, QDoubleSpinBox, QLabel, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (
+    QAbstractSpinBox,
+    QApplication,
+    QDoubleSpinBox,
+    QLabel,
+    QVBoxLayout,
+    QWidget,
+)
 
 from mag_opt_detective.core.spectra import FieldMap
 from mag_opt_detective.core.units import Unit, convert_range
@@ -46,6 +59,7 @@ HINT = (
 INTENSITY_NOTE = "Follows the offset while on Auto"
 NO_MAP = "Nothing to set until a sweep is processed"
 NO_REFERENCE_MAP = "Nothing to set until a reference map exists"
+GESTURE_MS = 100  # a pan or zoom: the fields follow at most this often; a wheel ends this after
 _PARTIAL_NUMBER = re.compile(r"[+-]?(\d+\.?\d*|\.\d*)?([eE][+-]?\d*)?")
 
 
@@ -230,16 +244,35 @@ class ViewPage(QWidget):
 
 
 # ---------------------------------------------------------------------- ranges
-class ViewRanges:
-    """Keeps the plot ranges, the controls and ``controller.view`` in step."""
+class ViewRanges(QObject):
+    """Keeps the plot ranges, the controls and ``controller.view`` in step.
+
+    A pan or zoom on a plot (pyqtgraph's ``sigRangeChangedManually``, every mouse move or wheel
+    step) is kept here while it lasts: only that plot moves, the View fields follow at most
+    every :data:`GESTURE_MS`, and :meth:`finish` puts it into the view state once (which draws
+    the shared ranges on the other plots): on the release of the mouse button, or
+    :data:`GESTURE_MS` after the last step without a button held (the wheel).
+    """
 
     def __init__(self, window, page: ViewPage):
+        super().__init__(page)
         self.window = window
         self.page = page
         self.c: AppController = window.controller
         self.maps: ShownMaps = window.shown_maps
         self._applied: dict[str, tuple[Pair, Pair]] = {}  # ranges put on the plots with data
         self._key = self.c.selection.level_key
+        self._pending: dict[str, Pair] | None = None  # ranges of a pan or zoom in progress
+        self._follow = self._timer(self.sync_controls)  # the fields follow the gesture
+        self._idle = self._timer(self._on_idle)  # restarted on every step: the gesture ended
+        self._viewports: set[QObject] = set()  # of the plots: their mouse releases end gestures
+
+    def _timer(self, slot) -> QTimer:
+        timer = QTimer(self)
+        timer.setSingleShot(True)
+        timer.setInterval(GESTURE_MS)
+        timer.timeout.connect(slot)
+        return timer
 
     # --- what is shown -----------------------------------------------------------------
     def effective(self) -> dict[str, tuple[Pair, Pair]]:
@@ -265,11 +298,17 @@ class ViewRanges:
         for name, (x, y) in self._applied.items():
             self.window.plots[name].plot.vb.setRange(xRange=x, yRange=y, padding=0)
 
+    def shown(self) -> ViewState:
+        """The view state with the ranges of a pan or zoom in progress."""
+        v = self.c.view
+        return v if self._pending is None else dataclasses.replace(v, **self._pending)
+
     def sync_controls(self) -> None:
-        """Show the ranges of the plot on screen in the controls (without emitting)."""
+        """Show the ranges of the plot on screen in the controls (without emitting); those of
+        a pan or zoom in progress, if any."""
         c, page = self.c, self.page
         view = self.window.plot_area.current_view()
-        v = c.view
+        v = self.shown()
         unit = unit_text(c.unit)
         page.energy.set_unit(unit)
         fmap = self.maps.get(view)
@@ -288,33 +327,100 @@ class ViewRanges:
         _show(page.intensity, v.stacked_range, i_data, INTENSITY_NOTE)
 
     def refresh(self) -> None:
+        """Put the ranges on the plots and into the controls; a pan or zoom in progress goes
+        into the view state first (after a redraw, which drew the state's ranges)."""
         if self.c.is_restoring():  # restored values are shown once settings are restored
+            return
+        if self._pending is not None:
+            self.finish()  # refreshes
             return
         self.apply()
         self.sync_controls()
+
+    def on_ranges(self) -> None:
+        """The ranges were set (controls, Fit, Auto, a pan or zoom put into the state): a pan
+        or zoom still in progress gives way to them."""
+        self.discard()
+        self.refresh()
 
     def on_selection(self) -> None:
         """Another level key: the stacked spectra have other intensities, so a fixed
         intensity range fits them again."""
         old, self._key = self._key, self.c.selection.level_key
         if self._key != old and not self.c.is_restoring():
+            self.finish()
             self.c.set_ranges(stacked_range=None)
+
+    def edit(self, **ranges: Pair | None) -> None:
+        """Set ranges from the controls (after a pan or zoom in progress)."""
+        self.finish()
+        self.c.set_ranges(**ranges)
 
     # --- user changes on the plots -----------------------------------------------------
     def on_manual(self, view: str) -> None:
-        """A pan or zoom on plot *view*: the axes it moved become fixed (on a plot with data;
-        an empty one keeps nothing)."""
+        """A pan or zoom step on plot *view*: the axes it moved become fixed (on a plot with
+        data; an empty one keeps nothing), in the view state once the gesture ends."""
         applied = self._applied.get(view)
         if applied is None:
             return
         vb = self.window.plots[view].plot.vb
         moved = tuple((float(lo), float(hi)) for lo, hi in vb.viewRange())
-        changes = {}
+        pending = {} if self._pending is None else self._pending
         for i, name in enumerate(VIEW_RANGES[view]):
-            if not _same(applied[i], moved[i]):
-                changes[name] = moved[i]
-        if changes:
-            self.c.set_ranges(**changes)
+            if name in pending or not _same(applied[i], moved[i]):
+                pending[name] = moved[i]
+        self._pending = pending
+        self._idle.start()
+        if not self._follow.isActive():
+            self._follow.start()
+
+    def on_typed(self, view: str) -> None:
+        """Limits typed into the plot menu: fixed at once."""
+        self.on_manual(view)
+        self.finish()
+
+    def finish(self) -> None:
+        """Put a pan or zoom in progress into the view state now (this draws its ranges on
+        the other plots and shows them in the fields); nothing without one."""
+        pending = self._pending
+        self.discard()
+        if pending is None:
+            return
+        view = self.c.view
+        if pending:
+            self.c.set_ranges(**pending)  # refreshes through rangesChanged
+        if self.c.view == view:  # nothing changed: show the state again
+            self.refresh()
+
+    def discard(self) -> None:
+        """Forget a pan or zoom in progress (the plots keep showing it until a refresh)."""
+        self._pending = None
+        self._idle.stop()
+        self._follow.stop()
+
+    def in_gesture(self) -> bool:
+        """True while a pan or zoom is not yet in the view state."""
+        return self._pending is not None
+
+    def _on_idle(self) -> None:
+        if QApplication.mouseButtons() != Qt.MouseButton.NoButton:
+            self._idle.start()  # a drag held still: it ends on the release
+            return
+        self.finish()
+
+    def _on_release(self) -> None:
+        if QApplication.mouseButtons() == Qt.MouseButton.NoButton:
+            self.finish()
+
+    def watch_plot(self, viewport: QObject) -> None:
+        """End gestures on mouse releases in *viewport* (a plot's view port)."""
+        self._viewports.add(viewport)
+        viewport.installEventFilter(self)
+
+    def eventFilter(self, watched: QObject, event: QEvent) -> bool:
+        if watched in self._viewports and event.type() == QEvent.Type.MouseButtonRelease:
+            QTimer.singleShot(0, self, self._on_release)  # after pyqtgraph's last drag step
+        return False
 
     def on_click(self, view: str, event) -> None:
         """A double-click in the data area of plot *view* fits it to the data, unless the
@@ -332,14 +438,14 @@ class ViewRanges:
     def on_menu_auto(self, view: str, axis: int) -> None:
         """Auto for one axis in the plot menu: that range fits the data again."""
         if view in self._applied:
-            self.c.set_ranges(**{VIEW_RANGES[view][axis]: None})
+            self.edit(**{VIEW_RANGES[view][axis]: None})
             self.apply()  # also when it was on Auto: the menu left pyqtgraph's auto-range on
 
     def on_menu_manual(self, view: str, axis: int) -> None:
         """Manual for one axis in the plot menu: the range shown becomes fixed."""
         if view in self._applied:
             lo, hi = self.window.plots[view].plot.vb.viewRange()[axis]
-            self.c.set_ranges(**{VIEW_RANGES[view][axis]: (float(lo), float(hi))})
+            self.edit(**{VIEW_RANGES[view][axis]: (float(lo), float(hi))})
 
 
 def _show(control: RangeControl, fixed: Pair | None, data: Pair | None, note=None) -> None:
@@ -360,13 +466,17 @@ def _show(control: RangeControl, fixed: Pair | None, data: Pair | None, note=Non
 class ViewSetting:
     """Settings protocol for the plot ranges: JSON with the field range (T), the energy range
     in cm^-1 and the stacked intensity range (per cm^-1 for per-unit energy derivatives); null
-    fits the data. Restored ranges are applied in the unit shown once settings are restored."""
+    fits the data. Restored ranges are applied in the unit shown once settings are restored.
+    A pan or zoom still in progress in *ranges* goes into the view state before it is saved."""
 
-    def __init__(self, controller: AppController):
+    def __init__(self, controller: AppController, ranges: ViewRanges | None = None):
         self.controller = controller
+        self.ranges = ranges
         self.pending: dict[str, Pair | None] | None = None
 
     def settings_value(self) -> str:
+        if self.ranges is not None:
+            self.ranges.finish()
         c = self.controller
         v = c.view
         scale = c.derivative_scale()
@@ -427,7 +537,7 @@ def connect_menu(menu, view: str, ranges: ViewRanges) -> None:
         ui.autoRadio.clicked.connect(lambda *_args, i=axis: ranges.on_menu_auto(view, i))
         ui.manualRadio.clicked.connect(lambda *_args, i=axis: ranges.on_menu_manual(view, i))
         for text in (ui.minText, ui.maxText):
-            text.editingFinished.connect(lambda: ranges.on_manual(view))
+            text.editingFinished.connect(lambda: ranges.on_typed(view))
 
 
 def install(window) -> None:
@@ -436,14 +546,15 @@ def install(window) -> None:
     window.add_inspector_section("view", "View", page)
     window.inspector_views = dict(SECTION_VIEWS)
     window.shown_maps = ShownMaps(c)
-    ranges = ViewRanges(window, page)
+    ranges = window.view_ranges = ViewRanges(window, page)
 
     for name, control in page.controls().items():
-        control.rangeEdited.connect(lambda lo, hi, n=name: c.set_ranges(**{n: (lo, hi)}))
-        control.autoRequested.connect(lambda n=name: c.set_ranges(**{n: None}))
+        control.rangeEdited.connect(lambda lo, hi, n=name: ranges.edit(**{n: (lo, hi)}))
+        control.autoRequested.connect(lambda n=name: ranges.edit(**{n: None}))
 
     for view, plot in window.plots.items():
         plot.plot.vb.sigRangeChangedManually.connect(lambda _mask, v=view: ranges.on_manual(v))
+        ranges.watch_plot(plot.view.viewport())
         plot.plot.scene().sigMouseClicked.connect(lambda event, v=view: ranges.on_click(v, event))
         plot.plot.autoBtn.clicked.connect(lambda *_args, v=view: c.fit_ranges(v))
         plot.plot.vb.menu.viewAll.triggered.connect(lambda *_args, v=view: c.fit_ranges(v))
@@ -452,9 +563,15 @@ def install(window) -> None:
     # after the plot area's redraw (connected earlier), which draws the stored ranges
     c.selectionChanged.connect(ranges.on_selection)
     c.resultChanged.connect(lambda: update_sections(window))
-    for signal in (c.resultChanged, c.selectionChanged, c.viewChanged, c.rangesChanged):
+    for signal in (c.resultChanged, c.selectionChanged, c.viewChanged):
         signal.connect(ranges.refresh)
-    c.unitChanged.connect(lambda _old, _new: ranges.refresh())
+    c.rangesChanged.connect(ranges.on_ranges)
+
+    def on_unit(_old, _new) -> None:
+        ranges.discard()  # a pan or zoom in the old unit
+        ranges.refresh()
+
+    c.unitChanged.connect(on_unit)
 
     def on_tab(_index: int) -> None:
         view = window.plot_area.current_view()
@@ -465,9 +582,10 @@ def install(window) -> None:
     window.plot_area.tabs.currentChanged.connect(on_tab)
     on_tab(window.plot_area.tabs.currentIndex())
 
-    setting = ViewSetting(c)
+    setting = ViewSetting(c, ranges)
 
     def on_restored() -> None:
+        ranges.discard()
         setting.apply()
         ranges.refresh()
 
