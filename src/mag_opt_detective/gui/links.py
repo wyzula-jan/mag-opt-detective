@@ -37,6 +37,7 @@ BUG_FORM, FEATURE_FORM = "bug_report.yml", "feature_request.yml"  # in .github/I
 ENVIRONMENT_FIELDS = ("version", "install", "os", "python", "qt", "libraries", "plot")
 MAX_VALUE = 100  # characters of one field: the whole address stays well under 8000
 STANDALONE, FROM_SOURCE = "Standalone app", "From source"
+NO_BROWSER = "No web browser opened the page: copy its address, or find it in the log"
 
 
 def new_issue_url(form: str, fields: Mapping[str, str] | None = None) -> str:
@@ -61,7 +62,8 @@ def bug_report_url(environment: Mapping[str, str]) -> str:
 def system() -> str:
     """The operating system with its version and the processor, e.g. ``macOS 15.6 (arm64)``."""
     if sys.platform == "darwin":
-        name = f"macOS {platform.mac_ver()[0] or platform.release()}"
+        release = platform.mac_ver()[0]
+        name = f"macOS {release}" if release else f"Darwin {platform.release()}"
     elif sys.platform == "win32":
         name = f"Windows {platform.release()} {platform.version()}"
     else:
@@ -73,16 +75,24 @@ def system() -> str:
     return f"{name} ({platform.machine()})"
 
 
+def versions() -> dict[str, str]:
+    """The versions of Python, Qt and the libraries, as the About box and the bug form show
+    them (keys ``python``, ``qt`` and ``libraries``)."""
+    return {
+        "python": platform.python_version(),
+        "qt": f"Qt {qVersion()}, PySide6 {pyside_version}",
+        "libraries": f"numpy {np.__version__}, scipy {scipy.__version__}, "
+        f"pyqtgraph {pg.__version__}",
+    }
+
+
 def environment(plot: str = "") -> dict[str, str]:
     """What the bug form is filled in with; *plot* names the plot shown (may be empty)."""
     fields = {
         "version": __version__,
         "install": STANDALONE if getattr(sys, "frozen", False) else FROM_SOURCE,
         "os": system(),
-        "python": platform.python_version(),
-        "qt": f"Qt {qVersion()}, PySide6 {pyside_version}",
-        "libraries": f"numpy {np.__version__}, scipy {scipy.__version__}, "
-        f"pyqtgraph {pg.__version__}",
+        **versions(),
     }
     if plot:
         fields["plot"] = plot
@@ -93,4 +103,4 @@ def open_url(url: str) -> None:
     """Open *url* in the web browser; OSError when none opens it (the log keeps the address)."""
     if not QDesktopServices.openUrl(QUrl.fromEncoded(QByteArray(url.encode()))):
         logger.info("Address: %s", url)
-        raise OSError("No web browser opened the page: its address is in the log")
+        raise OSError(NO_BROWSER)

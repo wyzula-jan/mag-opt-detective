@@ -17,10 +17,11 @@ from PySide6 import __version__ as pyside_version
 from PySide6.QtCore import Qt, QUrl, qVersion
 from PySide6.QtGui import QAccessible, QDesktopServices, QKeySequence
 from PySide6.QtTest import QTest
+from PySide6.QtWidgets import QApplication
 
 import gui_helpers
 from mag_opt_detective import __version__
-from mag_opt_detective.gui import links
+from mag_opt_detective.gui import licences, links
 from mag_opt_detective.gui.main_window import SHORTCUTS
 
 window, errors = gui_helpers.window, gui_helpers.errors  # shared fixtures
@@ -69,8 +70,12 @@ def test_the_help_menu(window):
     assert [a for a in menu.actions() if not a.isSeparator()] == names
     assert all(a.statusTip() for a in names)
     assert all(not window.commands[n].icon().isNull() for n in LINKS)
-    assert window.commands["documentation"].shortcut() == QKeySequence("F1")
-    assert ("F1", "Open the documentation") in SHORTCUTS  # Help > Shortcuts
+    # the system's help keys first (the menu shows Cmd+? on macOS), and F1 everywhere
+    keys = window.commands["documentation"].shortcuts()
+    help_keys = QKeySequence.keyBindings(QKeySequence.StandardKey.HelpContents)
+    assert keys[: len(help_keys)] == help_keys and QKeySequence("F1") in keys
+    assert len(set(k.toString() for k in keys)) == len(keys)
+    assert ("F1", "Open the documentation (on macOS also ⌘?)") in SHORTCUTS  # Help > Shortcuts
     menu.adjustSize()
     items = QAccessible.queryAccessibleInterface(menu)
     spoken = [items.child(i).text(QAccessible.Text.Name) for i in range(items.childCount())]
@@ -125,21 +130,75 @@ def test_the_bug_report_is_filled_in_with_the_environment(window, opened, sweep)
     assert window.plot_summary() == "Reference: R(B)/R(0), meV"
 
 
-def test_the_bug_report_sends_no_personal_data(window, opened, sweep):
+def test_the_bug_report_sends_no_personal_data(window, opened, sweep, monkeypatch):
+    monkeypatch.setattr(links, "system", lambda: "Some OS 1.0 (x86_64)")  # its own tests below
     gui_helpers.load_sweep(window, sweep)  # files in a temporary folder of the user's
     gui_helpers.process(window)
     window.commands["report_bug"].trigger()
     url = opened[-1]
     assert len(url) < 2000  # GitHub and browsers take 8000 characters; stay well under
-    text = " ".join(query(url).values())
+    fields = query(url)
+    text = " ".join(fields.values())  # the values only: the address names "wyzula-jan"
     home = Path.home()
     private = {str(home), home.name, getpass.getuser(), platform.node()}  # user and host
     private |= {Path(f).name for f in sweep["field"]} | {Path(sweep["field"][0]).parent.name}
     for value in private:
         if len(value) >= 3:
-            assert value not in text and value not in url, value
-    rest = text.replace("R(B)/R(0)", "")
+            assert value not in text, value
+    rest = " ".join(v for k, v in fields.items() if k != "os").replace("R(B)/R(0)", "")
     assert "/" not in rest and "\\" not in rest  # no paths at all
+
+
+SYSTEMS = [  # sys.platform, the platform functions' results, the system named
+    ("darwin", {"mac_ver": ("15.6", ("", "", ""), "arm64"), "machine": "arm64"},
+     "macOS 15.6 (arm64)"),
+    ("darwin", {"mac_ver": ("", ("", "", ""), ""), "release": "24.6.0", "machine": "arm64"},
+     "Darwin 24.6.0 (arm64)"),
+    ("win32", {"release": "11", "version": "10.0.26100", "machine": "AMD64"},
+     "Windows 11 10.0.26100 (AMD64)"),
+    ("linux", {"freedesktop_os_release": {"PRETTY_NAME": "Debian GNU/Linux 12 (bookworm)"},
+               "release": "6.1.0-18-amd64", "machine": "x86_64"},
+     "Debian GNU/Linux 12 (bookworm), kernel 6.1.0-18-amd64 (x86_64)"),
+    ("linux", {"freedesktop_os_release": OSError, "system": "Linux", "release": "6.1.0",
+               "machine": "aarch64"},
+     "Linux, kernel 6.1.0 (aarch64)"),
+]  # fmt: skip
+
+
+@pytest.mark.parametrize(("name", "results", "expected"), SYSTEMS)
+def test_the_system_name(monkeypatch, name, results, expected):
+    monkeypatch.setattr(sys, "platform", name)
+    for function, result in results.items():
+
+        def fake(result=result):
+            if result is OSError:
+                raise OSError("no /etc/os-release")
+            return result
+
+        monkeypatch.setattr(platform, function, fake)
+    assert links.system() == expected
+
+
+def test_a_debian_system_name_reaches_the_form_whole(window, opened, monkeypatch):
+    debian = "Debian GNU/Linux 12 (bookworm), kernel 6.1.0-18-amd64 (x86_64)"
+    monkeypatch.setattr(links, "system", lambda: debian)
+    window.commands["report_bug"].trigger()
+    assert query(opened[-1])["os"] == debian
+    assert "os=Debian%20GNU%2FLinux%2012%20%28bookworm%29" in opened[-1]
+
+
+def test_the_about_box_shows_the_versions_of_the_bug_form(window, monkeypatch):
+    texts = []
+
+    class Box:
+        def exec(self) -> int:
+            return 0
+
+    monkeypatch.setattr(licences, "about_box", lambda _parent, text: texts.append(text) or Box())
+    window.commands["about"].trigger()
+    v = links.versions()
+    assert f"Python {v['python']}, {v['qt']}<br>{v['libraries']}<br>" in texts[0]
+    assert {k: links.environment()[k] for k in v} == v
 
 
 def test_a_standalone_app_says_so(monkeypatch):
@@ -159,10 +218,22 @@ def test_long_values_are_cut_and_unknown_fields_refused():
 def test_no_web_browser_goes_to_the_info_bar(window, errors, monkeypatch, caplog):
     caplog.set_level(logging.INFO, logger="mag_opt_detective")
     monkeypatch.setattr(QDesktopServices, "openUrl", lambda _url: False)
-    window.commands["documentation"].trigger()
-    assert errors == ["No web browser opened the page: its address is in the log"]
-    assert gui_helpers.infobar_text(window).startswith("Can't open the documentation:")
-    assert f"Address: {links.DOCS_URL}" in caplog.messages
+    bar = window.infobar
+    bug_url = links.bug_report_url(links.environment(window.plot_summary()))
+    for name, url in (("documentation", links.DOCS_URL), ("report_bug", bug_url)):
+        QApplication.clipboard().clear()
+        window.commands[name].trigger()
+        assert errors[-1] == links.NO_BROWSER
+        assert f"Address: {url}" in caplog.messages  # the log keeps it too
+        assert not bar.action_button.isHidden() and bar.action_button.text() == "Copy address"
+        bar.action_button.click()
+        assert QApplication.clipboard().text() == url and bar.isHidden()
+    assert gui_helpers.infobar_text(window) == ""
+    window.commands["request_feature"].trigger()
+    assert gui_helpers.infobar_text(window) == (
+        "Can't request a feature: No web browser opened the page: copy its address, or find "
+        "it in the log"
+    )
 
 
 # ---------------------------------------------------------------------- issue forms
@@ -288,6 +359,8 @@ def test_the_feature_form_and_the_chooser():
         "solution",
         "alternatives",
     ]
+    intro = next(e for e in form["body"] if e["type"] == "markdown")["attributes"]["value"]
+    assert re.findall(r"\]\((https?://[^)]+)\)", intro) == [links.DOCS_URL]  # the docs link
     config = load("config.yml")
     assert set(config) <= {"blank_issues_enabled", "contact_links"}
     assert isinstance(config["blank_issues_enabled"], bool)

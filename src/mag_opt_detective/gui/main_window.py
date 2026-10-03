@@ -9,14 +9,9 @@ from __future__ import annotations
 
 import itertools
 import logging
-import platform
 from pathlib import Path
 
-import numpy as np
-import pyqtgraph as pg
-import scipy
-from PySide6 import __version__ as pyside_version
-from PySide6.QtCore import QEvent, QPointF, QRect, QRectF, QSettings, QSize, Qt, Signal, qVersion
+from PySide6.QtCore import QEvent, QPointF, QRect, QRectF, QSettings, QSize, Qt, Signal
 from PySide6.QtGui import (
     QAction,
     QActionGroup,
@@ -93,7 +88,7 @@ SHORTCUTS = [
     ("W", "Auto-pick: follow a clicked line, or find the lines in a drawn region"),
     ("Ctrl+Z / Ctrl+Shift+Z", "Undo / redo a point edit (Alt-click removes a point)"),
     ("A", "Fit the plot to the data"),
-    ("F1", "Open the documentation"),
+    ("F1", "Open the documentation (on macOS also ⌘?)"),
 ]
 KINDS = (
     ("Ratio", "R(B)/R(0)", "Ctrl+1"),
@@ -778,7 +773,11 @@ class MainWindow(QMainWindow):
         # Help: the web links (gui/links.py), the shortcuts, then the group of the app itself,
         # About (on macOS Qt moves it into the application menu); commands[...] names them
         self.help_menu = self.menuBar().addMenu("&Help")
-        docs = self._action("documentation", "&Documentation", ("F1",), self.open_documentation)
+        # the system's help keys (the menu shows the first: F1, on macOS Cmd+?) and F1, which
+        # needs fn on Mac laptops
+        keys = QKeySequence.keyBindings(QKeySequence.StandardKey.HelpContents)
+        keys += [QKeySequence("F1")] if QKeySequence("F1") not in keys else []
+        docs = self._action("documentation", "&Documentation", keys, self.open_documentation)
         docs.setStatusTip("Open the user guide in the web browser")
         icons.set_icon(docs, "file-text")
         feature = self._action("request_feature", "Request a &feature…", (), self.request_feature)
@@ -1105,11 +1104,11 @@ class MainWindow(QMainWindow):
         QMessageBox.information(self, "Shortcuts", f"<table cellspacing='6'>{rows}</table>")
 
     def show_about(self) -> None:
+        v = links.versions()  # the bug form gets the same
         licences.about_box(
             self,
             f"<b>Magneto-Optical Detective {__version__}</b><br>"
-            f"Python {platform.python_version()}, Qt {qVersion()}, PySide6 {pyside_version}<br>"
-            f"numpy {np.__version__}, scipy {scipy.__version__}, pyqtgraph {pg.__version__}<br><br>"
+            f"Python {v['python']}, {v['qt']}<br>{v['libraries']}<br><br>"
             "Free software under the GNU GPL v3; commercial licences on request. If you use it "
             "for an analysis in a publication, please cite "
             "it with this version (see CITATION.cff in the repository).",
@@ -1118,16 +1117,32 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------ web links
     @user_action("Open the documentation")
     def open_documentation(self) -> None:
-        links.open_url(links.DOCS_URL)
+        self._open_link("Open the documentation", links.DOCS_URL)
 
     @user_action("Request a feature")
     def request_feature(self) -> None:
-        links.open_url(links.feature_request_url())
+        self._open_link("Request a feature", links.feature_request_url())
 
     @user_action("Report a bug")
     def report_bug(self) -> None:
         """Open the bug form, filled in with :func:`links.environment` and the plot shown."""
-        links.open_url(links.bug_report_url(links.environment(self.plot_summary())))
+        url = links.bug_report_url(links.environment(self.plot_summary()))
+        self._open_link("Report a bug", url)
+
+    def _open_link(self, title: str, url: str) -> None:
+        """Open *url* in the web browser; without one, the error bar offers to copy it."""
+        try:
+            links.open_url(url)
+        except OSError as exc:
+            self.report_error(title, str(exc))
+            bar = self.infobar  # the same message, with the address to copy
+            bar.show_message(
+                "error",
+                bar.title_label.text(),
+                bar.text_label.text(),
+                "Copy address",
+                lambda: QApplication.clipboard().setText(url),
+            )
 
     def plot_summary(self) -> str:
         """The plot shown in a few words, e.g. ``"Map: R(B)/R(0), meV"`` (no names or data)."""
