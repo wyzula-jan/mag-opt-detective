@@ -62,6 +62,7 @@ from mag_opt_detective.gui.kit import (
     TightToolButton,
 )
 from mag_opt_detective.gui.panels import PanelPage, library, points, processing, reference, sample
+from mag_opt_detective.gui.panels.common import ElidedLabel
 from mag_opt_detective.gui.settings import Persistence
 from mag_opt_detective.gui.theme import SCHEMES, Theme, current_theme, current_tokens
 from mag_opt_detective.gui.tools import autopick
@@ -739,9 +740,8 @@ class MainWindow(QMainWindow):
         status = self.statusBar()
         status.setContentsMargins(12, 0, 8, 0)  # the state dot clear of the window edge
         self._state_label = QLabel()
-        self._summary_label = QLabel()
+        self._summary_label = ElidedLabel()  # ends in "…" where the bar is too short for it
         self._summary_label.setProperty("kit", "muted")
-        self._summary_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         self._cursor_label = QLabel()
         self._cursor_label.setProperty("kit", "muted")
         status.addWidget(self._state_label)

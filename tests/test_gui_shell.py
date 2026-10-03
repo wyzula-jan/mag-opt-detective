@@ -9,7 +9,7 @@ import shiboken6
 from PySide6.QtCore import QEvent, QPoint, Qt
 from PySide6.QtGui import QCloseEvent, QGuiApplication, QImage
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QComboBox, QToolButton
+from PySide6.QtWidgets import QApplication, QComboBox, QLabel, QToolButton
 
 import gui_helpers
 from gui_helpers import energy_label, load_sweep, process, shown_image
@@ -21,6 +21,7 @@ from mag_opt_detective.gui import console, display, theme
 from mag_opt_detective.gui.console import Badge, LogButton
 from mag_opt_detective.gui.kit import SlidePanel
 from mag_opt_detective.gui.main_window import MainWindow
+from mag_opt_detective.gui.panels.common import ElidedLabel
 from mag_opt_detective.gui.plots import BarScale, HistogramScale
 from mag_opt_detective.gui.theme import Theme, current_tokens
 
@@ -509,3 +510,20 @@ def test_a_window_whose_building_failed_closes_quietly(qapp, monkeypatch):
     ]
     half.closeEvent(QCloseEvent())  # raised AttributeError before
     half.deleteLater()
+
+
+def test_the_status_bar_summary_is_elided(window, sweep, qtbot):
+    w = window
+    load_sweep(w, sweep)
+    process(w)
+    w.controller.set_processing(energy_cut=(200.0, None))  # Settings changed · process again
+    w.resize(1100, 800)
+    w.show()
+    qtbot.waitExposed(w)
+    w.set_cursor_text("B = 15.75 T    E = 1199.12 cm⁻¹    R(B)/R(0) = 0.998765    " * 3)
+    qtbot.wait(20)
+    labels = w.statusBar().findChildren(QLabel)
+    summary = next(label for label in labels if label.text() == w.summary_text())
+    assert isinstance(summary, ElidedLabel)  # ends in "…" where it is cut
+    assert summary.width() < summary.fontMetrics().horizontalAdvance(summary.text())
+    assert w.minimumSizeHint().width() <= 1100
