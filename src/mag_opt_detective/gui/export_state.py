@@ -1,10 +1,13 @@
 """What the export window draws: the window's plot as an export :class:`FigureState`, the
-print size checked against a journal preset, and the default file name.
+print size checked against a journal preset, the style (colour bar place, ticks), the colour
+range and the default file name.
 
 :func:`figure_state` adapts :meth:`AppController.figure_state` (the map as shown: display unit,
 plot kind and derivative, ranges, colour map and the levels in effect, model overlays and the
-picked points) and the stacked options of the view. :func:`print_size` turns the typed sizes
-into the values drawn with, plus the errors that block saving and the warnings shown inline.
+picked points) and the stacked options of the view; the map's colour range is the window's, the
+1st-99th percentile of the whole map, or fixed. :func:`print_size` and :func:`figure_style` turn
+the typed values into the ones drawn with, plus the errors that block saving and the warnings
+shown inline.
 """
 
 from __future__ import annotations
@@ -16,20 +19,28 @@ from pathlib import Path
 
 import numpy as np
 
-from mag_opt_detective.core.units import Unit
+from mag_opt_detective.core.units import Unit, convert_levels
 from mag_opt_detective.export import (
     FORMATS,
     Curve,
     FigureState,
+    FigureStyle,
     JournalPreset,
     PointSet,
     StackedOptions,
+    TickStyle,
+    robust_levels,
 )
 from mag_opt_detective.export.figure import FIELD_LABEL, INTENSITY_LABEL, MM_PER_INCH
+from mag_opt_detective.export.style import MAJOR_LENGTH, MINOR_LENGTH
+from mag_opt_detective.export.user_presets import COLOUR_RANGES
+from mag_opt_detective.gui.controller import parse_level_key
 from mag_opt_detective.gui.display import energy_label
+from mag_opt_detective.gui.widgets import parse_float
 
 KINDS = ("map", "stacked")
 POINTS_ALL, POINTS_CURRENT, POINTS_NONE = "all", "current", "none"
+RANGE_WINDOW, RANGE_AUTO, RANGE_FIXED = COLOUR_RANGES
 FORMAT_LABELS = {"pdf": "PDF", "svg": "SVG", "eps": "EPS", "png": "PNG", "tif": "TIFF"}
 SUFFIXES = {"pdf": ".pdf", "svg": ".svg", "eps": ".eps", "png": ".png", "tif": ".tif"}
 RASTER_FORMATS = ("png", "tif")
@@ -39,6 +50,8 @@ SIZE_LIMITS_MM = (5.0, 1000.0)
 FONT_LIMITS_PT = (1.0, 72.0)
 LINE_LIMITS_PT = (0.05, 10.0)
 DPI_LIMITS = (50.0, 2400.0)
+TICK_LENGTH_LIMITS_PT = (0.0, 20.0)
+TICK_WIDTH_LIMITS_PT = LINE_LIMITS_PT
 MAX_PIXELS = 120e6  # a larger image would need gigabytes of memory to draw
 
 
@@ -49,6 +62,8 @@ class FigureContent:
 
     *points*: ``"all"`` curves, the ``"current"`` one or ``"none"``. An empty axis label is
     filled in automatically; one of only spaces leaves the axis without a label.
+    *colour_range* of a map: the levels of the ``"window"``, the 1st-99th percentile
+    (``"auto"``) or *fixed_levels* (``"fixed"``, display unit; None: the window's).
     """
 
     kind: str = "map"
@@ -58,6 +73,8 @@ class FigureContent:
     points: str = POINTS_ALL
     x_label: str = ""
     y_label: str = ""
+    colour_range: str = RANGE_WINDOW
+    fixed_levels: tuple[float, float] | None = None
 
 
 def auto_labels(kind: str, unit: Unit) -> tuple[str, str]:
@@ -96,6 +113,16 @@ def point_sets(snapshot, which: str = POINTS_ALL) -> list[PointSet]:
     return sets
 
 
+def map_levels(snapshot, content: FigureContent) -> tuple[float, float]:
+    """The colour range of a map figure. Auto, as the window's Auto, uses the whole map (not
+    only the part in view)."""
+    if content.colour_range == RANGE_AUTO:
+        return robust_levels(snapshot.fmap.values)
+    if content.colour_range == RANGE_FIXED and content.fixed_levels is not None:
+        return float(content.fixed_levels[0]), float(content.fixed_levels[1])
+    return float(snapshot.levels[0]), float(snapshot.levels[1])
+
+
 def figure_state(controller, content: FigureContent, snapshot=None) -> FigureState:
     """The plot on screen as an export figure, in the display unit.
 
@@ -117,7 +144,7 @@ def figure_state(controller, content: FigureContent, snapshot=None) -> FigureSta
             kind="map",
             x_range=snapshot.field_range,
             y_range=snapshot.energy_range,
-            levels=tuple(snapshot.levels),
+            levels=map_levels(snapshot, content),
             cmap=snapshot.colormap,
             colorbar=content.colorbar,
             curves=model_curves(snapshot) if content.models else [],
@@ -132,6 +159,109 @@ def figure_state(controller, content: FigureContent, snapshot=None) -> FigureSta
         stacked=StackedOptions(view.stacked_offset, view.stacked_every, view.stacked_by_field),
         **common,
     )
+
+
+# ---------------------------------------------------------------------- colour range
+def _level_scale(key: str):
+    k = parse_level_key(key)
+    return k.order, k.axis_is_energy, k.physical
+
+
+def canonical_levels(key: str, levels: tuple[float, float], unit: Unit) -> tuple[float, float]:
+    """Levels of level key *key* shown in *unit* as stored (per-unit energy derivatives per
+    cm^-1, everything else as it is)."""
+    return convert_levels(levels, unit, Unit.CM1, *_level_scale(key))
+
+
+def display_levels(key: str, levels: tuple[float, float], unit: Unit) -> tuple[float, float]:
+    """Stored levels of *key* (see :func:`canonical_levels`) as shown in *unit*."""
+    return convert_levels(levels, Unit.CM1, unit, *_level_scale(key))
+
+
+def levels_problem(lo: float | None, hi: float | None) -> str:
+    """Why typed fixed levels cannot be drawn ("" if they can)."""
+    if lo is None or hi is None:
+        return "Enter both ends of the colour range."
+    if not lo < hi:
+        return "The colour range needs its minimum below its maximum."
+    return ""
+
+
+# ---------------------------------------------------------------------- style
+@dataclass(frozen=True)
+class StyleCheck:
+    """Typed style values made usable: the style drawn with, errors (no figure) and the names
+    of the refused fields. Refused fields are drawn automatic in :attr:`style`."""
+
+    style: FigureStyle
+    errors: list[str] = field(default_factory=list)
+    invalid: frozenset[str] = frozenset()
+
+    @property
+    def ok(self) -> bool:
+        return not self.errors
+
+
+def _optional(
+    name: str,
+    title: str,
+    text: str,
+    limits: tuple[float, float],
+    errors: list[str],
+    invalid: set[str],
+) -> float | None:
+    """A typed size in pt: None when empty (automatic)."""
+    if not text.strip():
+        return None
+    value = parse_float(text)
+    if value is None:
+        errors.append(f"Enter the {title} in pt, or leave it empty.")
+    elif not limits[0] <= value <= limits[1]:
+        errors.append(f"The {title} must be {limits[0]:g}–{limits[1]:g} pt.")
+    else:
+        return value
+    invalid.add(name)
+    return None
+
+
+def figure_style(
+    colorbar_location: str = "right",
+    direction: str = "out",
+    mirror: bool = False,
+    length: str = "",
+    width: str = "",
+    minor: bool = False,
+    minor_intervals: int = 2,
+    minor_length: str = "",
+) -> StyleCheck:
+    """The colour bar place and the ticks from the typed values (empty sizes: automatic)."""
+    errors: list[str] = []
+    invalid: set[str] = set()
+    lengths = TICK_LENGTH_LIMITS_PT
+    ticks = TickStyle(
+        direction=direction,
+        mirror=mirror,
+        length_pt=_optional("tick_length", "tick length", length, lengths, errors, invalid),
+        width_pt=_optional(
+            "tick_width", "tick width", width, TICK_WIDTH_LIMITS_PT, errors, invalid
+        ),
+        minor=minor,
+        minor_intervals=minor_intervals,
+        minor_length_pt=_optional(
+            "minor_length", "minor tick length", minor_length, lengths, errors, invalid
+        ),
+    )
+    style = FigureStyle(colorbar_location=colorbar_location, ticks=ticks)
+    return StyleCheck(style, errors, frozenset(invalid))
+
+
+def auto_tick_sizes(font_pt: float, line_pt: float) -> dict[str, float]:
+    """What empty tick fields draw: lengths from the text size, the width of the lines."""
+    return {
+        "tick_length": MAJOR_LENGTH * font_pt,
+        "tick_width": line_pt,
+        "minor_length": MINOR_LENGTH * font_pt,
+    }
 
 
 # ---------------------------------------------------------------------- print size

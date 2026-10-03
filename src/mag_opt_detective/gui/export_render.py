@@ -11,14 +11,21 @@ from __future__ import annotations
 
 import logging
 from concurrent.futures import Future, ThreadPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
 from PySide6.QtCore import QObject, QTimer, Signal
 from PySide6.QtGui import QImage
 
-from mag_opt_detective.export import FigureState, JournalPreset, rasterize, render, save
+from mag_opt_detective.export import (
+    FigureState,
+    FigureStyle,
+    JournalPreset,
+    rasterize,
+    render,
+    save,
+)
 
 logger = logging.getLogger("mag_opt_detective")
 
@@ -36,7 +43,8 @@ def executor() -> ThreadPoolExecutor:
 
 @dataclass(frozen=True)
 class FigureJob:
-    """A figure to draw: what it shows, its preset and print size, and the dpi to draw at."""
+    """A figure to draw: what it shows, its preset, print size and style, and the dpi to draw
+    at."""
 
     state: FigureState
     preset: JournalPreset
@@ -46,6 +54,7 @@ class FigureJob:
     line_pt: float
     panel_label: str | None
     dpi: float
+    style: FigureStyle = field(default_factory=FigureStyle)
 
     def figure(self):
         return render(
@@ -57,6 +66,7 @@ class FigureJob:
             line_width_pt=self.line_pt,
             panel_label=self.panel_label or None,
             dpi=self.dpi,
+            style=self.style,
         )
 
 

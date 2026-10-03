@@ -19,7 +19,15 @@ import gui_helpers
 from gui_helpers import click_map, infobar_text, load_sweep, process, save_to, set_unit
 from mag_opt_detective.core.spectra import FieldMap
 from mag_opt_detective.core.units import Unit, from_cm1
-from mag_opt_detective.export import APS, CUSTOM, NATURE, StackedOptions
+from mag_opt_detective.export import (
+    APS,
+    CUSTOM,
+    NATURE,
+    FigureStyle,
+    StackedOptions,
+    TickStyle,
+    robust_levels,
+)
 from mag_opt_detective.gui.controller import AppController
 from mag_opt_detective.gui.export_menu import DEFAULTS, ExportSettings
 from mag_opt_detective.gui.export_state import (
@@ -28,6 +36,7 @@ from mag_opt_detective.gui.export_state import (
     FigureContent,
     auto_labels,
     figure_state,
+    figure_style,
     file_name,
     print_size,
     safe_name,
@@ -617,3 +626,32 @@ def test_export_settings_drop_invalid_values():
     assert settings.values == {**DEFAULTS, "dpi": 300, "colorbar": False}
     assert not settings.set_settings_value("not json")
     assert not settings.set_settings_value("[1, 2]")
+
+
+# ---------------------------------------------------------------------- colour range and style
+
+
+def test_colour_range_of_the_adapter(controller):
+    c = controller
+    c.set_ranges(field_range=(0.6, 1.4))  # zoomed: Auto still uses the whole map
+    window_levels = figure_state(c, FigureContent()).levels
+    assert window_levels == pytest.approx((0.9, 1.1))
+    auto = figure_state(c, FigureContent(colour_range="auto")).levels
+    assert auto == pytest.approx(robust_levels(c.current_map().values))
+    fixed = FigureContent(colour_range="fixed", fixed_levels=(0.98, 1.02))
+    assert figure_state(c, fixed).levels == (0.98, 1.02)
+    unset = FigureContent(colour_range="fixed")  # nothing typed yet: the window's
+    assert figure_state(c, unset).levels == pytest.approx((0.9, 1.1))
+
+
+def test_style_of_the_adapter():
+    check = figure_style("top", "in", True, "4", "", True, 5, "1.5")
+    assert check.ok
+    assert check.style == FigureStyle("top", TickStyle("in", True, 4.0, None, True, 5, 1.5))
+    check = figure_style(length="30", width="x")
+    assert not check.ok and check.invalid == {"tick_length", "tick_width"}
+    assert check.style.ticks == TickStyle()  # refused values are drawn automatic
+    assert check.errors == [
+        "The tick length must be 0–20 pt.",
+        "Enter the tick width in pt, or leave it empty.",
+    ]
