@@ -48,7 +48,8 @@ Everything lives in `src/mag_opt_detective/`:
   - `theme.py` (light and dark tokens, palette, style sheet) and `icons/` (tinted icons).
   - `plot_panel.py` (plot area, plot toolbar, tool registry), `export_menu.py` and
     `export_dialog.py` (Export menu, journal figure window), `points_*.py` (point table,
-    markers, undo), `console.py` (log drawer), `licences.py` (About, Licences…).
+    markers, undo), `console.py` (log drawer), `licences.py` (About, Licences…), `links.py`
+    (the Help menu's web links: the docs site and the issue forms).
 - `smoke.py`: the self-test behind `--smoke-test`.
 
 **Area modules.** Each panel, inspector section and tool exposes `install(window)`, which
@@ -124,6 +125,11 @@ Each task there has an ID (`P2-04`), acceptance criteria and a suggested branch 
 (`feat/p2-04-merge-by-field`). Claim a task on the board before starting it and set it
 to *In review* when its branch is ready. The board's *Agent handoff* section explains
 how coding agents update it.
+
+Bug reports and feature requests come in through the issue forms in
+`.github/ISSUE_TEMPLATE/`; *Help › Report a bug…* fills the bug form's environment fields
+through query parameters named after their ids (`gui/links.py`), so rename an id in both
+places (`tests/test_gui_links.py` checks that they match).
 
 ## Commit messages
 

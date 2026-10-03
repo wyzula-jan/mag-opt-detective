@@ -222,6 +222,15 @@ Ctrl is ⌘ and Alt is ⌥ on macOS. *Help › Shortcuts* lists them in the app.
 | W | Auto-pick: follow a clicked line, or find the lines in a drawn region |
 | Ctrl+Z / Ctrl+Shift+Z | Undo / redo a point edit (Alt-click removes a point) |
 | A | Fit the plot to the data |
+| F1 | Open the documentation |
+
+## Feedback
+
+Found a bug or missing a feature? *Help › Report a bug…* and *Help › Request a feature…*
+open the [bug report](https://github.com/wyzula-jan/mag-opt-detective/issues/new?template=bug_report.yml)
+and [feature request](https://github.com/wyzula-jan/mag-opt-detective/issues/new?template=feature_request.yml)
+forms in the browser; the bug form comes with the app version and the system filled in.
+Never attach measurement data you cannot share.
 
 ## Development
 
