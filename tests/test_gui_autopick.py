@@ -464,3 +464,21 @@ def test_default_choice_and_window():
         energy=np.linspace(350.0, 3200.0, 11), field=np.ones(1), values=np.ones((11, 1))
     )
     assert auto_window(fmap) == 57.0
+
+
+def test_accept_on_a_finer_library_map_stores_every_point(picked, errors):
+    """A table made on a coarser map gets the rows of the finer one: Accept stores (and
+    reports) every point on its own field."""
+    w, c, tool = picked, picked.controller, picked.autopick
+    fine = c.result.ratio
+    c.set_new_table(True)
+    c.from_map(fine.replace(field=fine.field[::4], values=fine.values[:, ::4]))
+    assert c.points.field.size == 8
+    c.plot_entry(c.add_map(fine, "fine"))
+    assert click_map(w, 4.0, line1(4.0) + 6.0)
+    assert tool.accept() == 31
+    assert status(w).startswith("Added 31 points to LL 1")
+    b, e = c.points.points("LL 1")
+    np.testing.assert_allclose(b, FIELDS)
+    np.testing.assert_allclose(e, line1(FIELDS), atol=STEP)
+    assert not errors

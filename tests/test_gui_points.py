@@ -19,6 +19,7 @@ from gui_helpers import (
     select,
     set_unit,
 )
+from mag_opt_detective.core.points import PointTable
 from mag_opt_detective.core.spectra import FieldMap
 from mag_opt_detective.core.units import from_cm1
 from mag_opt_detective.gui.controller import AppController, SweepFiles
@@ -658,6 +659,67 @@ def test_dropping_the_last_curve_leaves_an_empty_one(ctl):
     assert c.points.names == ["LL 1"] and c.curve == "LL 1"
     c.points_undo.undo()
     assert c.points.names == ["CR"] and c.curve == "CR"
+
+
+# ---------------------------------------------------------------------- field grids
+def line_map(field: np.ndarray) -> FieldMap:
+    e = np.linspace(400.0, 1200.0, 401)
+    return FieldMap(e, field, 1 - 0.1 * np.exp(-(((e[:, None] - 600 - 20 * field) / 8) ** 2)))
+
+
+def test_a_new_field_grid_keeps_every_point_on_its_field(ctl):
+    """A result on another field grid adds its rows to the table (no undo step): old points
+    stay, and picks on the new map land on the field of the column under the click."""
+    c, stack = ctl, ctl.points_undo
+    c.record_point(1.5, 400.0)
+    steps = stack.count()
+    wide = np.arange(0.5, 8.01, 0.5)
+    c.from_map(line_map(wide))  # the sweep had 0.5 - 2 T
+    np.testing.assert_allclose(c.points.field, wide)
+    assert stack.count() == steps
+    assert c.record_point(6.1, 720.0) == 11  # not the 2 T row
+    b, e = c.points.points("LL 1")
+    np.testing.assert_allclose(b, [1.5, 6.0])
+    np.testing.assert_allclose(e, [400.0, 720.0])
+    with pytest.raises(ValueError, match=r"B = 8\.3 T is outside the map"):
+        c.record_point(8.3, 700.0)
+    assert c.record_point(8.2, 760.0) == 15  # the last column reaches 8.25 T
+
+    fine = np.arange(0.25, 8.01, 0.25)
+    c.plot_entry(c.add_map(line_map(fine), "fine"))
+    np.testing.assert_allclose(c.points.field, fine)  # the union of both grids
+    n = c.record_points(fine, 600 + 20 * fine, curve="auto", unit="cm-1")
+    assert n == fine.size
+    b, e = c.points.points("auto")
+    np.testing.assert_allclose(b, fine)
+    np.testing.assert_allclose(e, 600 + 20 * fine)  # 4.25 T is not folded into 4 T
+    np.testing.assert_allclose(c.points.points("LL 1")[0], [1.5, 6.0, 8.0])
+
+
+def test_points_recorded_into_an_older_table_get_their_own_rows(ctl):
+    """Undo can bring back a table from before a map on another grid: a pick or a batch
+    then adds the rows it needs, and a field given twice is counted once."""
+    c = ctl
+    fine = np.arange(0.25, 2.01, 0.25)
+    c.from_map(line_map(fine))
+    with c.point_edit("Old table"):
+        c.points = PointTable(np.array([0.5, 1.0]), {"LL 1": [np.nan, np.nan]})
+    assert c.record_point(0.8, 616.0) is not None
+    assert c.points.points("LL 1")[0].tolist() == [0.75]
+    assert c.record_points([1.25, 1.25, 1.75], [625.0, 626.0, 635.0], unit="cm-1") == 2
+    np.testing.assert_allclose(c.points.points("LL 1")[0], [0.75, 1.25, 1.75])
+    np.testing.assert_allclose(c.points.points("LL 1")[1], [616.0, 626.0, 635.0])
+    c.points_undo.undo()
+    c.points_undo.undo()
+    np.testing.assert_allclose(c.points.field, [0.5, 1.0])  # the rows go with the step
+
+
+def test_picks_without_a_map_stay_on_the_table_rows(qapp):
+    c = AppController()
+    c.points = PointTable(np.array([0.5, 1.0]), {"LL 1": [np.nan, np.nan]})
+    assert c.record_point(0.9, 300.0) == 1
+    with pytest.raises(ValueError, match="outside the field rows"):
+        c.record_point(1.3, 300.0)
 
 
 def test_imported_curve_names_follow_the_rules(ctl, tmp_path):

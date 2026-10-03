@@ -18,6 +18,30 @@ def test_set_and_clear_nearest():
     assert table.names == []
 
 
+def test_a_value_never_lands_on_another_field():
+    """Beyond half a field step past the first or last row, set_nearest refuses."""
+    table = PointTable(np.array([0.5, 1.0, 4.0]))
+    assert table.row_at(2.4) == 1 and table.row_at(2.6) == 2  # the gap splits at 2.5
+    assert table.set_nearest("LL 1", 4.25, 700.0) == 2  # the last cell reaches 5.5
+    assert table.row_at(0.25) == 0
+    for b in (0.2, 5.6):
+        with pytest.raises(ValueError, match=f"B = {b:g} T is outside the field rows"):
+            table.set_nearest("LL 1", b, 720.0)
+    np.testing.assert_allclose(table.points("LL 1")[1], [700.0])
+
+
+def test_with_fields_keeps_every_point_on_its_field():
+    table = PointTable(np.array([0.5, 1.0, 1.5]), {"LL 1": [10.0, np.nan, 30.0]})
+    assert table.with_fields(np.array([1.0 + 1e-9, 0.5])) is table  # nothing new
+    union = table.with_fields(np.array([2.0, 0.25, 1.0, 2.0]))
+    np.testing.assert_allclose(union.field, [0.25, 0.5, 1.0, 1.5, 2.0])
+    b, e = union.points("LL 1")
+    np.testing.assert_allclose(b, [0.5, 1.5])
+    np.testing.assert_allclose(e, [10.0, 30.0])
+    assert union.set_nearest("LL 1", 2.0, 40.0) == 4
+    np.testing.assert_allclose(table.field, [0.5, 1.0, 1.5])  # the old table is unchanged
+
+
 def test_round_trip(tmp_path):
     table = PointTable(np.array([0.25, 0.5]))
     table.add_column("LL 1")

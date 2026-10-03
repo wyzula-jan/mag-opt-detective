@@ -7,8 +7,10 @@ from pathlib import Path
 
 import numpy as np
 
-from mag_opt_detective.core.spectra import file_errors
+from mag_opt_detective.core.spectra import file_errors, sample_at
 from mag_opt_detective.core.units import Unit, axis_label, from_cm1, parse_axis_label, to_cm1
+
+FIELD_TOL = 1e-6  # T: field values closer than this are the same row
 
 
 class PointTable:
@@ -45,12 +47,46 @@ class PointTable:
     def nearest_row(self, b: float) -> int:
         return int(np.abs(self.field - b).argmin())
 
+    def row_at(self, b: float) -> int | None:
+        """The row whose field is nearest to *b*, if *b* is at most half a field step from it
+        (the step towards *b*); None beyond the first and last rows."""
+        return sample_at(self.field, b)
+
     def set_nearest(self, name: str, b: float, energy: float) -> int:
-        """Store *energy* at the field row closest to *b*; creates the column if needed."""
+        """Store *energy* at the field row of *b* (:meth:`row_at`); creates the column if
+        needed. ValueError when *b* is beyond the rows: it never lands on another field."""
+        row = self.row_at(b)
+        if row is None:
+            lo, hi = (float(v) for v in (self.field.min(), self.field.max()))
+            raise ValueError(
+                f"B = {b:g} T is outside the field rows of the point table ({lo:g} – {hi:g} T)"
+            )
         self.add_column(name)
-        row = self.nearest_row(b)
         self._columns[name][row] = energy
         return row
+
+    def missing_fields(self, field: np.ndarray) -> np.ndarray:
+        """The values of *field* that are not rows of the table (within FIELD_TOL), sorted."""
+        field = np.unique(np.asarray(field, dtype=float).ravel())
+        if self.field.size == 0 or field.size == 0:
+            return field
+        known = np.abs(field[:, None] - self.field[None, :]).min(axis=1) <= FIELD_TOL
+        return field[~known]
+
+    def with_fields(self, field: np.ndarray) -> PointTable:
+        """This table with a row for every value of *field* as well (the union of the two
+        grids, sorted by field); every point keeps its field and energy. Returns the table
+        itself when it has all of them."""
+        missing = self.missing_fields(field)
+        if missing.size == 0:
+            return self
+        union = np.concatenate([self.field, missing])
+        order = np.argsort(union, kind="stable")
+        empty = np.full(missing.shape, np.nan)
+        columns = {
+            name: np.concatenate([values, empty])[order] for name, values in self._columns.items()
+        }
+        return PointTable(union[order], columns)
 
     def clear_nearest(self, name: str, b: float) -> int:
         self.add_column(name)

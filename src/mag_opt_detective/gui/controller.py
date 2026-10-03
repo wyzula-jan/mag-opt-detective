@@ -45,7 +45,7 @@ from mag_opt_detective.core.processing import (
     merge_field,
 )
 from mag_opt_detective.core.readers import Measurement, load_measurement, sort_paths
-from mag_opt_detective.core.spectra import FieldMap, energy_mask, load_tsv
+from mag_opt_detective.core.spectra import FieldMap, energy_mask, load_tsv, sample_at
 from mag_opt_detective.core.units import (
     Range,
     Unit,
@@ -992,8 +992,16 @@ class AppController(QObject):
             self.pointsChanged.emit()
 
     def _init_points_if_requested(self, field_values: np.ndarray) -> None:
-        """A new (empty) table on the result's field, keeping the curve names, if asked."""
+        """A new (empty) table on the result's field, keeping the curve names, if asked;
+        else the table gets rows for the result's fields it lacks (:meth:`PointTable.with_fields`),
+        so that every point keeps its own field and a pick never lands on another one."""
         if not self.new_table and self.points is not None:
+            table = self.points.with_fields(field_values)
+            if table is not self.points:
+                added = table.field.size - self.points.field.size
+                self.points = table  # no undo step: the points are the same
+                logger.info("Point table: %d field rows added for the new map.", added)
+                self.pointsChanged.emit()
             return
         names = self.curve_names() or ["LL 1"]
         table = PointTable(
@@ -1010,12 +1018,34 @@ class AppController(QObject):
         self.set_new_table(False)
         logger.info("New point extraction table initialized.")
 
+    def map_field(self, b: float) -> float | None:
+        """Field of the map column drawn at *b*: its nearest field (see
+        :func:`~mag_opt_detective.core.spectra.sample_at`), or None without a map.
+        ValueError beyond the map's first and last columns."""
+        if self.result is None:
+            return None
+        try:
+            field_values = self.result.base(self._selection.kind).field
+        except ValueError:  # no field-step ratio: the field of the other maps
+            field_values = self.result.ratio.field
+        column = sample_at(field_values, b)
+        if column is None:
+            lo, hi = field_values.min(), field_values.max()
+            raise ValueError(f"B = {b:.4g} T is outside the map ({lo:g} – {hi:g} T)")
+        return float(field_values[column])
+
     def record_point(self, b: float, energy: float) -> int:
-        """Record a point clicked at *energy* in the display unit (kept in cm^-1)."""
+        """Record a point clicked at (*b*, *energy*), energy in the display unit (kept in
+        cm^-1). It goes to the field of the map column under the click, whose row is added
+        if the table lacks it (without a map: the table row of *b*)."""
         if self.points is None:
             raise panel_error("no point table - process data first", "points")
         name = self.curve_name()
+        column = self.map_field(b)
         with self.point_edit(f"Record point on {name}"):
+            if column is not None:
+                b = column
+                self.points = self.points.with_fields(np.array([b]))
             row = self.points.set_nearest(name, b, float(to_cm1(energy, self._unit)))
         logger.info("%s: B = %g T -> E = %.4g %s", name, self.points.field[row], energy, self._unit)
         return row
@@ -1028,10 +1058,12 @@ class AppController(QObject):
         unit: Unit | str | None = None,
         text: str | None = None,
     ) -> int:
-        """Record many points as one undo step (e.g. an auto-pick result); returns how many.
+        """Record many points as one undo step (e.g. an auto-pick result); returns how many
+        it stored (a field given twice is stored once, with its last energy).
 
-        Each point goes to the field row nearest to it in *curve* (default: the current one);
-        *energy* is in *unit* (default: the display unit). NaN energies are skipped.
+        Each point goes to the row of its own field in *curve* (default: the current one),
+        which is added if the table lacks it; *energy* is in *unit* (default: the display
+        unit). NaN energies are skipped.
         """
         if self.points is None:
             raise panel_error("no point table - process data first", "points")
@@ -1041,11 +1073,13 @@ class AppController(QObject):
         field, energy = np.broadcast_arrays(np.asarray(field, float), np.asarray(energy, float))
         keep = np.isfinite(field) & np.isfinite(energy)
         energy_cm1 = to_cm1(energy[keep], self._unit if unit is None else Unit(unit))
+        rows = set()
         with self.point_edit(text or f"Record {int(keep.sum())} points on {name}"):
+            self.points = self.points.with_fields(field[keep])
             for b, e in zip(field[keep], energy_cm1, strict=True):
-                self.points.set_nearest(name, float(b), float(e))
-        logger.info("%s: %d points recorded", name, int(keep.sum()))
-        return int(keep.sum())
+                rows.add(self.points.set_nearest(name, float(b), float(e)))
+        logger.info("%s: %d points recorded", name, len(rows))
+        return len(rows)
 
     def remove_point(self, b: float) -> int:
         """Remove the current curve's point in the field row nearest to *b* (if there is one)."""
