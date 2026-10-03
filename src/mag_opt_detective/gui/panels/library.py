@@ -54,6 +54,8 @@ from mag_opt_detective.gui.widgets import (
 )
 
 NEED_TWO = "Tick at least two maps"
+SAVE_TIP = "Add the R(B)/R(0) map shown to the library"
+NOTHING_TO_SAVE = "Process a sweep first: there is no map to save yet"
 TOOLTIPS = {
     "energy": "Join maps measured in different spectral ranges, each cut to its E limits",
     "field": "Join maps measured over different field ranges, each cut to its B limits",
@@ -296,9 +298,7 @@ class LibraryPanel(QWidget):
         self.rows: dict[int, EntryRow] = {}
         self._expanded: set[int] = set()
 
-        self.save_button = small_button(
-            "Save current map", "save", "Add the R(B)/R(0) map shown to the library"
-        )
+        self.save_button = small_button("Save current map", "save", SAVE_TIP)
         self.load_button = small_button(
             "Load table…", "upload", "Add exported R(B)/R(0) tables to the library"
         )
@@ -535,6 +535,14 @@ def install(window) -> None:
     rebuild()
 
     panel.save_button.clicked.connect(lambda: save_current(window))
+
+    def sync_save() -> None:
+        has_map = c.result is not None
+        panel.save_button.setEnabled(has_map)
+        panel.save_button.setToolTip(SAVE_TIP if has_map else NOTHING_TO_SAVE)
+
+    c.resultChanged.connect(sync_save)
+    sync_save()
     panel.load_button.clicked.connect(lambda: load_tables(window))
     panel.empty.clicked.connect(lambda: load_tables(window))
     panel.empty.filesDropped.connect(lambda paths: load_tables(window, paths))

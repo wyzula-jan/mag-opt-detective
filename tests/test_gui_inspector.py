@@ -317,16 +317,35 @@ def test_stacked_intensity_fits_again_for_another_kind_of_map(processed):
     assert lo < map_values(w).min() < map_values(w).max() < hi
 
 
-def test_sections_follow_the_plot_on_screen(window):
+def test_sections_follow_the_plot_on_screen(window, sweep):
     page = view_page(window)
     visible = {
         "map": ["view", "colour", "models"],
         "stacked": ["view", "traces"],
         "reference": ["view", "colour"],
     }
+
+    def shown_sections() -> list[str]:
+        return [n for n, s in window.inspector.items() if not s.isHidden()]
+
+    for view in visible:  # nothing processed: nothing to set
+        window.plot_area.set_current_view(view)
+        assert shown_sections() == []
+        assert window.inspector_subtitle() == (
+            "Nothing to set until a reference map exists"
+            if view == "reference"
+            else "Nothing to set until a sweep is processed"
+        )
+    load_sweep(window, sweep)
+    process(window)  # no reference: the Reference tab still has nothing to set
+    assert shown_sections() == []
+    assert window.inspector_subtitle() == "Nothing to set until a reference map exists"
+    window.controller.set_processing(reference_mode=ReferenceMode.SELF)
+    process(window)
     for view, names in visible.items():
         window.plot_area.set_current_view(view)
-        assert [n for n, s in window.inspector.items() if not s.isHidden()] == names
+        assert shown_sections() == names
+        assert window.inspector_subtitle() == "Settings for the plot on screen"
         assert page.field.isHidden() == (view == "stacked")
         assert page.intensity.isHidden() == (view != "stacked")
 
@@ -545,7 +564,7 @@ def test_reference_tab_edits_the_reference_levels(window, sweep, errors):
     process(window)
     window.plot_area.set_current_view("reference")
     page = colour_page(window)
-    window.plot_area.ref_data.setChecked(True)  # reference data: no symmetric levels
+    window.plot_area.ref_kind.set_value("Data")  # reference data: no symmetric levels
     assert page.label.text() == "Data"
     assert not page.mode.button("sym").isEnabled()
     page.mode.button("fixed").click()

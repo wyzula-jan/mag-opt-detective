@@ -54,6 +54,7 @@ from mag_opt_detective.gui.widgets import FlowLayout, Separator, last_dir, set_l
 logger = logging.getLogger("mag_opt_detective")
 
 SIDE_WIDTH, INSPECTOR_WIDTH, LOG_HEIGHT = 292, 300, 180
+INSPECTOR_SUBTITLE = "Settings for the plot on screen"
 
 SHORTCUTS = [
     ("Ctrl+Return (or Ctrl+F)", "Process"),
@@ -431,10 +432,11 @@ class MainWindow(QMainWindow):
         font = self._inspector_title.font()
         font.setBold(True)
         self._inspector_title.setFont(font)
-        hint = QLabel("Settings for the plot on screen")
-        hint.setProperty("kit", "muted")
+        self._inspector_subtitle = QLabel(INSPECTOR_SUBTITLE)
+        self._inspector_subtitle.setProperty("kit", "muted")
+        self._inspector_subtitle.setWordWrap(True)
         head_layout.addWidget(self._inspector_title)
-        head_layout.addWidget(hint)
+        head_layout.addWidget(self._inspector_subtitle)
         inspector_layout.addWidget(head)
         inspector_layout.addWidget(Separator())
         self._inspector_layout = QVBoxLayout()
@@ -625,6 +627,12 @@ class MainWindow(QMainWindow):
 
     def set_inspector_title(self, text: str) -> None:
         self._inspector_title.setText(text)
+
+    def set_inspector_subtitle(self, text: str = INSPECTOR_SUBTITLE) -> None:
+        self._inspector_subtitle.setText(text)
+
+    def inspector_subtitle(self) -> str:
+        return self._inspector_subtitle.text()
 
     def add_splitter(self, key: str, splitter: QSplitter) -> None:
         """Remember *splitter*'s layout between sessions (saveState under *key*)."""

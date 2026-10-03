@@ -44,6 +44,8 @@ HINT = (
     "fixes the range; Auto fits the data again."
 )
 INTENSITY_NOTE = "Follows the offset while on Auto"
+NO_MAP = "Nothing to set until a sweep is processed"
+NO_REFERENCE_MAP = "Nothing to set until a reference map exists"
 _PARTIAL_NUMBER = re.compile(r"[+-]?(\d+\.?\d*|\.\d*)?([eE][+-]?\d*)?")
 
 
@@ -148,11 +150,22 @@ def stacked_extent(fmap: FieldMap, view: ViewState, energy: Pair | None) -> Pair
 
 
 def update_sections(window) -> None:
-    """Show the inspector sections of the plot on screen (``window.inspector_views``)."""
+    """Show the inspector sections of the plot on screen (``window.inspector_views``).
+
+    A plot with nothing to show (no processed map, no reference map) has nothing to set:
+    its sections are hidden and the subtitle says what is missing.
+    """
     view = window.plot_area.current_view()
+    shown = window.shown_maps.get(view) is not None
     for name, section in window.inspector.items():
         views = window.inspector_views.get(name)
-        section.setVisible(views is None or view in views)
+        section.setVisible(views is None or (shown and view in views))
+    if shown:
+        window.set_inspector_subtitle()
+    elif view == "reference":
+        window.set_inspector_subtitle(NO_REFERENCE_MAP)
+    else:
+        window.set_inspector_subtitle(NO_MAP)
 
 
 def load_json(value) -> dict | None:
@@ -436,6 +449,7 @@ def install(window) -> None:
 
     # after the plot area's redraw (connected earlier), which draws the stored ranges
     c.selectionChanged.connect(ranges.on_selection)
+    c.resultChanged.connect(lambda: update_sections(window))
     for signal in (c.resultChanged, c.selectionChanged, c.viewChanged, c.rangesChanged):
         signal.connect(ranges.refresh)
     c.unitChanged.connect(lambda _old, _new: ranges.refresh())

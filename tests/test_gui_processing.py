@@ -143,7 +143,7 @@ def test_custom_field_and_reference(window, sweep, errors):
     np.testing.assert_allclose(result.ratio.field, [1, 2, 3, 4])
     np.testing.assert_allclose(result.ratio.values, 1.0)
     assert window.plots.reference.image.image is not None
-    window.plot_area.ref_data.setChecked(True)
+    window.plot_area.ref_kind.set_value("Data")
     np.testing.assert_allclose(window.plots.reference.image.image, result.reference_data.values)
 
 

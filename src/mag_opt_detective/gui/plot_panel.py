@@ -17,10 +17,8 @@ import pyqtgraph as pg
 from PySide6.QtCore import QEvent, QObject, QPointF, QRect, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import QKeySequence, QPainter, QShortcut
 from PySide6.QtWidgets import (
-    QButtonGroup,
     QHBoxLayout,
     QLabel,
-    QRadioButton,
     QSizePolicy,
     QSplitter,
     QSplitterHandle,
@@ -31,7 +29,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from mag_opt_detective.core.pipeline import PlotKind
+from mag_opt_detective.core.pipeline import PlotKind, ReferenceMode
 from mag_opt_detective.core.processing import Axis
 from mag_opt_detective.core.spectra import save_tsv
 from mag_opt_detective.core.units import Unit
@@ -44,8 +42,8 @@ from mag_opt_detective.gui.controller import (
     level_label,
     user_action,
 )
-from mag_opt_detective.gui.display import format_number, unit_text
-from mag_opt_detective.gui.kit import SlidePanel
+from mag_opt_detective.gui.display import format_number, process_key, unit_text
+from mag_opt_detective.gui.kit import EmptyState, SegmentedControl, SlidePanel
 from mag_opt_detective.gui.plots import ColorMapPlot, PlotColors, StackedPlot, robust_levels
 from mag_opt_detective.gui.theme import current_tokens
 from mag_opt_detective.gui.widgets import IMAGE_FILTER, CheckableSetting, Separator, save_file
@@ -299,27 +297,36 @@ class ScaleSplitter(QSplitter):
 
 
 class _Overlay(QObject):
-    """Keeps a floating child (the error bar) at the top centre of its parent."""
+    """Keeps a floating child of *parent* over *anchor* (a child of *parent*, the plots).
 
-    def __init__(self, child: QWidget, parent: QWidget):
+    The error bar (*cover* False) sits at the top centre of the anchor; an empty state
+    (*cover* True) covers it.
+    """
+
+    def __init__(self, child: QWidget, parent: QWidget, anchor: QWidget, cover: bool = False):
         super().__init__(parent)
         self._child = child
-        self._parent = parent
+        self._anchor = anchor
+        self._cover = cover
         child.setParent(parent)
-        parent.installEventFilter(self)
-        child.installEventFilter(self)
+        for widget in (parent, anchor, child):
+            widget.installEventFilter(self)
 
     def eventFilter(self, watched, event) -> bool:
-        if event.type() in (QEvent.Type.Resize, QEvent.Type.Show, QEvent.Type.LayoutRequest):
+        kinds = (QEvent.Type.Resize, QEvent.Type.Move, QEvent.Type.Show, QEvent.Type.LayoutRequest)
+        if event.type() in kinds:
             self.place()
         return False
 
     def place(self) -> None:
-        child, area = self._child, self._parent.rect()
+        child, area = self._child, self._anchor.geometry()
+        if self._cover:
+            child.setGeometry(area)
+            return
         width = max(120, min(560, area.width() - 20))
         height = child.heightForWidth(width) if child.hasHeightForWidth() else -1
         height = max(height, child.sizeHint().height())
-        child.setGeometry((area.width() - width) // 2, 10, width, height)
+        child.setGeometry(area.left() + (area.width() - width) // 2, area.top() + 10, width, height)
         child.raise_()
 
 
@@ -348,12 +355,20 @@ class PlotArea(QWidget):
         self.tools_row.setSpacing(2)
         self.tools_row.addLayout(self.tool_bar)
 
+        self.ref_kind = SegmentedControl(size="sm")
+        for kind in (PlotKind.RATIO, PlotKind.DATA):
+            label = KIND_LABELS[kind]
+            self.ref_kind.add_option(kind.value, label, f"Show the reference {label}")
+        self.ref_kind.setAccessibleName("Reference map")
+        self.ref_kind.hide()
+
         head = QWidget()
         head.setFixedHeight(40)
         row = QHBoxLayout(head)
         row.setContentsMargins(4, 0, 8, 0)
         row.setSpacing(10)
         row.addWidget(self.tabs)
+        row.addWidget(self.ref_kind)
         row.addWidget(self.description, stretch=1)
         row.addLayout(self.tools_row)
 
@@ -363,36 +378,23 @@ class PlotArea(QWidget):
         self.map_splitter, self.map_scale = self._with_scale(self.map)
         self.reference_splitter, self.reference_scale = self._with_scale(self.reference)
 
-        reference_page = QWidget()
-        ref_layout = QVBoxLayout(reference_page)
-        ref_layout.setContentsMargins(0, 0, 0, 0)
-        ref_layout.setSpacing(0)
-        options = QHBoxLayout()
-        options.setContentsMargins(10, 4, 10, 4)
-        self.ref_ratio = QRadioButton("Reference R(B)/R(0)")
-        self.ref_data = QRadioButton("Reference data")
-        self.ref_ratio.setChecked(True)
-        self.ref_group = QButtonGroup(self)
-        self.ref_group.addButton(self.ref_ratio)
-        self.ref_group.addButton(self.ref_data)
-        options.addWidget(self.ref_ratio)
-        options.addWidget(self.ref_data)
-        options.addStretch(1)
-        ref_layout.addLayout(options)
-        ref_layout.addWidget(self.reference_splitter, stretch=1)
-
         self.stack = QStackedWidget()
         self.stack.addWidget(self.map_splitter)
         self.stack.addWidget(self.stacked)
-        self.stack.addWidget(reference_page)
+        self.stack.addWidget(self.reference_splitter)
         self.tabs.currentChanged.connect(self.stack.setCurrentIndex)
 
+        # the plots; strips (the Auto-pick options) go above them and push them down
         self.plot_box = QWidget()
         box = QVBoxLayout(self.plot_box)
         box.setContentsMargins(0, 0, 0, 0)
-        box.addWidget(self.stack)
+        box.setSpacing(0)
+        box.addWidget(self.stack, stretch=1)
+        self.empty = EmptyState()
+        self.empty.hide()
+        self._cover = _Overlay(self.empty, self.plot_box, self.stack, cover=True)
         self.infobar = infobar
-        self._overlay = _Overlay(infobar, self.plot_box)
+        self._overlay = _Overlay(infobar, self.plot_box, self.stack)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -508,11 +510,71 @@ def update_description(window) -> None:
     area: PlotArea = window.plot_area
     c = window.controller
     if area.current_view() == "reference":
-        kind = c.selection.reference_kind
-        area.description.setText(f"Reference {KIND_LABELS[kind]}")
+        area.description.setText("")
     else:
         area.description.setText(c.description() if c.result is not None else "")
     area.description.setToolTip(area.description.text())
+    update_empty_state(window)
+
+
+# what the Reference tab says without a reference map, by reference mode (as in the mockup)
+NO_REFERENCE = {
+    ReferenceMode.NONE: (
+        "No reference in use",
+        "Choose Separate sweep in the Reference panel to correct the sample with a second "
+        "measurement. Its map then appears here.",
+    ),
+    ReferenceMode.SEPARATE: (
+        "Reference files missing",
+        "Add the reference sweep in the Reference panel and process again to compare it here.",
+    ),
+}
+
+
+def empty_message(window, view: str) -> tuple[str, str, str, str | None, Callable | None] | None:
+    """(icon, title, text, action text, action) for plot *view* while it has nothing to
+    show, else None."""
+    c = window.controller
+    process = window.commands["process"].trigger
+    key = process_key()
+    if view == "reference":
+        if c.reference_map() is not None:
+            return None
+        mode = c.processing.reference_mode
+        open_reference = ("Open Reference", lambda: window.show_panel("reference"))
+        files = c.processing.reference_files.field
+        if mode is ReferenceMode.NONE or (mode is ReferenceMode.SEPARATE and not files):
+            return ("layers", *NO_REFERENCE[mode], *open_reference)
+        what = "the reference sweep" if mode is ReferenceMode.SEPARATE else "the smoothed sweep"
+        text = f"Press Process ({key}) to show {what} the sample is divided by."
+        return "layers", "Reference not processed yet", text, "Process", process
+    if c.result is not None:
+        return None
+    if c.processing.sample_files.field:
+        text = f"Press Process ({key}) to draw the map and the spectra of the loaded sweep."
+        return "activity", "Not processed yet", text, "Process", process
+    text = (
+        "Open the in-field files of a sweep, or drop them on the Sample panel, then press "
+        f"Process ({key})."
+    )
+    open_sweep = window.toolbar.open_button.click
+    return "activity", "No sweep loaded", text, "Open sweep…", open_sweep
+
+
+def update_empty_state(window) -> None:
+    """Show the empty state instead of a plot that has nothing to show."""
+    area: PlotArea = window.plot_area
+    view = area.current_view()
+    message = empty_message(window, view)
+    area.ref_kind.setVisible(view == "reference" and message is None)
+    if message is None:
+        area.empty.hide()
+        return
+    area.empty.show_message(*message)
+    area.empty.show()
+    area.empty.raise_()
+    if not window.infobar.isHidden():
+        window.infobar.raise_()
 
 
 def _store_levels(window, view: str, key: str, lo: float, hi: float) -> None:
@@ -729,24 +791,13 @@ def install(window) -> None:
         lambda v: c.set_selection(axis=Axis.FIELD if v == "B" else Axis.ENERGY)
     )
     tb.per_unit.toggled.connect(lambda on: c.set_selection(physical=on))
-    area.ref_group.buttonToggled.connect(
-        lambda _b, checked: (
-            checked
-            and c.set_selection(
-                reference_kind=PlotKind.DATA if area.ref_data.isChecked() else PlotKind.RATIO
-            )
-        )
-    )
-
-    def follow_reference_kind() -> None:
-        data = c.selection.reference_kind is PlotKind.DATA
-        (area.ref_data if data else area.ref_ratio).setChecked(True)
-
-    c.selectionChanged.connect(follow_reference_kind)
+    area.ref_kind.valueChanged.connect(lambda v: c.set_selection(reference_kind=PlotKind(v)))
+    c.selectionChanged.connect(lambda: area.ref_kind.set_value(c.selection.reference_kind.value))
 
     # drawing (a new result also closes an old error bar; before drawing, which may report)
     c.resultChanged.connect(window.infobar.dismiss)
     c.resultChanged.connect(lambda: redraw(window))
+    c.processingChanged.connect(lambda: update_empty_state(window))  # files, reference mode
     c.selectionChanged.connect(lambda: redraw(window))
     c.viewChanged.connect(lambda: redraw(window))
     c.unitChanged.connect(lambda _old, _new: redraw(window))
@@ -779,8 +830,7 @@ def install(window) -> None:
     p = window.persistence
     if p is not None:
         p.bind("plot/scale_style_bar", area.scale_style_button)
-        p.bind("plot/reference_ratio", area.ref_ratio)
-        p.bind("plot/reference_data", area.ref_data)
+        p.bind("plot/reference_kind", area.ref_kind)
         p.bind("export/type_suffix", CheckableSetting(window.commands["export_suffix"]))
     window.add_splitter("map_scale", area.map_splitter)
     window.add_splitter("reference_scale", area.reference_splitter)

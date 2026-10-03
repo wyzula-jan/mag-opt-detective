@@ -12,7 +12,7 @@ from PySide6.QtWidgets import QComboBox
 
 import gui_helpers
 from gui_helpers import energy_label, load_sweep, process, shown_image
-from mag_opt_detective.core.pipeline import PlotKind
+from mag_opt_detective.core.pipeline import PlotKind, ReferenceMode
 from mag_opt_detective.core.processing import Axis
 from mag_opt_detective.core.units import Unit
 from mag_opt_detective.gui.kit import SlidePanel
@@ -176,7 +176,7 @@ def test_toolbar_follows_the_controller(window, sweep, errors):
     assert tb.axis.button("B").isEnabled() and tb.per_unit.isEnabled()
     c.set_selection(axis=Axis.FIELD, physical=True, reference_kind=PlotKind.DATA)
     assert tb.axis.value() == "B" and tb.per_unit.isChecked()
-    assert window.plot_area.ref_data.isChecked()
+    assert window.plot_area.ref_kind.value() == "Data"
     tb.kind.button("Ratio").click()
     assert c.selection.kind is PlotKind.RATIO and c.selection.axis is Axis.FIELD
     expected = c.result.get(PlotKind.RATIO, 1, Axis.FIELD, physical=True)
@@ -218,3 +218,40 @@ def test_theme_connections_end_with_the_window(qtbot):
     finally:
         theme.set_scheme("system")
         QGuiApplication.styleHints().setColorScheme(Qt.ColorScheme.Unknown)
+
+
+def test_empty_states_replace_plots_with_nothing_to_show(shown, sweep, monkeypatch):
+    area, c = shown.plot_area, shown.controller
+    empty = area.empty
+    for view in ("map", "stacked"):  # nothing loaded: open a sweep
+        area.set_current_view(view)
+        assert not empty.isHidden() and empty.title() == "No sweep loaded"
+        assert empty.geometry() == area.stack.geometry()  # it covers the plot and its scale
+        assert empty.action_button.text() == "Open sweep…"
+    opened = []
+    monkeypatch.setattr(
+        shown.panels["sample"].measurement, "open_sweep_dialog", lambda: opened.append(1)
+    )
+    empty.action_button.click()
+    assert opened == [1]
+    load_sweep(shown, sweep)
+    assert empty.title() == "Not processed yet" and empty.action_button.text() == "Process"
+    assert not shown.panels["library"].save_button.isEnabled()
+    empty.action_button.click()  # processes
+    assert c.result is not None and empty.isHidden()
+    assert shown.panels["library"].save_button.isEnabled()
+
+    area.set_current_view("reference")  # no reference map: say why, by reference mode
+    assert not empty.isHidden() and empty.title() == "No reference in use"
+    assert area.ref_kind.isHidden() and area.description.text() == ""
+    shown.side_panel.set_open(False, animate=False)
+    empty.action_button.click()
+    assert shown.current_panel() == "reference" and shown.side_panel.is_open()
+    c.set_processing(reference_mode=ReferenceMode.SEPARATE)
+    assert empty.title() == "Reference files missing"
+    c.set_processing(reference_mode=ReferenceMode.SELF)
+    assert empty.title() == "Reference not processed yet"
+    empty.action_button.click()
+    assert empty.isHidden() and not area.ref_kind.isHidden()
+    area.set_current_view("map")
+    assert empty.isHidden() and area.ref_kind.isHidden()
