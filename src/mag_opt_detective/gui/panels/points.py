@@ -82,6 +82,7 @@ ALT_TEXT = "⌥" if sys.platform == "darwin" else "Alt"
 REMOVE_RADIUS = 12.0  # px: Alt-click removes the current curve's point this close to it
 EMPTY = "No points yet. Turn on picking and click the map."
 NO_TABLE = "No point table yet. Process a sweep (or import points), then pick."
+PICK_LABELS = {"map": "Pick on the map", "stacked": "Pick on the stacked plot"}  # by view
 
 
 def _hint(text: str) -> QLabel:
@@ -314,6 +315,7 @@ class PointsView(QTableView):
     """The points of the current curve; the x of a row, or Delete, removes points."""
 
     removeRequested = Signal(list)  # fields (T) of the points to remove
+    ROWS = 5  # rows in the size hint: the panel fits small windows, the table grows
 
     def __init__(self, model: CurvePointsModel, parent=None):
         super().__init__(parent)
@@ -337,6 +339,11 @@ class PointsView(QTableView):
         header.setSectionResizeMode(model.REMOVE, QHeaderView.ResizeMode.Fixed)
         header.resizeSection(model.REMOVE, 30)
         self.clicked.connect(self._on_click)
+
+    def sizeHint(self) -> QSize:
+        rows = self.ROWS * self.verticalHeader().defaultSectionSize()
+        header = self.horizontalHeader().sizeHint().height()
+        return QSize(super().sizeHint().width(), header + rows + 2 * self.frameWidth())
 
     def show_points(self, field: np.ndarray, energy_cm1: np.ndarray, keep: bool = True) -> None:
         """Show the points; with *keep* the selected fields stay selected if the rows change."""
@@ -395,9 +402,9 @@ class PointsPanel(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.pick_button = PickButton("Pick on the map", "P")
+        self.pick_button = PickButton(PICK_LABELS["map"], "P")
         self.pick_button.setToolTip("Pick points: a click records, Alt-click removes (P)")
-        self.pick_button.setAccessibleName("Pick on the map")
+        self.pick_button.setAccessibleName(PICK_LABELS["map"])
 
         self.chips = CurveChips()
         self.column_name = QLineEdit()
@@ -666,6 +673,11 @@ def install(window) -> None:
     def sync_tool(*_args) -> None:
         picking = tools.active() == PICK
         panel.pick_button.setChecked(picking)
+        label = PICK_LABELS.get(tools.view(), PICK_LABELS["map"])  # Reference: shows the map
+        if panel.pick_button.text() != label:
+            panel.pick_button.setText(label)
+            panel.pick_button.setAccessibleName(label)
+            panel.pick_button.updateGeometry()
         if picking:
             where = "click a trace to record" if tools.view() == "stacked" else "click to record"
             curve = c.curve or "(no curve)"
@@ -724,6 +736,7 @@ def install(window) -> None:
         panel.chips.set_curves(curves, c.curve)
         panel.chips.new_chip.setEnabled(table is not None)
         panel.delete_button.setEnabled(table is not None)
+        panel.export_button.setEnabled(table is not None)
         name = panel.column_name  # follows the curve, but keeps a refused name being typed
         typing = name.hasFocus() and c.curve_name_problem(name.text(), c.curve) is not None
         if name.text().strip() != c.curve and not typing:

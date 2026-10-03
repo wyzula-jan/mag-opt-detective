@@ -144,6 +144,14 @@ def test_the_table_keeps_its_selection_across_edits(processed):
     assert selected() == []
 
 
+def test_without_a_table_new_delete_and_export_are_off(window):
+    panel = window.panels["points"]
+    assert panel.table_stack.currentWidget() is panel.empty_label
+    for button in (panel.chips.new_chip, panel.delete_button, panel.export_button):
+        assert not button.isEnabled()
+    assert panel.import_button.isEnabled()
+
+
 def test_a_unit_switch_changes_the_table_but_not_the_points(processed):
     w = processed
     c, panel = w.controller, w.panels["points"]
@@ -263,8 +271,10 @@ def test_pick_toggle_follows_the_tool_and_shows_a_hint(shown):
     assert area.current_view() == "map" and tools.active() == "pick"
     assert panel.pick_button.isChecked() and tools.tool("pick").button.isChecked()
     assert hint.isVisible() and hint.text().startswith("Picking LL 1 · click to record")
+    assert panel.pick_button.text() == "Pick on the map"
     area.set_current_view("stacked")
     assert tools.active() == "pick" and "click a trace to record" in hint.text()
+    assert panel.pick_button.text() == "Pick on the stacked plot"
     view = w.plots.stacked.view
     view.setFocus()
     QTest.keyClick(view, Qt.Key.Key_Escape)
@@ -280,6 +290,7 @@ def test_pick_toggle_follows_the_tool_and_shows_a_hint(shown):
     assert tools.active() == "navigate" and hint.isHidden()
     area.set_current_view("reference")
     assert not tools.tool("pick").button.isEnabled()
+    assert panel.pick_button.text() == "Pick on the map"  # a click shows the map
 
 
 def test_tool_registry_routes_clicks_with_modifiers(processed):
