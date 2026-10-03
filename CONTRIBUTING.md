@@ -22,11 +22,86 @@ GitHub Actions runs the same checks on every push to `main` and on pull requests
 (Linux with Python 3.12–3.15, macOS and Windows with 3.14). Results:
 <https://github.com/wyzula-jan/mag-opt-detective/actions>.
 
-- `src/mag_opt_detective/core` holds the numerical code and must not import Qt.
-  Every change there needs a test in `tests/`.
-- `src/mag_opt_detective/gui` is the PySide6 interface, written in code (no `.ui` files).
-- Never commit measurement data. Tests needing real data use the `data_dir` fixture,
-  which skips when `Data_to_test/` is missing.
+Every behaviour change needs a test in `tests/`. Never commit measurement data: tests
+needing real data use the `data_dir` fixture, which skips when `Data_to_test/` is missing.
+
+## Architecture
+
+Everything lives in `src/mag_opt_detective/`:
+
+- `core/`: the numerical code (readers, processing, units, points, picking, fitting,
+  Zeeman and expression models, colour-map tables). No Qt.
+- `export/`: journal figures with matplotlib's object API only: no Qt and no pyplot
+  (`test_export_does_not_import_qt_or_pyplot` checks it in a subprocess).
+- `gui/`: the PySide6 interface, written in code (no `.ui` files).
+  - `controller.py`: the state (processing, view, unit, results, points) and the actions,
+    with signals for every change; `figure_state()` is the snapshot that exports draw.
+  - `main_window.py`: only the frame (toolbar, rail, plot area, inspector, log drawer,
+    status bar). The area modules fill it.
+  - `kit/`: our own widgets (range slider and control, segmented control, switch, slide
+    panel, collapsible section, info bar); `python -m mag_opt_detective.gui.kit.gallery`
+    shows them all.
+  - `plots/`: the map and stacked views, colour scales and overlay layers.
+  - `panels/`: the rail's panels (Sample, Reference, Processing, Library, Points).
+  - `inspector/`: the inspector's sections (View, Colour, Traces, Models).
+  - `tools/`: plot tools beyond pan, zoom and pick (auto-pick).
+  - `theme.py` (light and dark tokens, palette, style sheet) and `icons/` (tinted icons).
+  - `plot_panel.py` (plot area, plot toolbar, tool registry), `export_menu.py` and
+    `export_dialog.py` (Export menu, journal figure window), `points_*.py` (point table,
+    markers, undo), `console.py` (log drawer), `licences.py` (About, Licences…).
+- `smoke.py`: the self-test behind `--smoke-test`.
+
+**Area modules.** Each panel, inspector section and tool exposes `install(window)`, which
+builds its widgets, puts them into the window (`add_panel`, `add_inspector_section`,
+`tools.register`, …), wires them to the controller and **binds its own settings keys**
+with `window.persistence.bind("area/key", widget)`. `main_window.py` only lists the
+modules. Handlers that can fail use the `user_action` decorator, which reports expected
+errors in the info bar above the plot and logs unexpected ones.
+
+**Settings.** Values are stored under the `v2/` prefix (`gui/settings.py`). Bump `PREFIX`
+when a stored key changes meaning: everything older is then ignored once, so no migration
+code is needed. Widgets store plain values: Qt's own widgets are handled, and our widgets
+implement the settings protocol, `settings_value()` returning a str, int, float or bool
+and `set_settings_value(value)` returning False for a value it cannot take (the default
+stays). Energies are stored in cm⁻¹ whatever unit is shown.
+
+**Icons.** The icons are [Lucide](https://lucide.dev) SVGs from `lucide-static` 1.50.0
+(24 × 24, stroke 2, `stroke="currentColor"`). Copy the SVG unchanged into `gui/icons/`
+under its Lucide name, use it with `icons.set_icon(widget, "name")`, and keep
+`LICENSE-lucide.txt` (ISC, with the MIT notice for icons derived from Feather) next to
+them.
+
+## GUI tests
+
+GUI tests use pytest-qt and run offscreen (`QT_QPA_PLATFORM=offscreen`, set in
+`tests/conftest.py`). Take the shared fixtures from `tests/gui_helpers.py` with
+`window, errors = gui_helpers.window, gui_helpers.errors`: `window` is a main window
+without stored settings, `errors` collects the messages it reports (and no dialog
+blocks). The helpers load the synthetic `sweep` fixture, process, choose plots and units
+and click on the plots. Test through the controller and public widget methods, not
+private attributes. Open and close slide panels and sections with `animate=False`, or
+wait with a generous timeout. After each test `conftest.py` deletes the closed windows
+and the menus pyqtgraph leaves without a parent; without that they pile up and slow down
+later tests.
+
+## Bundle
+
+The app bundles are built with PyInstaller from `packaging/mag-opt-detective.spec`:
+
+```bash
+uv sync --locked --no-default-groups --group bundle   # without the dev tools
+uv run --no-sync pyinstaller packaging/mag-opt-detective.spec --noconfirm
+dist/mag-opt-detective/mag-opt-detective --smoke-test  # macOS: inside the .app
+uv sync                                                # back to the dev environment
+```
+
+`--smoke-test` loads a synthetic sweep, processes it, draws every plot, switches the unit,
+saves journal figures in every format and exits with 0. The spec also writes
+`THIRD_PARTY_NOTICES.txt` (`packaging/third_party_notices.py`); the *App bundles*
+workflow builds and smoke-tests the bundles on Linux, macOS and Windows for pull requests
+that touch the packaging and for version tags, which also publish a release. The app icon
+is drawn by `packaging/make_icon.py`; the README screenshots by `docs/make_screenshots.py`
+(synthetic data only).
 
 ## Branches and the task board
 
