@@ -69,7 +69,8 @@ def significant_decimals(value: float, digits: int = 4) -> int:
 class RangeControl(QWidget):
     """Range editor as in the inspector mockup.
 
-    ``rangeEdited(lo, hi)`` fires when the user changes the range with the slider or the number
+    ``rangeEdited(lo, hi)`` fires when the user changes the range with the slider (a handle, or
+    the bar between the handles, which moves the whole range, or their keys) or the number
     fields, or picks Fixed; the control then switches itself to Fixed. ``autoRequested`` fires
     when the user picks Auto; the owner should then call :meth:`set_range` with the data range.
     Programmatic setters are silent. A low limit at or above the high one is refused with an

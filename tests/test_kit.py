@@ -58,7 +58,7 @@ def test_range_slider_keyboard(qtbot, slider):
     with qtbot.waitSignal(slider.valuesChanged) as moved:
         qtbot.keyClick(slider, Qt.Key.Key_Right)
     assert moved.args == pytest.approx([21.0, 80.0])
-    qtbot.keyClick(slider, Qt.Key.Key_Right, Qt.KeyboardModifier.ShiftModifier)
+    qtbot.keyClick(slider, Qt.Key.Key_PageUp)
     assert slider.values() == pytest.approx((31.0, 80.0))
     with qtbot.waitSignal(slider.editingFinished):
         qtbot.keyClick(slider, Qt.Key.Key_Home)
@@ -86,17 +86,17 @@ def test_range_slider_mouse(qtbot, slider):
     slider.show()
     qtbot.waitExposed(slider)
     y = slider.height() // 2
-    x_hi = round(slider._x_for(80.0))
+    x_hi = round(slider.x_for(80.0))
     with qtbot.waitSignal(slider.editingFinished):
         qtbot.mousePress(slider, Qt.MouseButton.LeftButton, pos=QPoint(x_hi, y))
-        qtbot.mouseMove(slider, QPoint(round(slider._x_for(60.0)), y))
+        qtbot.mouseMove(slider, QPoint(round(slider.x_for(60.0)), y))
         qtbot.mouseRelease(slider, Qt.MouseButton.LeftButton, pos=QPoint(x_hi, y))
     assert slider.values()[1] == pytest.approx(60.0, abs=1.0)
     assert slider.active_handle() == 1
 
     # a press on the groove moves the nearest handle there
     with qtbot.waitSignal(slider.valuesChanged):
-        qtbot.mouseClick(slider, Qt.MouseButton.LeftButton, pos=QPoint(round(slider._x_for(5)), y))
+        qtbot.mouseClick(slider, Qt.MouseButton.LeftButton, pos=QPoint(round(slider.x_for(5)), y))
     assert slider.values()[0] == pytest.approx(5.0, abs=1.0)
     assert slider.active_handle() == 0
 
@@ -110,9 +110,9 @@ def test_range_slider_handles_stay_in_the_extent(qtbot, slider, start, press_at,
     qtbot.waitExposed(slider)
     y = slider.height() // 2
     slider.set_values(*start)  # handles drawn on top of each other at an end
-    press = QPoint(round(slider._x_for(start[0]) + press_at - start[0]), y)  # a pixel beside
+    press = QPoint(round(slider.x_for(start[0]) + press_at - start[0]), y)  # a pixel beside
     qtbot.mousePress(slider, Qt.MouseButton.LeftButton, pos=press)
-    qtbot.mouseMove(slider, QPoint(round(slider._x_for(drag_to)), y))
+    qtbot.mouseMove(slider, QPoint(round(slider.x_for(drag_to)), y))
     qtbot.mouseRelease(slider, Qt.MouseButton.LeftButton, pos=press)
     lo, hi = slider.values()
     assert 0.0 <= lo < hi <= 100.0
@@ -123,6 +123,136 @@ def test_range_slider_handles_stay_in_the_extent(qtbot, slider, start, press_at,
     focused(qtbot, slider)
     qtbot.keyClick(slider, Qt.Key.Key_Right)
     assert slider.values() == pytest.approx((99.0, 100.0))
+
+
+def record(slider) -> tuple[list, list]:
+    """The values of every valuesChanged and a list that grows on every editingFinished."""
+    moves, finished = [], []
+    slider.valuesChanged.connect(lambda lo, hi: moves.append((lo, hi)))
+    slider.editingFinished.connect(lambda: finished.append(True))
+    return moves, finished
+
+
+def drag(qtbot, slider, *xs: float) -> None:
+    """Press at the first x, move through the others, release at the last."""
+    y = slider.height() // 2
+    qtbot.mousePress(slider, Qt.MouseButton.LeftButton, pos=QPoint(round(xs[0]), y))
+    for x in xs[1:]:
+        qtbot.mouseMove(slider, QPoint(round(x), y))
+    qtbot.mouseRelease(slider, Qt.MouseButton.LeftButton, pos=QPoint(round(xs[-1]), y))
+
+
+def test_range_slider_drag_between_the_handles_moves_the_range(qtbot, slider):
+    slider.show()
+    qtbot.waitExposed(slider)
+    moves, finished = record(slider)
+    x = slider.x_for
+    assert slider.part_at(x(50.0)) == 2
+    drag(qtbot, slider, x(50.0), x(55.0), x(60.0), x(60.0))
+    assert len(moves) == 2  # one per move that changed the values
+    assert len(finished) == 1
+    assert all(hi - lo == pytest.approx(60.0) for lo, hi in moves)
+    assert slider.values() == pytest.approx((30.0, 90.0), abs=1.0)
+    assert slider.active_handle() == 0  # the keyboard keeps its handle
+
+
+def test_range_slider_range_drag_stops_at_the_ends(qtbot, slider):
+    slider.show()
+    qtbot.waitExposed(slider)
+    moves, finished = record(slider)
+    y = slider.height() // 2
+    qtbot.mousePress(slider, Qt.MouseButton.LeftButton, pos=QPoint(round(slider.x_for(50)), y))
+    qtbot.mouseMove(slider, QPoint(slider.width() + 40, y))
+    assert slider.values() == pytest.approx((40.0, 100.0))
+    assert slider.values()[1] == 100.0  # exactly at the end, the width kept
+    qtbot.mouseMove(slider, QPoint(-40, y))
+    assert slider.values() == pytest.approx((0.0, 60.0))
+    assert slider.values()[0] == 0.0
+    qtbot.mouseMove(slider, QPoint(-80, y))  # further out: nothing changes, nothing emitted
+    qtbot.mouseRelease(slider, Qt.MouseButton.LeftButton, pos=QPoint(-80, y))
+    assert (len(moves), len(finished)) == (2, 1)
+
+
+def test_range_slider_handles_win_on_a_narrow_range(qtbot, slider):
+    slider.show()
+    qtbot.waitExposed(slider)
+    x = slider.x_for
+    assert slider.part_at(x(80.0) - 4) == 1  # where a handle overlaps the bar, it wins
+    assert slider.part_at(x(10.0)) is None  # the groove
+    slider.set_values(40.0, 51.0)  # 22 px apart: 3 px of bar between the handles' reach
+    assert slider.part_at(x(45.0)) == 0  # too little to grab: the nearer handle
+    assert slider.part_at(x(46.0)) == 1
+
+    slider.set_values(50.0, 52.0)  # nearly on top of each other
+    _, finished = record(slider)
+    drag(qtbot, slider, x(52.0), x(70.0))
+    assert slider.values() == pytest.approx((50.0, 70.0), abs=1.0)  # the high handle alone
+    assert slider.active_handle() == 1
+    assert len(finished) == 1
+
+
+def test_range_slider_shift_keys_move_the_range(qtbot, slider):
+    focused(qtbot, slider)
+    moves, finished = record(slider)
+    shift = Qt.KeyboardModifier.ShiftModifier
+    qtbot.keyClick(slider, Qt.Key.Key_Right, shift)
+    assert slider.values() == pytest.approx((21.0, 81.0))
+    assert (len(moves), len(finished)) == (1, 1)
+    qtbot.keyClick(slider, Qt.Key.Key_Left, shift)
+    assert slider.values() == pytest.approx((20.0, 80.0))
+    qtbot.keyClick(slider, Qt.Key.Key_PageUp, shift)
+    qtbot.keyClick(slider, Qt.Key.Key_PageUp, shift)  # stops at the end, the width kept
+    assert slider.values() == pytest.approx((40.0, 100.0))
+    assert (len(moves), len(finished)) == (4, 4)
+    qtbot.keyClick(slider, Qt.Key.Key_Up, shift)  # no room: no signal
+    assert (len(moves), len(finished)) == (4, 4)
+    qtbot.keyClick(slider, Qt.Key.Key_Home, shift)
+    assert slider.values() == pytest.approx((0.0, 60.0))
+    assert all(hi - lo == pytest.approx(60.0) for lo, hi in moves)
+    assert slider.active_handle() == 0
+    qtbot.keyClick(slider, Qt.Key.Key_Right)  # without Shift: the active handle alone
+    assert slider.values() == pytest.approx((1.0, 60.0))
+    assert "Shift+arrow" in slider.toolTip()
+    assert "Shift+arrow" in slider.accessibleDescription()
+
+    slider.set_values(-20.0, 50.0)  # an end outside the extent does not go further out
+    qtbot.keyClick(slider, Qt.Key.Key_Left, shift)
+    assert slider.values() == (-20.0, 50.0)
+    qtbot.keyClick(slider, Qt.Key.Key_Right, shift)
+    assert slider.values() == pytest.approx((-19.0, 51.0))
+
+    slider.set_min_span(10.0)  # pinned at the end, the high handle moves with the range
+    slider.set_values(90.0, 100.0)
+    qtbot.keyClick(slider, Qt.Key.Key_End, shift)
+    assert slider.values() == (90.0, 100.0)
+    qtbot.keyClick(slider, Qt.Key.Key_Left, shift)
+    assert slider.values() == pytest.approx((89.0, 99.0))
+
+    slider.set_values(0.0, 100.0)  # a range that fills the extent cannot move
+    assert slider.part_at(slider.x_for(50.0)) is None  # a press moves the nearest handle
+    with qtbot.assertNotEmitted(slider.valuesChanged):
+        qtbot.keyClick(slider, Qt.Key.Key_Right, shift)
+
+
+def test_range_slider_cursor_and_hover_over_the_range(qtbot, slider):
+    slider.show()
+    qtbot.waitExposed(slider)
+    y = slider.height() // 2
+    middle = QPoint(round(slider.x_for(50.0)), y)
+    assert slider.cursor().shape() == Qt.CursorShape.ArrowCursor
+    qtbot.mouseMove(slider, middle)
+    assert slider.cursor().shape() == Qt.CursorShape.OpenHandCursor
+    slider.grab()  # paints the hover band
+    qtbot.mousePress(slider, Qt.MouseButton.LeftButton, pos=middle)
+    assert slider.cursor().shape() == Qt.CursorShape.ClosedHandCursor
+    slider.grab()
+    qtbot.mouseRelease(slider, Qt.MouseButton.LeftButton, pos=middle)
+    assert slider.cursor().shape() == Qt.CursorShape.OpenHandCursor
+    qtbot.mouseMove(slider, QPoint(round(slider.x_for(80.0)), y))  # a handle
+    assert slider.cursor().shape() == Qt.CursorShape.ArrowCursor
+    qtbot.mouseMove(slider, middle)
+    slider.set_values(0.0, 100.0)  # the range can no longer move
+    assert slider.cursor().shape() == Qt.CursorShape.ArrowCursor
 
 
 # --- RangeControl --------------------------------------------------------------------------
@@ -254,6 +384,34 @@ def test_range_control_slider_and_auto_fixed(qtbot, control):
         control.mode.button("fixed").click()
     assert fixed.args == [0.25, 16.0]
     assert not control.is_auto()
+
+
+def test_range_control_range_drag_switches_to_fixed(qtbot, control):
+    control.resize(300, control.sizeHint().height())
+    control.show()
+    qtbot.waitExposed(control)
+    control.set_range(4.0, 8.0)  # still Auto
+    slider = control.slider
+    edits = []
+    control.rangeEdited.connect(lambda lo, hi: edits.append((lo, hi)))
+    drag(qtbot, slider, slider.x_for(6.0), slider.x_for(8.0), slider.x_for(10.0))
+    lo, hi = control.range()
+    assert hi - lo == pytest.approx(4.0)
+    assert lo == pytest.approx(8.0, abs=0.2)
+    assert edits[-1] == (lo, hi)
+    assert len(edits) == 2
+    assert not control.is_auto()
+    assert control.mode.value() == "fixed"
+    assert not slider.is_muted()
+    assert (control.lo_spin.value(), control.hi_spin.value()) == pytest.approx((lo, hi), abs=1e-4)
+
+    control.set_auto(True)  # Shift+arrows count as an edit too
+    focused(qtbot, slider)
+    with qtbot.waitSignal(control.rangeEdited) as edited:
+        qtbot.keyClick(slider, Qt.Key.Key_Left, Qt.KeyboardModifier.ShiftModifier)
+    assert edited.args == pytest.approx([lo - 0.1575, hi - 0.1575])
+    assert not control.is_auto()
+    assert control.hi_spin.value() == pytest.approx(hi - 0.1575, abs=1e-4)
 
 
 def test_range_control_settings_protocol(control):

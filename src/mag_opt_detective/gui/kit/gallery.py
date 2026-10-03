@@ -192,7 +192,7 @@ class Gallery(QMainWindow):
         off = Switch("Disabled switch")
         off.setEnabled(False)
         layout.addWidget(off)
-        layout.addWidget(_label("RangeSlider (muted = Auto)", muted=True))
+        layout.addWidget(_label("RangeSlider: drag a handle or the bar (muted = Auto)", muted=True))
         slider = RangeSlider()
         slider.setAccessibleName("Example range")
         slider.set_extent(0, 100)
