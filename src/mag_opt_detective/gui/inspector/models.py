@@ -324,7 +324,11 @@ class Models(QObject):
         if item is None or self.c.result is None or entry.model is None:
             return []
         grid = ms.field_grid(self.c.result.ratio.field, entry.kind)
-        return ms.evaluate_curves(entry.model, grid, unit, item[0].values)
+        try:
+            return ms.evaluate_curves(entry.model, grid, unit, item[0].values)
+        except ValueError as exc:
+            logger.debug("The fit of %s cannot be drawn: %s", entry.name, exc)
+            return []
 
     def draw(self) -> None:
         """Draw every model in its layer, the fit previews, and register the overlays."""
