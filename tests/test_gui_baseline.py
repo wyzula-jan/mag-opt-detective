@@ -1079,3 +1079,17 @@ def test_baseline_is_live(processed):
     library.save_current(w)
     library.plot_entry(w, c.library[0].key)
     assert not c.baseline_is_live()  # a library map keeps its baseline
+
+
+def test_processed_options_follow_process_and_live(processed):
+    w, c = processed, processed.controller
+    assert c.processed_options() == c.processing
+    c.set_processing(energy_cut=(500.0, None), baseline=(600.0, 700.0))
+    used = c.processed_options()
+    assert used.energy_cut is None and used.baseline == (450.0, 550.0)
+    w.panels["processing"].baseline_live.setChecked(True)  # applies the region, not the window
+    assert c.processed_options().baseline == (600.0, 700.0)
+    assert c.processed_options().energy_cut is None
+    process(w)
+    assert c.processed_options() == c.processing
+    assert AppController().processed_options() is None

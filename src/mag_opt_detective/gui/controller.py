@@ -714,6 +714,11 @@ class AppController(QObject):
     def changed_since_process(self) -> bool:
         return self._changed
 
+    def processed_options(self) -> ProcessingState | None:
+        """The processing options of the last Process (with the baseline Live applied since),
+        None before the first."""
+        return self._processed_with
+
     def _update_changed(self) -> None:
         used = self._processed_with
         if used is not None and self._baseline_is_live():  # applied at once (apply_baseline)
