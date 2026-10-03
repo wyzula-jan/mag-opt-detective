@@ -10,7 +10,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QGuiApplication, QIcon, QPalette
 from PySide6.QtWidgets import QApplication, QMenu
 
-from mag_opt_detective import app
+from mag_opt_detective import app, export
 from mag_opt_detective.gui import icons, teardown, theme
 from mag_opt_detective.gui.main_window import MainWindow
 
@@ -33,6 +33,17 @@ def test_smoke_test_passes(restore_look):
     assert app.main(["mag-opt-detective", "--smoke-test"]) == 0
     assert theme.current_theme() is not None  # the application look comes from the theme
     assert not QApplication.windowIcon().isNull()
+
+
+def test_smoke_test_fails_on_a_broken_figure_export(restore_look, monkeypatch):
+    """The smoke test saves a journal figure in every format (backends, fonts, Pillow)."""
+
+    def save_nothing(fig, path, *, dpi):
+        path.write_bytes(b"")
+        return path
+
+    monkeypatch.setattr(export, "save", save_nothing)
+    assert app.main(["mag-opt-detective", "--smoke-test"]) == 1
 
 
 def test_qt_arguments_are_ignored():

@@ -1,7 +1,9 @@
 """Self-test used to check that a packaged app works (``mag-opt-detective --smoke-test``).
 
 It writes a small synthetic field sweep, loads it through the main window, processes
-it, draws every plot type and exits. No user settings are read or written.
+it, draws every plot type, switches the unit, saves a small journal figure in every format
+(matplotlib's backends, fonts and Pillow's writers) and exits. No user settings are read or
+written.
 """
 
 from __future__ import annotations
@@ -57,4 +59,29 @@ def run(window) -> None:
                 raise RuntimeError(f"the plots did not switch to {unit}")
         if errors:
             raise RuntimeError("; ".join(errors))
+        save_figures(controller, Path(tmp))
     logger.info("Smoke test passed: %d field spectra processed.", len(field))
+
+
+# the first bytes of a file in each figure format
+MAGIC = {
+    ".pdf": b"%PDF",
+    ".svg": b"<?xml",
+    ".eps": b"%!PS-Adobe",
+    ".png": b"\x89PNG",
+    ".tif": (b"II*\x00", b"MM\x00*"),
+}
+
+
+def save_figures(controller, folder: Path) -> None:
+    """Save the map and the stacked plot as small journal figures in every format."""
+    from mag_opt_detective import export
+    from mag_opt_detective.gui.export_state import FigureContent, figure_state
+
+    for kind in ("map", "stacked"):
+        state = figure_state(controller, FigureContent(kind=kind))
+        fig = export.render(state, preset="nature", width_mm=89, height_mm=60, dpi=72)
+        for suffix, magic in MAGIC.items():
+            path = export.save(fig, folder / f"{kind}{suffix}", dpi=72)
+            if not path.read_bytes().startswith(magic):
+                raise RuntimeError(f"the {kind} figure saved as {suffix} is not a {suffix} file")
