@@ -53,6 +53,7 @@ logger = logging.getLogger("mag_opt_detective")
 VIEWS = ("map", "stacked", "reference")
 TAB_TITLES = ("Map", "Stacked", "Reference")
 DEFAULT_SCALE_STYLE = "histogram"
+TOOL_SIZE = 28  # plot tool buttons, as the mockup's icon buttons
 
 
 @dataclass(frozen=True)
@@ -127,6 +128,7 @@ class ToolRegistry(QObject):
         button.setProperty("kit", "tool")
         button.setCheckable(True)
         button.setIconSize(QSize(16, 16))
+        button.setFixedSize(TOOL_SIZE, TOOL_SIZE)
         text = f"{tooltip} ({shortcut})" if shortcut else tooltip
         button.setToolTip(text)
         button.setAccessibleName(tooltip)
@@ -366,7 +368,7 @@ class PlotArea(QWidget):
         head.setFixedHeight(40)
         row = QHBoxLayout(head)
         row.setContentsMargins(4, 0, 8, 0)
-        row.setSpacing(10)
+        row.setSpacing(6)
         row.addWidget(self.tabs)
         row.addWidget(self.ref_kind)
         row.addWidget(self.description, stretch=1)
@@ -421,6 +423,7 @@ class PlotArea(QWidget):
         button.setProperty("kit", "tool")
         button.setCheckable(checkable)
         button.setIconSize(QSize(16, 16))
+        button.setFixedSize(TOOL_SIZE, TOOL_SIZE)
         button.setToolTip(tooltip)
         button.setAccessibleName(tooltip.split(" (")[0])
         icons.set_icon(button, name, "muted", on_color="accent")

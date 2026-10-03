@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from PySide6.QtCore import QRectF, QSignalBlocker, QSize, Qt
+from PySide6.QtCore import QRectF, QSignalBlocker, Qt
 from PySide6.QtGui import QFont, QPainter, QPen
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -73,6 +73,7 @@ FORMS = {
     Form.HYPERBOLIC: ("hyp", "Hyperbolic: E = √(E₀² + (m g μB B)²)"),
 }
 OUTPUT_UNITS = ((Unit.MEV, "meV"), (Unit.CM1, "cm⁻¹"), (Unit.THZ, "THz"))
+E0_WIDEST = "-0000.00"  # five significant digits of an energy, with a sign
 
 
 class Owner(Protocol):
@@ -198,7 +199,10 @@ class BranchRow(QWidget):
         self.label = compact(UnitField(QLineEdit()))
         self.label.edit.setMaxLength(24)
         self.label.edit.setAccessibleName("Branch label")
-        self.e0 = captioned(NumberField(name="E₀"), "E₀")
+        self.e0 = captioned(NumberField(name="E₀", digits=5), "E₀")
+        # room for any energy in any unit, so the first digit never hides behind the caption
+        metrics = self.e0.edit.fontMetrics()
+        self.e0.edit.setMinimumWidth(metrics.horizontalAdvance(E0_WIDEST) + 6)
         self.g = captioned(NumberField(name="g factor"), "g")
         self.m = captioned(NumberField(name="m, the multiplier of g μB B"), "m")
         self.e0.setToolTip("Energy at zero field")
@@ -206,8 +210,6 @@ class BranchRow(QWidget):
         self.m.setToolTip("Multiplier of g μB B (e.g. ±1, or 0 for a field-independent line)")
         self.form = FormButton()
         self.remove = tool_button("x", "Remove branch", "faint")
-        self.remove.setFixedSize(20, 20)
-        self.remove.setIconSize(QSize(12, 12))
         first = QHBoxLayout()
         first.setContentsMargins(0, 0, 0, 0)
         first.setSpacing(4)
@@ -321,7 +323,7 @@ class ZeemanEditor(QWidget):
             clear_layout(self.coupling_grid)
             self.couplings = {}
             for k, (i, j) in enumerate(pairs):
-                field = NumberField(unit_text(unit), name=f"Coupling Δ {i + 1}–{j + 1}")
+                field = NumberField(unit_text(unit), name=f"Coupling Δ {i + 1}–{j + 1}", digits=5)
                 field.valueEdited.connect(lambda v, pair=(i, j): self._on_coupling(pair, v))
                 box = QWidget()
                 box_layout = QVBoxLayout(box)

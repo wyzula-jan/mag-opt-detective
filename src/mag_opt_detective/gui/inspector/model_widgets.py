@@ -165,6 +165,8 @@ class NumberField(UnitField):
         if text != self.edit.text():
             with QSignalBlocker(self.edit):
                 self.edit.setText(text)
+                if not self.edit.hasFocus():  # a number too long for the box shows its start
+                    self.edit.home(False)
 
     def _format(self, value: float) -> str:
         return str(round(value)) if self._integer else f"{value:.{self._digits}g}"

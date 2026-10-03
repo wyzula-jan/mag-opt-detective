@@ -54,6 +54,9 @@ from mag_opt_detective.gui.widgets import FlowLayout, Separator, last_dir, set_l
 logger = logging.getLogger("mag_opt_detective")
 
 SIDE_WIDTH, INSPECTOR_WIDTH, LOG_HEIGHT = 292, 300, 180
+# narrowest side panel and inspector (the mockup's narrow-window inspector): the plot gives way
+# first, so the window stays usable down to about 1100 px with both open
+SIDE_MIN_WIDTH, INSPECTOR_MIN_WIDTH = 240, 280
 INSPECTOR_SUBTITLE = "Settings for the plot on screen"
 
 SHORTCUTS = [
@@ -402,6 +405,7 @@ class MainWindow(QMainWindow):
         side = _Pane("win")
         QVBoxLayout(side).setContentsMargins(0, 0, 0, 0)
         side.layout().addWidget(self._side_stack)
+        side.setMinimumWidth(SIDE_MIN_WIDTH)
         self.side_panel = SlidePanel(side, SIDE_WIDTH)
 
         self.stage = QWidget()
@@ -448,6 +452,7 @@ class MainWindow(QMainWindow):
         scroll.setFrameShape(QScrollArea.Shape.NoFrame)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         scroll.setWidget(inspector)
+        scroll.setMinimumWidth(INSPECTOR_MIN_WIDTH)
         self.inspector_panel = SlidePanel(scroll, INSPECTOR_WIDTH)
 
         self.body_splitter = _Splitter(Qt.Orientation.Horizontal)

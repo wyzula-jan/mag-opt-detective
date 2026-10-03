@@ -382,7 +382,8 @@ def test_fit_zeeman_branches_to_picked_points(window, sweep, tmp_path, errors):
     assert models.result(entry) is None and area.results.isHidden()
     for p in entry.model.params:
         assert p.value == pytest.approx(fitted[p.name])
-    assert float(editor.rows[0].e0.text()) == pytest.approx(fitted["e0_0"] * MEV, rel=1e-5)
+    shown_e0 = float(editor.rows[0].e0.text())  # five significant digits
+    assert shown_e0 == pytest.approx(fitted["e0_0"] * MEV, rel=1e-4)
     assert float(editor.rows[1].g.text()) == pytest.approx(fitted["g_1"], rel=1e-5)
     assert not errors
 
@@ -675,6 +676,32 @@ def test_the_section_never_widens_the_inspector(window, sweep, tmp_path, errors)
     assert models.result(zeeman) is not None
     colour = window.inspector["colour"].minimumSizeHint().width()
     assert window.inspector["models"].minimumSizeHint().width() <= colour
+    assert not errors
+
+
+def test_zeeman_energies_fit_their_fields_in_a_narrow_window(window, sweep, qtbot, errors):
+    """At 1100 px with the side panel open the inspector keeps its narrow width (280 px) and
+    each E0 shows all its digits (once shown as "ꞁ22.624", read as 22.6)."""
+    window.resize(1100, 800)
+    window.show()
+    qtbot.waitExposed(window)
+    load_sweep(window, sweep)
+    process(window)
+    zeeman = add(window, "zeeman")
+    editor = card_of(window, zeeman).editor
+    editor.add_button.click()
+    p = ms.params(zeeman)
+    p["e0_0"].value, p["e0_1"].value = 40.0, 60.0  # meV
+    models_of(window).edited(zeeman, structure=True)
+    qtbot.wait(50)
+    assert window.inspector_panel.width() >= 280 and window.side_panel.is_open()
+    texts = []
+    for row in editor.rows:
+        edit = row.e0.edit
+        texts.append(edit.text())
+        assert edit.width() >= edit.fontMetrics().horizontalAdvance(edit.text())
+        assert edit.cursorPosition() == 0  # a longer number would show its start
+    assert texts == ["322.62", "483.94"]  # five significant digits, in cm⁻¹
     assert not errors
 
 
