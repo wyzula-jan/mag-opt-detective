@@ -1,0 +1,69 @@
+<!--
+title: Viewing
+description: Plot kinds, derivatives per data point or per unit, the live energy unit switch, view ranges, colour maps and levels, colour scales, stacked traces and the sliding panels.
+-->
+<h1>Viewing</h1>
+<p>Everything on this page changes only how the processed sweep is shown. It applies at once, without processing again, and is remembered for the next session.</p>
+
+<!-- toc -->
+
+<h2 id="plots">Plots and derivatives</h2>
+<p>The toolbar chooses what the plots show:</p>
+<dl class="terms">
+  <dt>Plot</dt>
+  <dd>R(B)/R(0), Data, R(B)/R(B-AVR) or R(B)/R(B-ΔB) (<kbd>Ctrl</kbd>+<kbd>1</kbd> to <kbd>4</kbd>); <a href="processing.html#plots">what each one is</a>.</dd>
+  <dt>Derivative</dt>
+  <dd>Off, 1st or 2nd (<kbd>Alt</kbd>+<kbd>1</kbd>, <kbd>2</kbd>, <kbd>3</kbd>), along the energy (<b>d/dE</b>) or along the field (<b>d/dB</b>).</dd>
+  <dt>per unit</dt>
+  <dd>Off: the derivative is taken per data point, as in the old versions. On: it is divided by the real step, so d/dE is per cm⁻¹, meV or THz and d/dB is per tesla. An energy derivative per unit therefore changes its values with the unit; one per data point or along the field does not.</dd>
+</dl>
+<p>The plot tabs are <b>Map</b>, <b>Stacked</b> and <b>Reference</b>; the line next to them describes the map shown, e.g. <i>R(B)/R(0) · 2nd derivative d/dE per meV</i>.</p>
+
+<h2 id="unit">The energy unit</h2>
+<p>The <b>Unit</b> switch in the toolbar (cm⁻¹ | meV | THz) converts everything at once: the maps and their axes, the view ranges, the colour levels of per-unit derivatives, the picked points, the model parameters and curves, the journal figure window and every export. Nothing is processed again, and switching back gives exactly the numbers you had.</p>
+<p>Inside, energies are kept in cm⁻¹, the unit of the files, with 1 meV = 8.0656 cm⁻¹ and 1 THz = 33.35641 cm⁻¹ (the factors of the earlier versions).</p>
+
+<h2 id="ranges">View ranges</h2>
+<p>The <b>inspector › View</b> holds the ranges of the plot on screen: <b>Field B</b> and <b>Energy E</b>, shared by the map and the stacked plot, and the <b>Intensity</b> of the stacked plot. Each range is <b>Auto</b>, which fits the data, or <b>Fixed</b>, with a slider and two fields; the note below it gives the range of the data.</p>
+<p>On a plot, drag to pan, scroll over the plot or an axis to zoom, and double-click to fit. Any such change fixes the range; <b>Auto</b> or <b>Fit to data</b> (<kbd>A</kbd>) fits the data again. <b>Box zoom</b> (<kbd>Z</kbd>) zooms to a dragged rectangle.</p>
+
+<h2 id="colour">Colour maps and levels</h2>
+<figure class="shot">
+  <img src="images/derivative-dark.png" width="1400" height="900" loading="lazy" decoding="async" alt="The dark appearance with the energy unit in meV: the first derivative along the field per tesla, drawn with the bipolar colour map; the side panel is closed, the map has a slim colour bar, and the Colour section shows Symmetric levels and an open histogram.">
+  <figcaption>The 1st derivative d/dB per tesla in meV with the bipolar colour map, symmetric levels and slim colour bars, in the dark appearance with the side panel closed.</figcaption>
+</figure>
+<p>The <b>inspector › Colour</b> chooses the colour map and its levels:</p>
+<ul>
+  <li><b>Colour maps</b>: Auto (magma for maps, grey for derivatives), magma, inferno, viridis, plasma, turbo, grey and bipolar.</li>
+  <li><b>Auto</b> levels span the 1st to 99th percentile of the whole map, not only the part zoomed in.</li>
+  <li><b>Fixed</b> keeps the levels you set, by typing them, by dragging on the histogram or on the colour scale next to the map.</li>
+  <li><b>Symmetric</b> centres the levels on 1 for ratios and on 0 for derivatives; it is not offered for the raw data.</li>
+</ul>
+<p>The levels are remembered for each combination of plot kind, derivative, axis and per-unit setting, so going back to a view brings back its levels. To start with, ratios are fixed at 0.9 – 1.1 (0.98 – 1.02 for R(B)/R(B-ΔB)), the data map is on Auto and derivatives are symmetric about 0. The <b>Histogram</b> of the map values folds open below the levels.</p>
+
+<h2 id="scales">Colour scales</h2>
+<p>Each map has its colour scale beside it, in one of two styles that a switch in the plot toolbar chooses for all maps:</p>
+<ul>
+  <li>the <b>classic</b> histogram scale, with the distribution of the values and draggable levels (the default);</li>
+  <li>a <b>slim</b> colour bar with two handles, which leaves more room for the map. With slim bars the inspector shows the histogram instead.</li>
+</ul>
+<p>A click on the handle between a map and its scale slides the scale away or back; the eye button in the plot toolbar shows or hides all of them.</p>
+
+<h2 id="stacked">Stacked spectra</h2>
+<figure class="shot">
+  <img src="images/stacked-light.png" width="1400" height="900" loading="lazy" decoding="async" alt="The Stacked tab: the spectra of the sweep drawn above one another with an offset, coloured from dark to light by field, with the picked points on the traces.">
+  <figcaption>The Stacked tab: every spectrum offset from the last, coloured by field, with the picked points on the traces.</figcaption>
+</figure>
+<p>The <b>Stacked</b> tab draws the spectra above one another. The <b>inspector › Traces</b> section sets the <b>offset between spectra</b>, which spectra are shown (all, every 2nd or every 4th) and <b>colour by field</b>, which takes the colours from the colour map (Auto uses viridis). The intensity range follows the offset while it is on Auto. Picked points are drawn on their traces, and you can <a href="picking.html#stacked">pick on this plot too</a>.</p>
+
+<h2 id="panels">Sliding panels and appearance</h2>
+<p>The side panel, the inspector, the log drawer and the colour scales all slide open and closed and never cover the plot. The dividers can be dragged, and the window remembers the sizes. A click on the open panel's rail button closes it; the panel button in the plot toolbar shows or hides the inspector, and the Log button in the status bar opens the log.</p>
+<p>The button at the right end of the toolbar, or <b>View › Appearance</b>, switches between light, dark and the system's appearance.</p>
+
+<h2 id="quick-exports">Quick exports</h2>
+<ul>
+  <li><b>Export › Data table…</b> (<kbd>Ctrl</kbd>+<kbd>E</kbd>) saves the map shown as a tab-separated table, in the unit shown (<a href="settings.html#data-tables">format</a>).</li>
+  <li><b>Export › Quick image (PNG/SVG)…</b>, or the image button in the plot toolbar, saves the plot as it is on screen, with its colour scale.</li>
+  <li><b>Export › Add plot type to the file name</b> appends the plot to the name of a data table, e.g. <code>sweep_Ratio_2ndDer.csv</code>.</li>
+</ul>
+<p>For figures to print, use the <a href="figures.html">journal figure window</a>.</p>

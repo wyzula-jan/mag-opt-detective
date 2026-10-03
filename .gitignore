@@ -14,6 +14,9 @@ dist/
 .coverage
 htmlcov/
 
+# Docs site build (python docs/site/build.py)
+docs/site/_build/
+
 # IDEs / OS
 .idea/
 .vscode/

@@ -1,0 +1,58 @@
+<!--
+title: Processing
+description: What Process does with a sweep: zero-field drift correction, the four plot kinds, reference correction, the energy window and the baseline.
+-->
+<h1>Processing</h1>
+<p>Process turns the loaded spectra into maps of intensity over field and energy. Its settings live in the Sample, Reference and Processing panels and take effect the next time you process.</p>
+
+<!-- toc -->
+
+<h2 id="chain">What Process does</h2>
+<ol class="steps">
+  <li><b>Read.</b> Every spectrum is read in cm⁻¹, the unit of the files. If the Processing panel has an energy window, the data outside it is dropped first.</li>
+  <li><b>Divide by zero field.</b> Each in-field spectrum R(B) is divided by the zero-field spectrum R(0). With two zero-field spectra, R(0) is interpolated linearly between the first and the last field point, so a drift during the sweep cancels.</li>
+  <li><b>Correct with a reference</b>, if one is chosen in the Reference panel (see <a href="#reference">below</a>).</li>
+  <li><b>Build the plot kinds</b> listed below, and shift the ratio maps to the baseline, if one is set.</li>
+</ol>
+<p>Derivatives, the energy unit, ranges and colours are applied when a map is shown, so changing them never needs processing again.</p>
+
+<h2 id="plots">The plot kinds</h2>
+<p>Choose them with <b>Plot</b> in the toolbar or with <kbd>Ctrl</kbd>+<kbd>1</kbd> to <kbd>4</kbd>:</p>
+<div class="table-wrap"><table>
+  <thead><tr><th scope="col">Plot</th><th scope="col">Each spectrum is</th></tr></thead>
+  <tbody>
+    <tr><td>R(B)/R(0)</td><td class="wrap-ok">divided by the zero-field spectrum; the usual view of a sweep</td></tr>
+    <tr><td>Data</td><td class="wrap-ok">shown as measured, or divided by the reference when one is used</td></tr>
+    <tr><td>R(B)/R(B-AVR)</td><td class="wrap-ok">divided by the average of all spectra of the sweep, which brings out what changes with the field without a zero-field spectrum</td></tr>
+    <tr><td>R(B)/R(B-ΔB)</td><td class="wrap-ok">R(B)/R(0) divided by the one at the previous field step, so only the change from one field to the next remains; it needs at least two fields</td></tr>
+  </tbody>
+</table></div>
+
+<h2 id="reference">Reference correction</h2>
+<p>The <b>Reference</b> panel divides out what the sample's spectra share with another measurement:</p>
+<dl class="terms">
+  <dt>None</dt>
+  <dd>The sample ratio is used as measured.</dd>
+  <dt>Separate sweep</dt>
+  <dd>Divides by a second sweep measured the same way, for example of the bare substrate. Load it like the sample: <b>Open reference sweep…</b> (<kbd>Ctrl</kbd>+<kbd>R</kbd>), zero field with <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>R</kbd>, or a drop on the panel. Its fields come from its file names, or from its own custom range when the sample uses one. The reference is interpolated onto the sample's fields (and onto its energies, if they differ) before dividing: the sample's data by the reference's data, and the sample's R(B)/R(0) by the reference's R(B)/R(0).</dd>
+  <dt>The sample</dt>
+  <dd>Divides the sweep by itself, smoothed, to remove slow spectral features while keeping the narrow lines. Use it with smoothing on.</dd>
+</dl>
+<p><b>Smooth the reference</b> applies a Savitzky–Golay filter along energy before dividing. The window (in points, default 11) must be odd and larger than the polynomial order (default 2). The <b>Reference</b> plot tab shows the reference map the sample is divided by, as R(B)/R(0) or as data.</p>
+
+<h2 id="energy-window">Energy window</h2>
+<figure class="shot">
+  <img src="images/processing-light.png" width="1400" height="900" loading="lazy" decoding="async" alt="The Processing panel with the energy window 420 to 3100 cm⁻¹ and the baseline 2650 to 2950 cm⁻¹ switched on; the map shows the baseline region as a shaded band near its top.">
+  <figcaption>The Processing panel. While it is open, the map shows the energy window and the baseline region.</figcaption>
+</figure>
+<p>The <b>Energy window</b> in the Processing panel drops the data outside it, for example the noisy edges of a detector range. Type its ends in the unit shown; an empty end leaves that side open. The window changes the data, so it applies when you process.</p>
+<p>To look at a smaller range without changing the data, use the energy range in <b>inspector › View</b> instead (the panel links to it): it keeps the data and changes only the view. See <a href="viewing.html#ranges">Viewing</a>.</p>
+
+<h2 id="baseline">Baseline</h2>
+<p>With <b>Baseline</b> on, each spectrum of the ratio maps (R(B)/R(0), R(B)/R(B-AVR) and R(B)/R(B-ΔB)) is shifted so that its average over the baseline region is 1. Choose a region without features, where the ratio should be flat. The data map is not shifted.</p>
+
+<h2 id="field-range">Custom field range</h2>
+<p>When the file names hold no field, set <b>Field values › Custom range</b> in the Sample panel: the first field, the step and the last field in tesla. The range must have one field per in-field file; if it does not, Process stops and says how many of each there are. A reference sweep then takes its own custom range, set in the Reference panel.</p>
+
+<h2 id="units">Units in processing</h2>
+<p>The energy window and the baseline are typed in the unit shown in the toolbar, but they are kept in cm⁻¹: switching the unit converts the numbers in the fields and changes nothing in the result.</p>

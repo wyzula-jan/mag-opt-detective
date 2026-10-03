@@ -1,0 +1,114 @@
+<!--
+title: Home
+description: Magneto-Optical Detective is a desktop app for magneto-optical FTIR field sweeps: R(B)/R(0) maps, Landau-level picking, model fitting and journal figures.
+-->
+<section class="wrap hero" aria-labelledby="hero-title">
+  <div class="lut" aria-hidden="true"></div>
+  <p class="eyebrow">Version 5.0 · in development · macOS, Windows, Linux</p>
+  <h1 id="hero-title">From an FTIR field sweep to a journal figure</h1>
+  <p class="lead">Magneto-Optical Detective is a desktop app for magneto-optical spectroscopy. Load a field sweep measured with Bruker OPUS, look at it as R(B)/R(0) maps and stacked spectra, pick the Landau-level transitions, fit a model to them and export the figure at the size the journal asks for.</p>
+  <div class="actions">
+    <a class="btn primary" href="#download"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/><path d="M12 15V3"/></svg>Download</a>
+    <a class="btn" href="getting-started.html">Get started</a>
+  </div>
+  <figure class="shot hero-shot">
+    <picture>
+      <source srcset="images/main-window-dark.png" media="(prefers-color-scheme: dark)">
+      <img src="images/main-window-light.png" width="1400" height="900" alt="The main window. On the left the Sample panel lists 64 field files from 0.25 to 16 T; in the middle an R(B)/R(0) colour map shows a fan of Landau-level transitions with picked points and the dashed curves of a Dirac model; on the right the inspector holds the View, Colour and Models settings.">
+    </picture>
+    <figcaption>The main window: the Sample panel, an R(B)/R(0) map with picked points and a Dirac model, and the inspector. Every screenshot on this site shows a synthetic Landau fan.</figcaption>
+  </figure>
+</section>
+
+<section class="wrap section" aria-labelledby="features-title">
+  <div class="section-head">
+    <h2 id="features-title">What it does</h2>
+    <p>One window for the whole analysis of a sweep, from the raw spectra to the fitted parameters and the printed figure.</p>
+  </div>
+  <ul class="features">
+    <li>
+      <img src="images/processing-light.png" width="1400" height="900" loading="lazy" decoding="async" alt="The Processing panel with an energy window and a baseline region; the baseline region is shaded on the R(B)/R(0) map.">
+      <div class="feature-text">
+        <h3>Maps from a sweep</h3>
+        <p>Drop a folder of OPUS files or OPUS-macro text files. The fields are read from the file names, the zero-field drift is corrected, and Process draws R(B)/R(0), the data, R(B)/R(B-AVR) and R(B)/R(B-ΔB), with 1st and 2nd derivatives along energy or field. <a href="processing.html">Processing</a></p>
+      </div>
+    </li>
+    <li>
+      <img src="images/derivative-dark.png" width="1400" height="900" loading="lazy" decoding="async" alt="The dark appearance: the first field derivative per tesla in meV, drawn with the bipolar colour map and symmetric levels, next to the Colour section with its histogram.">
+      <div class="feature-text">
+        <h3>Live units, clear colours</h3>
+        <p>Switch between cm⁻¹, meV and THz at any time: maps, axes, ranges, picked points, models and exports change at once, without processing again. Seven colour maps, with levels kept per plot. <a href="viewing.html">Viewing</a></p>
+      </div>
+    </li>
+    <li>
+      <img src="images/autopick-light.png" width="1400" height="900" loading="lazy" decoding="async" alt="Auto-pick in Detect mode: a dashed box on the map, the lines found inside it, and the chosen line marked with diamonds; the options strip above the map reads 5 lines found.">
+      <div class="feature-text">
+        <h3>Pick the transitions</h3>
+        <p>Click the map to record a transition energy at a field, or let auto-pick follow a line field by field or find every line in a box. Every edit can be undone. <a href="picking.html">Picking points</a></p>
+      </div>
+    </li>
+    <li>
+      <img src="images/fit-light.png" width="1400" height="900" loading="lazy" decoding="async" alt="A Dirac model fitted to three picked curves: the fitted curves on the map, and the result in the Models section, the Fermi velocity and the half-gap with their errors and chi squared.">
+      <div class="feature-text">
+        <h3>Fit models</h3>
+        <p>Massive Dirac transitions, Zeeman or magnon branches with optional coupling, or your own expression in B. Fit them to the picked curves and read every parameter as value ± σ, with χ². <a href="models.html">Models and fitting</a></p>
+      </div>
+    </li>
+    <li>
+      <img src="images/export-window-light.png" width="1080" height="720" loading="lazy" decoding="async" alt="The journal figure window: a live preview of a Nature single-column figure on the left, and the journal, size, format and content settings on the right.">
+      <div class="feature-text">
+        <h3>Journal figures</h3>
+        <p>Nature, APS or your own sizes in mm, text and lines in pt. PDF, SVG and EPS keep their text editable; PNG and TIFF carry the dpi. The preview follows the main window live. <a href="figures.html">Journal figures</a></p>
+      </div>
+    </li>
+    <li>
+      <img src="images/library-light.png" width="1400" height="900" loading="lazy" decoding="async" alt="The Library panel with two ticked maps, the energy and field limits of the first one, and the Merge by energy, Merge by field and Average buttons.">
+      <div class="feature-text">
+        <h3>Combine measurements</h3>
+        <p>Keep processed maps in the library, then join spectral ranges such as FIR and MIR, join field ranges, or average repeated sweeps. <a href="library.html">Library</a></p>
+      </div>
+    </li>
+  </ul>
+</section>
+
+<section class="wrap section" aria-labelledby="facts-title">
+  <h2 id="facts-title" class="sr-only">Good to know</h2>
+  <ul class="facts">
+    <li><b>Reads OPUS directly</b><span>OPUS binary files (<code>*.0</code>, <code>*.1</code>, …) or the two-column text files of the OPUS export macro.</span></li>
+    <li><b>Plain tables out</b><span>Maps, points and fit results as tab-separated text, with the energy unit in the header.</span></li>
+    <li><b>Remembers your choices</b><span>Units, ranges, colours and the window layout are kept between sessions.</span></li>
+    <li><b>Runs offline</b><span>Everything happens on your computer; the app needs no network connection.</span></li>
+  </ul>
+</section>
+
+<section class="wrap section" id="download" aria-labelledby="download-title">
+  <div class="section-head">
+    <h2 id="download-title">Download</h2>
+    <p>Standalone apps: unpack the archive and start the app. Python is not needed.</p>
+  </div>
+  <div class="note warn">
+    <strong>No release has been published yet.</strong>
+    <p>Version 5.0 is still in development. The buttons work once its first release is out; until then <a href="download.html#source">run the app from source with uv</a>.</p>
+  </div>
+  <ul class="platforms">
+    <li>
+      <h3>macOS</h3>
+      <p class="req">macOS 13 or newer on Apple silicon</p>
+      <a class="btn primary" href="https://github.com/wyzula-jan/mag-opt-detective/releases/latest/download/mag-opt-detective-macos.zip">Download for macOS</a>
+      <span class="file">mag-opt-detective-macos.zip</span>
+    </li>
+    <li>
+      <h3>Windows</h3>
+      <p class="req">Windows 10 or 11, 64-bit</p>
+      <a class="btn primary" href="https://github.com/wyzula-jan/mag-opt-detective/releases/latest/download/mag-opt-detective-windows.zip">Download for Windows</a>
+      <span class="file">mag-opt-detective-windows.zip</span>
+    </li>
+    <li>
+      <h3>Linux</h3>
+      <p class="req">64-bit, glibc 2.39 or newer</p>
+      <a class="btn primary" href="https://github.com/wyzula-jan/mag-opt-detective/releases/latest/download/mag-opt-detective-linux.tar.gz">Download for Linux</a>
+      <span class="file">mag-opt-detective-linux.tar.gz</span>
+    </li>
+  </ul>
+  <p><a href="download.html">System requirements, opening the app the first time, and all releases</a></p>
+</section>

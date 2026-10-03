@@ -1,0 +1,87 @@
+<!--
+title: Download
+description: Download Magneto-Optical Detective for macOS, Windows or Linux, open it the first time, or run it from source with uv.
+-->
+<div class="wrap page">
+<div class="prose">
+<h1>Download</h1>
+<p class="lead">Standalone apps for macOS, Windows and Linux. Unpack the archive and start the app; Python is not needed.</p>
+
+<div class="note warn" id="no-release">
+  <strong>No release has been published yet.</strong>
+  <p>Version 5.0 is still in development. The buttons below download the newest release as soon as the first one is published; until then GitHub answers them with “Not Found”. To use the app now, <a href="#source">run it from source</a>.</p>
+</div>
+</div>
+
+<ul class="platforms">
+  <li>
+    <h2 id="macos-download">macOS</h2>
+    <p class="req">macOS 13 Ventura or newer on Apple silicon (M1 or later).</p>
+    <p>There is no build for Intel Macs: <a href="#source">run it from source</a> there.</p>
+    <a class="btn primary" href="https://github.com/wyzula-jan/mag-opt-detective/releases/latest/download/mag-opt-detective-macos.zip">Download for macOS</a>
+    <span class="file">mag-opt-detective-macos.zip</span>
+  </li>
+  <li>
+    <h2 id="windows-download">Windows</h2>
+    <p class="req">Windows 10 or 11, 64-bit (x86-64).</p>
+    <p>The zip holds a folder with <code>mag-opt-detective.exe</code> and the files it needs.</p>
+    <a class="btn primary" href="https://github.com/wyzula-jan/mag-opt-detective/releases/latest/download/mag-opt-detective-windows.zip">Download for Windows</a>
+    <span class="file">mag-opt-detective-windows.zip</span>
+  </li>
+  <li>
+    <h2 id="linux-download">Linux</h2>
+    <p class="req">64-bit (x86-64) with glibc 2.39 or newer: Ubuntu 24.04, Debian 13, Fedora 40 or newer.</p>
+    <p>The archive holds a folder with the <code>mag-opt-detective</code> program.</p>
+    <a class="btn primary" href="https://github.com/wyzula-jan/mag-opt-detective/releases/latest/download/mag-opt-detective-linux.tar.gz">Download for Linux</a>
+    <span class="file">mag-opt-detective-linux.tar.gz</span>
+  </li>
+</ul>
+<p>Every published release, with its notes and files: <a href="https://github.com/wyzula-jan/mag-opt-detective/releases">all releases on GitHub</a>. What is new in version 5.0: <a href="release-notes.html">release notes</a>.</p>
+
+<div class="prose">
+<h2 id="first-launch">Opening the app the first time</h2>
+<p>The apps are not code-signed, so macOS and Windows ask once whether you trust them.</p>
+
+<h3 id="macos">macOS</h3>
+<ol>
+  <li>Double-click the zip to unpack it and move <b>Magneto-Optical Detective.app</b> to your Applications folder.</li>
+  <li>Right-click (or Control-click) the app, choose <b>Open</b>, and confirm with <b>Open</b>. Later launches work as usual.</li>
+  <li>On macOS 15 and newer that dialog has no Open button. Double-click the app once, then open <b>System Settings › Privacy &amp; Security</b>, scroll to the message about Magneto-Optical Detective and choose <b>Open Anyway</b>.</li>
+</ol>
+<p>If macOS still refuses, or says the app “is damaged”, remove the quarantine flag that the browser put on it, in Terminal:</p>
+<pre><code>xattr -dr com.apple.quarantine "/Applications/Magneto-Optical Detective.app"</code></pre>
+
+<h3 id="windows">Windows</h3>
+<ol>
+  <li>Right-click the zip, choose <b>Extract All…</b>, and keep the extracted <code>mag-opt-detective</code> folder together: the program needs the files next to it.</li>
+  <li>Start <code>mag-opt-detective.exe</code> in that folder.</li>
+  <li>If Microsoft Defender SmartScreen says “Windows protected your PC”, choose <b>More info</b>, then <b>Run anyway</b>.</li>
+</ol>
+
+<h3 id="linux">Linux</h3>
+<pre><code>tar -xzf mag-opt-detective-linux.tar.gz
+./mag-opt-detective/mag-opt-detective</code></pre>
+<p>If it does not start and the terminal mentions the Qt platform plugin “xcb”, install the XCB cursor library (on Ubuntu and Debian: <code>sudo apt install libxcb-cursor0</code>).</p>
+
+<h3 id="good-to-know">Good to know</h3>
+<ul>
+  <li>The first <b>Journal figure…</b> export after installing takes about 20 s while matplotlib builds its font cache. The cache is kept, so later exports start at once (<a href="settings.html#folders">where it is kept</a>).</li>
+  <li>To check an installation from a terminal, start the program with <code>--smoke-test</code>: it processes a small synthetic measurement, saves a figure in every format and exits with 0. On macOS the program is inside the app:
+<pre><code>"/Applications/Magneto-Optical Detective.app/Contents/MacOS/mag-opt-detective" --smoke-test</code></pre></li>
+</ul>
+
+<h2 id="source">Run from source with uv</h2>
+<p>This works on every computer that runs Qt 6, including Intel Macs, and is the way to use version 5.0 before its release. You need <a href="https://git-scm.com">git</a> and <a href="https://docs.astral.sh/uv/">uv</a>; uv downloads a matching Python (3.12 or newer) if you do not have one.</p>
+<pre><code>git clone https://github.com/wyzula-jan/mag-opt-detective.git
+cd mag-opt-detective
+uv sync
+uv run mag-opt-detective</code></pre>
+<p><code>uv run python -m mag_opt_detective</code> starts it too. To update later, run <code>git pull</code> and <code>uv sync</code> in the same folder.</p>
+
+<h3 id="build">Build the app yourself</h3>
+<p>The standalone apps are built with PyInstaller. In a source checkout, without the development tools:</p>
+<pre><code>uv sync --locked --no-default-groups --group bundle
+uv run --no-sync pyinstaller packaging/mag-opt-detective.spec --noconfirm</code></pre>
+<p>The result is in <code>dist/</code>. Run <code>uv sync</code> afterwards to get the development tools back; <a href="https://github.com/wyzula-jan/mag-opt-detective/blob/main/CONTRIBUTING.md">CONTRIBUTING.md</a> has the details.</p>
+</div>
+</div>

@@ -1,0 +1,75 @@
+<!--
+title: Getting started
+description: Load a field sweep, process it, and find your way around the window: toolbar, panels, plots, inspector, status bar and log.
+-->
+<h1>Getting started</h1>
+<p>A session usually runs in one direction: open a sweep, process it, look at the maps, pick the transitions, fit a model and export. This page covers the first two steps and the window.</p>
+
+<!-- toc -->
+
+<h2 id="open">Open a sweep</h2>
+<p>A sweep is one spectrum per magnetic field plus one or two spectra at zero field. Open it with <b>Open sweep…</b> in the toolbar (<kbd>Ctrl</kbd>+<kbd>L</kbd>), or drop the sweep folder or its files on the <b>Sample</b> panel. A drop replaces the files the panel had; files whose first field is 0 T go to the zero-field list, the others to the field list.</p>
+
+<h3 id="file-types">File types</h3>
+<p>The type of each file is detected automatically:</p>
+<div class="table-wrap"><table>
+  <thead><tr><th scope="col">File</th><th scope="col">What is read</th></tr></thead>
+  <tbody>
+    <tr><td>OPUS binary (<code>*.0</code>, <code>*.1</code>, …)</td><td class="wrap-ok">the single-channel sample spectrum (<code>ScSm</code>)</td></tr>
+    <tr><td>Text (<code>*.txt</code>, …)</td><td class="wrap-ok">two columns separated by spaces or tabs, as the OPUS export macro writes them: wavenumber in cm⁻¹, intensity</td></tr>
+  </tbody>
+</table></div>
+
+<h3 id="fields">The field of each file</h3>
+<p>With <b>Field values › From file names</b> (the default) the field is read from the name: <code>_a01p250T</code> means 1.25 T, so <code>Demo_4p2K_Sam1_a01p250T.txt</code> is the spectrum at 1.25 T. The files are sorted by field, and the panel lists each file with its field, shows the part of the names they share, and reports fields that are missing from the steps.</p>
+<p>If the names hold no field, choose <b>Custom range</b> and type the first field, the step and the last field in tesla; the files are then taken in the order of their names.</p>
+
+<h3 id="zero-field">Zero field</h3>
+<p>Load one zero-field spectrum, or two: one measured before and one after the sweep. With two, the zero-field reference is interpolated linearly between the first and the last field point, which corrects a drift during the sweep. The names of a sweep up to 16 T might look like this:</p>
+<pre><code>Demo_4p2K_Sam1_a00p000T_a00p000T.txt    zero field, before the sweep
+Demo_4p2K_Sam1_a00p250T.txt             0.25 T
+Demo_4p2K_Sam1_a00p500T.txt             0.5 T
+…
+Demo_4p2K_Sam1_a16p000T.txt             16 T
+Demo_4p2K_Sam1_a00p000T_a16p000T.txt    zero field, after the sweep up to 16 T</code></pre>
+<p><b>Load sample zero field…</b> (<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>L</kbd>) adds zero-field files by hand. A reference sweep, for example of the bare substrate, goes into the <b>Reference</b> panel the same way (<kbd>Ctrl</kbd>+<kbd>R</kbd> and <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>R</kbd>); see <a href="processing.html#reference">Processing</a>.</p>
+
+<h2 id="process">Process</h2>
+<p>Press <b>Process</b> in the toolbar (<kbd>Ctrl</kbd>+<kbd>Return</kbd>, or <kbd>Ctrl</kbd>+<kbd>F</kbd> as in the old versions). The map of the sweep appears, and the status bar reads <i>Processed</i> with the time.</p>
+<p>Processing settings take effect the next time you process. When one has changed since the last run, a dot appears on the Process button and on the Process rail button, and the status bar says <i>Settings changed · process again</i>. The choices of what to show (plot, derivative, unit, ranges, colours) apply at once and need no processing.</p>
+<div class="note"><strong>On macOS</strong><p>Ctrl is <kbd>⌘</kbd> and Alt is <kbd>⌥</kbd> in every shortcut on this site.</p></div>
+
+<h2 id="window">The window</h2>
+<figure class="shot">
+  <picture>
+    <source srcset="images/main-window-dark.png" media="(prefers-color-scheme: dark)">
+    <img src="images/main-window-light.png" width="1400" height="900" loading="lazy" decoding="async" alt="The main window with its areas: the toolbar along the top, the rail and the Sample panel on the left, the plot tabs and the map in the middle, the inspector on the right and the status bar at the bottom.">
+  </picture>
+  <figcaption>From left to right: the rail with the Sample panel open, the plot area with the map, and the inspector. The toolbar runs along the top, the status bar along the bottom.</figcaption>
+</figure>
+<p>The window is a workbench: every side area slides open and closed, its dividers can be dragged, and the layout is remembered.</p>
+<dl class="terms">
+  <dt>Toolbar</dt>
+  <dd><b>Open sweep…</b> and <b>Process</b>; the <b>Plot</b> (R(B)/R(0), Data, R(B)/R(B-AVR), R(B)/R(B-ΔB)); the <b>Derivative</b> (Off, 1st, 2nd, along d/dE or d/dB, per data point or per unit); the <b>Unit</b> (cm⁻¹, meV, THz); the <b>Export</b> menu; and the appearance button (system, light or dark).</dd>
+  <dt>Rail and panels</dt>
+  <dd>One panel per step: <b>Sample</b>, <b>Reference</b>, <b>Process</b> (the Processing panel), <b>Library</b> and <b>Points</b>. A click on a rail button opens its panel; a second click closes it.</dd>
+  <dt>Plot tabs</dt>
+  <dd><b>Map</b> (the colour map), <b>Stacked</b> (the spectra above one another) and <b>Reference</b> (the map the sample is divided by). The description next to the tabs names what is shown, e.g. <i>R(B)/R(0) · 1st derivative d/dB per T</i>.</dd>
+  <dt>Plot tools</dt>
+  <dd><b>Pan and zoom</b> (<kbd>V</kbd>), <b>Box zoom</b> (<kbd>Z</kbd>), <b>Pick points</b> (<kbd>P</kbd>) and <b>Auto-pick</b> (<kbd>W</kbd>); <b>Fit to data</b> (<kbd>A</kbd>); the switch between classic and slim colour scales; showing or hiding all colour scales and the inspector; and a quick PNG or SVG image of the plot.</dd>
+  <dt>Inspector</dt>
+  <dd>Settings for the plot on screen: <b>View</b> (field, energy and intensity ranges), <b>Colour</b> (colour map and levels), <b>Traces</b> (stacked plot) and <b>Models</b> (map). Its sections follow the plot tab and fold away.</dd>
+  <dt>Status bar</dt>
+  <dd>Whether the map is processed, changed since the last run or a library map; a summary such as <i>64 spectra · B 0.25 – 16 T · E 350 – 3200 cm⁻¹</i>; the field and energy under the cursor; and the <b>Log</b> button, with the number of new errors.</dd>
+  <dt>Log</dt>
+  <dd>A drawer below the plot with what the app did: files loaded, processing, fits, exports and errors.</dd>
+</dl>
+<p>When something cannot be done, a bar above the plot says what failed and why, for example <i>Can't process: …</i>, with a button that opens the panel where it can be fixed. Unexpected errors also go into the log.</p>
+
+<h2 id="next">Next steps</h2>
+<ul>
+  <li><a href="processing.html">Processing</a>: reference correction, energy window and baseline.</li>
+  <li><a href="viewing.html">Viewing</a>: plots, derivatives, units, ranges and colours.</li>
+  <li><a href="picking.html">Picking points</a> and <a href="models.html">Models and fitting</a>.</li>
+  <li><a href="figures.html">Journal figures</a>, and <a href="shortcuts.html">all keyboard shortcuts</a>.</li>
+</ul>

@@ -1,0 +1,71 @@
+<!--
+title: Picking points
+description: Record transition energies by hand on the map or the stacked plot, remove and undo them, and let auto-pick track a line or detect every line in a box.
+-->
+<h1>Picking points</h1>
+<p>Picked points are the transition energies you read off the map: for each curve, such as a Landau-level transition, one energy per field. They are what <a href="models.html">models are fitted to</a>, and they can be exported as a table.</p>
+
+<!-- toc -->
+
+<h2 id="points-panel">The Points panel</h2>
+<figure class="shot">
+  <img src="images/points-dark.png" width="1400" height="900" loading="lazy" decoding="async" alt="The dark appearance with energies in meV: the Points panel lists the curves LL 1, LL 2 and CR as chips and the points of LL 2 in a table; the pick tool is active and the picked points sit on the lines of the map.">
+  <figcaption>Picking in meV, in the dark appearance: the curves as chips, the points of the current curve in the table, and the points on the map.</figcaption>
+</figure>
+<p>The first Process creates a point table with a row for every field of the map. The <b>Points</b> panel shows it:</p>
+<dl class="terms">
+  <dt>Curves</dt>
+  <dd>Each curve is a chip with its colour and number of points. Click a chip to make it the current curve, <b>New</b> to start another one; type in the name field to rename the current curve, and the bin button deletes it.</dd>
+  <dt>Points</dt>
+  <dd>The field and energy of every point of the current curve, in the unit shown, each with a button that removes it.</dd>
+  <dt>Markers on the plots</dt>
+  <dd><b>Current</b> curve only, <b>All</b> curves, or <b>Hidden</b>.</dd>
+  <dt>Start a new table on the next Process</dt>
+  <dd>Off (the default) keeps the picked points when you process again; on starts an empty table for the next sweep.</dd>
+  <dt>Import… / Export…</dt>
+  <dd>Read or save a point table: one column per curve, one row per field (<a href="settings.html#point-tables">format</a>). Import replaces the curves; undo brings them back.</dd>
+</dl>
+
+<h2 id="manual">Picking by hand</h2>
+<p>Turn on the <b>Pick points</b> tool with <kbd>P</kbd>, with the target button in the plot toolbar or with <b>Pick on the map</b> in the Points panel. Then:</p>
+<ul>
+  <li><b>Click</b> the map: the current curve gets a point at the field of the map column under the click, with the energy of the click. A curve has one point per field, so a second click at the same field moves the point.</li>
+  <li><b>Alt-click</b> (<kbd>⌥</kbd>-click on macOS) removes the current curve's point under the cursor, or else its point at that field.</li>
+  <li><kbd>Esc</kbd> stops picking.</li>
+</ul>
+<p>A hint above the plot names the curve you are picking, e.g. <i>Picking LL 2 · on the map · Alt-click to remove · Esc to stop</i>.</p>
+
+<h3 id="stacked">On the stacked plot</h3>
+<p>With the Pick tool on the <b>Stacked</b> tab, click a trace: the point goes to that trace's field, at the energy of the click. Alt-click a trace to remove its point. The points are drawn on the traces, so you can check a pick against the spectrum itself.</p>
+
+<h3 id="undo">Undo and redo</h3>
+<p><kbd>Ctrl</kbd>+<kbd>Z</kbd> undoes and <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd> redoes every change to the points: picks and removals, accepted auto-picks, imports, new, renamed and deleted curves. The <b>Edit</b> menu names the step it would undo.</p>
+
+<h2 id="autopick">Auto-pick</h2>
+<figure class="shot">
+  <img src="images/autopick-light.png" width="1400" height="900" loading="lazy" decoding="async" alt="Auto-pick in Detect mode on the R(B)/R(0) map: the options strip above the map with Track and Detect, Max, Min, Rising and Falling, the window, smoothing and prominence; a dashed box on the map with five lines found in it, and the line that continues LL 2 marked with diamonds.">
+  <figcaption>Detect in a box from 3 to 12 T: five lines found, and the one that continues the curve LL 2 chosen (diamonds). Accept puts its points into LL 2.</figcaption>
+</figure>
+<p>The <b>Auto-pick</b> tool (<kbd>W</kbd>, the wand in the plot toolbar) finds the points of a line for you. It works on the map, on whatever map is shown: plot kind, derivative and unit. A strip of options opens above the map.</p>
+
+<h3 id="track">Track</h3>
+<p>Click a line. Auto-pick finds the feature nearest to the click and follows the line field by field in both directions, predicting each next energy from the last three points. It bridges up to two fields where the line fades, and stops where it is lost for longer.</p>
+
+<h3 id="detect">Detect</h3>
+<p>Drag a box on the map. Every line inside it is found and drawn as a thin line. The line that continues the current curve's points is chosen, or else the longest one; it carries diamonds. Click another line to choose it instead. Panning still works with the middle mouse button, and zooming with the wheel.</p>
+
+<h3 id="options">Options</h3>
+<dl class="terms">
+  <dt>Feature</dt>
+  <dd><b>Max</b> (peaks), <b>Min</b> (dips, e.g. absorption lines in R(B)/R(0)), <b>Rising</b> or <b>Falling</b> (inflection points, where the values grow or drop fastest with energy).</dd>
+  <dt>Window</dt>
+  <dd>How far from the prediction (or from the click) a feature may be, in the unit shown. Empty means automatic: 2 % of the energy range, shown in the field.</dd>
+  <dt>Smooth</dt>
+  <dd>Off, or a Savitzky–Golay filter over 5, 9 or 15 points before searching, for noisy spectra.</dd>
+  <dt>Prominence</dt>
+  <dd>How much a feature must stand out to count. Empty means automatic, from the noise of the searched spectra; the value used is shown in the field. Raise it if noise is picked, lower it if a weak line is missed.</dd>
+</dl>
+<p>Changing an option searches again at once, from the same click or box. The status line says what was found, e.g. <i>5 lines found: 31 points for LL 2 on the one with diamonds</i>, or why nothing was found and what to change.</p>
+
+<h3 id="accept">Accept or discard</h3>
+<p>What auto-pick finds is only a preview until you press <b>Accept</b>: then the points go into the current curve, replacing its points at the same fields and keeping the others, as one undo step. <b>Discard</b>, <kbd>Esc</kbd>, another tool or another tab drop the preview. A unit switch converts the preview without searching again.</p>

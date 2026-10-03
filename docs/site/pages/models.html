@@ -1,0 +1,71 @@
+<!--
+title: Models and fitting
+description: Draw massive Dirac, Zeeman or magnon and custom E(B) models over the map, and fit them to the picked points with errors and chi squared.
+-->
+<h1>Models and fitting</h1>
+<p>A model gives transition energies E(B) as curves over the map. Draw one to compare it with the data by eye, then fit its parameters to the picked curves.</p>
+
+<!-- toc -->
+
+<h2 id="models">Adding a model</h2>
+<figure class="shot">
+  <img src="images/models-light.png" width="1400" height="900" loading="lazy" decoding="async" alt="The Models section of the inspector with a Massive Dirac card: sliders and fields for the Fermi velocity, the half-gap and the number of transitions, and the formula; its dashed curves follow the picked points on the map.">
+  <figcaption>A massive Dirac model in the Models section; its dashed curves follow the picked transitions.</figcaption>
+</figure>
+<p>Models live in <b>inspector › Models</b>, on the Map tab. <b>Add model…</b> offers three kinds. Each model is a card with a colour, its name, a switch that shows or hides its curves, and a button that removes it. Visible models are drawn dashed in their colour, in the unit shown, and they go into <a href="figures.html">journal figures</a>.</p>
+
+<h3 id="dirac">Massive Dirac</h3>
+<p>Interband transitions L<sub>−n</sub> → L<sub>n+1</sub> of a massive Dirac band:</p>
+<pre><code>E = √(2eħv²Bn + Δ²) + √(2eħv²B(n+1) + Δ²),   n = 0 … N-1</code></pre>
+<p>Set the Fermi velocity <i>v</i> (in 10⁵ m/s), the half-gap <i>Δ</i> (in the unit shown) and the number of transitions shown, <i>N</i>, with the sliders or by typing.</p>
+
+<h3 id="zeeman">Zeeman / magnon</h3>
+<p>A table of branches, each with a label, its energy at zero field <i>E<sub>0</sub></i>, a g-factor <i>g</i>, a multiplier <i>m</i> (e.g. +1 or −1; 0 gives a field-independent line, whose g is then held fixed) and a form:</p>
+<ul>
+  <li><b>lin</b>: E = E<sub>0</sub> + m g μ<sub>B</sub> B</li>
+  <li><b>hyp</b>: E = √(E<sub>0</sub>² + (m g μ<sub>B</sub> B)²)</li>
+</ul>
+<p><b>Add branch</b> adds a row. With <b>Coupled</b> on, every pair of branches has a coupling Δ<sub>ij</sub>, and the energies are the eigenvalues of diag(E<sub>i</sub>) + Δ: where two branches would cross, they repel and anticross. Switching coupling off sets every Δ<sub>ij</sub> to 0 for the time being; switching it on again brings your values back.</p>
+
+<h3 id="custom">Custom expression</h3>
+<p>Write the energies yourself, one branch per line, as an expression in the field <code>B</code> (in tesla). A <code>#</code> starts the branch's label. Every name that is not <code>B</code>, a constant or a function is a parameter, shared between the lines. For example, two spin-split branches and a cyclotron resonance:</p>
+<pre><code>E0 + g*muB*B                  # spin up
+E0 - g*muB*B                  # spin down
+hbar*e*B/(m*9.1093837e-31)    # CR, m in electron masses</code></pre>
+<p>The expression is checked as you type, and an error names its line and column. Choose the <b>output unit</b> of the energies (meV, cm⁻¹ or THz). The parameters below the editor each have a value, a <b>fixed</b> tick that holds them in fits, and optional limits.</p>
+<p>The constants with an energy in them are given in the output unit, so a g-factor means the same in every unit:</p>
+<div class="table-wrap"><table>
+  <thead><tr><th scope="col">Name</th><th scope="col">Meaning</th><th scope="col">In meV</th><th scope="col">In cm⁻¹</th><th scope="col">In THz</th></tr></thead>
+  <tbody>
+    <tr><td><code>muB</code></td><td>Bohr magneton, per T</td><td>0.057884</td><td>0.46687</td><td>0.013996</td></tr>
+    <tr><td><code>hbar</code></td><td>reduced Planck constant, times s</td><td>6.5821 × 10⁻¹³</td><td>5.3089 × 10⁻¹²</td><td>1.5916 × 10⁻¹³</td></tr>
+    <tr><td><code>kB</code></td><td>Boltzmann constant, per K</td><td>0.086173</td><td>0.69504</td><td>0.020837</td></tr>
+    <tr><td><code>e</code></td><td>elementary charge</td><td colspan="3">1.602177 × 10⁻¹⁹ C</td></tr>
+    <tr><td><code>c</code></td><td>speed of light</td><td colspan="3">299 792 458 m/s</td></tr>
+    <tr><td><code>pi</code></td><td>π</td><td colspan="3">3.14159…</td></tr>
+  </tbody>
+</table></div>
+<p>Functions: <code>sqrt</code>, <code>exp</code>, <code>log</code>, <code>log10</code>, <code>sin</code>, <code>cos</code>, <code>tan</code>, <code>arcsin</code>, <code>arccos</code>, <code>arctan</code>, <code>arctan2</code>, <code>sinh</code>, <code>cosh</code>, <code>tanh</code>, <code>abs</code>, <code>sign</code>, <code>minimum</code>, <code>maximum</code> and <code>hypot</code>. Arithmetic is <code>+ - * / **</code> with parentheses; nothing else of Python is allowed, so an expression cannot do anything but compute.</p>
+
+<h2 id="units">Units of the parameters</h2>
+<p>The energy parameters of the built-in models (Δ, E<sub>0</sub> and Δ<sub>ij</sub>) are shown and typed in the unit shown, and convert when you switch it. A custom expression keeps its parameters in its own output unit; only its curves are converted for the plot.</p>
+
+<h2 id="fitting">Fitting to the picked points</h2>
+<figure class="shot">
+  <img src="images/fit-light.png" width="1400" height="900" loading="lazy" decoding="async" alt="The Dirac card with its fit area open: the assignment By branch, the curves LL 1, LL 2 and CR each assigned a transition, and the result: v = 5.4013 ± 0.0049 × 10⁵ m/s and Δ = 96.39 ± 0.97 cm⁻¹ with χ², reduced χ², 35 degrees of freedom and 37 points. The fitted curves run through the points on the map.">
+  <figcaption>A Dirac model fitted to three picked curves. The fit started from v = 5 and Δ = 9 meV; the result is shown as value ± σ, and the fitted curves are drawn over the map until you apply or discard them.</figcaption>
+</figure>
+<p><b>Fit to points…</b> on a model card opens its fit area:</p>
+<ol class="steps">
+  <li><b>Choose how the points are assigned.</b>
+    <ul>
+      <li><b>By branch</b>: each picked curve is fitted to the branch you choose for it (by default the first curve to the first branch, and so on).</li>
+      <li><b>Sorted</b>: you choose the lowest, 2nd lowest, … model energy at each field, which suits coupled branches whose order matters more than their names.</li>
+      <li><b>Nearest</b>: each point is fitted to the branch nearest to it.</li>
+    </ul>
+    <b>Skip</b> leaves a curve out of the fit.</li>
+  <li><b>Fit.</b> The free parameters are fitted by least squares; fixed ones keep their values. A long fit can be cancelled.</li>
+  <li><b>Read the result</b>: every parameter as value ± σ (from the fit's Jacobian), χ² and reduced χ² in the unit shown squared, the degrees of freedom and the number of points. The fitted curves are drawn as a preview.</li>
+  <li><b>Apply</b> writes the fitted values into the model, <b>Discard</b> drops them. <b>Copy</b> puts the results on the clipboard as a table, <b>Export…</b> saves them as a TSV file (<a href="settings.html#fit-results">format</a>).</li>
+</ol>
+<p>Changing what the model is (its branches, its expression or the expression's unit) drops a result that has not been applied, because its numbers would no longer mean the same.</p>

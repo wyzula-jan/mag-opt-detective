@@ -1,0 +1,84 @@
+<!--
+title: Journal figures
+description: Export the map or the stacked plot at print size with the Nature, APS or custom presets, as PDF, SVG, EPS, PNG or TIFF, and what the warnings mean.
+-->
+<h1>Journal figures</h1>
+<p><b>Export › Journal figure…</b> (<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>E</kbd>) opens a window that draws the plot as a figure for print: at its exact size in millimetres, with text and lines in points, in the formats journals ask for.</p>
+
+<!-- toc -->
+
+<h2 id="window">The figure window</h2>
+<figure class="shot">
+  <img src="images/export-window-light.png" width="1080" height="720" loading="lazy" decoding="async" alt="The journal figure window: on the left a preview of the map as a Nature single-column figure on white paper with its print size below it; on the right the settings for journal, width, height, text, lines, format, resolution, view, colour bar, model curves, picked points, panel label and axis labels, with Save at the bottom.">
+  <figcaption>A Nature single-column figure of the map, with its colour bar, model curves and picked points.</figcaption>
+</figure>
+<p>The preview on the left shows the figure on white paper at its true aspect ratio, with the print size under it, e.g. <i>89 × 70 mm · PDF</i>. The window stays open next to the main window and follows it live: the unit, the plot, the ranges, the colour map and levels, the picked points and the models. Change the view in the main window and the figure changes with it.</p>
+
+<h2 id="settings">Settings</h2>
+<dl class="terms">
+  <dt>Journal</dt>
+  <dd><b>Nature</b>, <b>APS</b> or <b>Custom</b> (see <a href="#presets">the presets</a>). The notes under it sum up the journal's rules; their sources are in the tooltip.</dd>
+  <dt>Width and height</dt>
+  <dd>The journal's column widths, or any width in mm with Custom; the height in mm.</dd>
+  <dt>Text and lines</dt>
+  <dd>The text size and the line width in pt.</dd>
+  <dt>Format</dt>
+  <dd>PDF, SVG, EPS, PNG or TIFF, and the resolution in dpi. For PNG and TIFF it sets the pixel size, which is shown; in PDF, SVG and EPS it is the resolution of the map image inside the file.</dd>
+  <dt>View</dt>
+  <dd><b>Map</b> or <b>Stacked</b>, by default the tab on screen.</dd>
+  <dt>Colour bar</dt>
+  <dd>On or off, with an optional label (e.g. ΔT/T). On a stacked figure it is offered when the traces are coloured by field.</dd>
+  <dt>Model curves</dt>
+  <dd>The visible models, dashed.</dd>
+  <dt>Picked points</dt>
+  <dd>On or off, for the <b>current curve</b> or <b>all curves</b>; it starts from the markers shown in the main window.</dd>
+  <dt>Panel label</dt>
+  <dd>None, or a to f, in the journal's style: a bold <b>a</b> for Nature, <b>(a)</b> for APS and Custom.</dd>
+  <dt>Axis labels</dt>
+  <dd>Empty fields use the automatic labels, such as <i>Energy (meV)</i>; type your own, or a single space for no label.</dd>
+</dl>
+<p><b>Save…</b> asks where to save, with a name made from the sweep, the plot and the preset, such as <code>…_Ratio_nature-single.pdf</code>. The window remembers the journal, the sizes, the format, the resolution, the colour bar and the panel label for the next time.</p>
+
+<h2 id="presets">The presets</h2>
+<div class="table-wrap"><table>
+  <thead><tr><th scope="col"></th><th scope="col">Nature</th><th scope="col">APS (Physical Review)</th><th scope="col">Custom</th></tr></thead>
+  <tbody>
+    <tr><td>Widths</td><td class="wrap-ok">89 mm single, 120 or 136 mm for 1.5 columns, 183 mm double</td><td class="wrap-ok">86 mm single (8.6 cm), 178 mm double (17.8 cm)</td><td class="wrap-ok">free (starts at 120 mm)</td></tr>
+    <tr><td>Height</td><td class="wrap-ok">70 mm to start, at most 247 mm</td><td class="wrap-ok">65 mm to start</td><td class="wrap-ok">free (starts at 90 mm)</td></tr>
+    <tr><td>Text</td><td class="wrap-ok">5 – 7 pt (7 pt), Helvetica or Arial</td><td class="wrap-ok">8 – 12 pt (8 pt), at least 2 mm high</td><td class="wrap-ok">4 – 24 pt (8 pt)</td></tr>
+    <tr><td>Panel labels</td><td class="wrap-ok">8 pt bold lowercase: <b>a</b></td><td class="wrap-ok"><b>(a)</b></td><td class="wrap-ok"><b>(a)</b></td></tr>
+    <tr><td>Lines</td><td class="wrap-ok">0.25 – 1 pt (0.5 pt)</td><td class="wrap-ok">at least 0.5 pt (0.75 pt)</td><td class="wrap-ok">at least 0.25 pt (0.75 pt)</td></tr>
+    <tr><td>Images</td><td class="wrap-ok">300 – 600 dpi (450 dpi)</td><td class="wrap-ok">600 – 1200 dpi (600 dpi)</td><td class="wrap-ok">72 – 1200 dpi (600 dpi)</td></tr>
+    <tr><td>Formats</td><td class="wrap-ok">PDF or EPS; TIFF or PNG for images</td><td class="wrap-ok">EPS or PS preferred, PDF and PNG accepted</td><td class="wrap-ok">any</td></tr>
+  </tbody>
+</table></div>
+<p>The APS style guide gives the single column as 8.5 cm and the style basics as 8.6 cm, and the 17.8 cm of two columns is not confirmed by an official APS page, so check the journal's current rules before you submit. APS figures must also stay readable in grayscale.</p>
+
+<h2 id="files">What the files contain</h2>
+<ul>
+  <li>Every format has the exact print size.</li>
+  <li>PDF and EPS embed the fonts as TrueType and SVG keeps text as text, so labels stay editable in Illustrator, Inkscape or Affinity.</li>
+  <li>PNG and TIFF store their resolution, so they open at the right size.</li>
+  <li>The text uses Arial, else Helvetica, else DejaVu Sans; the log says when a font is missing.</li>
+  <li>Areas without data are white.</li>
+</ul>
+
+<h2 id="warnings">What the warnings mean</h2>
+<p>The window never opens a dialog box: it lists its messages at its foot, next to Save. Warnings, in amber, tell you that a value was adjusted to the journal's rules or does not follow them; the figure can still be saved:</p>
+<div class="table-wrap"><table>
+  <thead><tr><th scope="col">Message, for example</th><th scope="col">Meaning</th></tr></thead>
+  <tbody>
+    <tr><td class="wrap-ok"><i>Nature: height is at most 247 mm; using 247 mm.</i></td><td class="wrap-ok">The height was above the journal's maximum and is drawn at the maximum.</td></tr>
+    <tr><td class="wrap-ok"><i>Nature: text is 5–7 pt; using 7 pt.</i></td><td class="wrap-ok">The text size was outside the journal's range and is drawn at the nearest allowed size.</td></tr>
+    <tr><td class="wrap-ok"><i>APS (Physical Review): images need at least 600 dpi; using 600 dpi.</i></td><td class="wrap-ok">The resolution was raised to the journal's minimum.</td></tr>
+    <tr><td class="wrap-ok"><i>Nature: lines should be at most 1 pt, not 1.5 pt.</i></td><td class="wrap-ok">A value outside the journal's rules that is drawn as typed.</td></tr>
+    <tr><td class="wrap-ok"><i>Nature asks for PDF, EPS, TIFF or PNG files.</i></td><td class="wrap-ok">The chosen format is not one the journal asks for; it is saved anyway.</td></tr>
+  </tbody>
+</table></div>
+<p>Errors, in red, mark the field and disable Save until it is fixed: an empty field, or a value outside what can be drawn at all (sizes 5 – 1000 mm, text 1 – 72 pt, lines 0.05 – 10 pt, resolution 50 – 2400 dpi, at most 120 million pixels).</p>
+
+<h2 id="first-export">The first export</h2>
+<p>In the standalone app, the first figure after installing takes about 20 s: matplotlib, which draws the figures, builds its font cache once. The cache is kept for later sessions (<a href="settings.html#folders">where</a>).</p>
+
+<h2 id="quick">Quick images</h2>
+<p>For a look rather than for print, <b>Export › Quick image (PNG/SVG)…</b>, or the image button in the plot toolbar, saves the plot as it is on screen, with its colour scale.</p>

@@ -1,0 +1,47 @@
+<!--
+title: About
+description: Who makes Magneto-Optical Detective, the licences of the software it is built on, and where to find the source, report issues and contribute.
+-->
+<div class="wrap page">
+<div class="prose">
+<h1>About</h1>
+<p class="lead">Magneto-Optical Detective is a desktop app to plot, pick, fit and export magneto-optical FTIR measurements: field sweeps recorded with Bruker OPUS.</p>
+
+<h2 id="authors">Author</h2>
+<p>Jan Wyzula. Versions up to 4.9 were PyQt5 scripts; version 5 rewrites them as an app.</p>
+
+<h2 id="licence">Licence</h2>
+<div class="note">
+  <strong>Licence to be announced.</strong>
+  <p>The licence of Magneto-Optical Detective itself has not been decided yet. It will be stated here and in the repository once it is.</p>
+</div>
+
+<h2 id="third-party">Third-party software</h2>
+<p>The app is built on these projects, under their own licences:</p>
+<div class="table-wrap"><table>
+  <thead><tr><th scope="col">Project</th><th scope="col">Licence</th></tr></thead>
+  <tbody>
+    <tr><td><a href="https://www.qt.io">Qt</a> and <a href="https://pyside.org">PySide6</a></td><td class="wrap-ok">GNU LGPL v3</td></tr>
+    <tr><td><a href="https://numpy.org">NumPy</a></td><td class="wrap-ok">BSD 3-Clause (with parts under other permissive licences)</td></tr>
+    <tr><td><a href="https://scipy.org">SciPy</a></td><td class="wrap-ok">BSD 3-Clause</td></tr>
+    <tr><td><a href="https://matplotlib.org">Matplotlib</a></td><td class="wrap-ok">Matplotlib licence (based on the PSF licence)</td></tr>
+    <tr><td><a href="https://www.pyqtgraph.org">pyqtgraph</a></td><td class="wrap-ok">MIT</td></tr>
+    <tr><td><a href="https://python-pillow.org">Pillow</a></td><td class="wrap-ok">MIT-CMU</td></tr>
+    <tr><td><a href="https://lucide.dev">Lucide</a> icons</td><td class="wrap-ok">ISC, parts MIT</td></tr>
+  </tbody>
+</table></div>
+<p>The standalone apps contain the full text of every licence, including Python's and those of the libraries these projects use, in <code>THIRD_PARTY_NOTICES.txt</code>; <b>Help › About › Licences…</b> in the app shows it. The Qt and PySide6 libraries in the apps are the unmodified ones from the PySide6 wheels, as separate shared libraries that can be replaced. The fonts of this site are IBM Plex, under the SIL Open Font License, served by Google Fonts.</p>
+
+<h2 id="links">Source, issues and contributing</h2>
+<ul>
+  <li><a href="https://github.com/wyzula-jan/mag-opt-detective">Source code on GitHub</a></li>
+  <li><a href="https://github.com/wyzula-jan/mag-opt-detective/issues">Report a problem or ask for a feature</a> in the issue tracker</li>
+  <li><a href="https://github.com/wyzula-jan/mag-opt-detective/blob/main/CONTRIBUTING.md">CONTRIBUTING.md</a>: setting up, the checks, the architecture and the commit conventions</li>
+  <li><a href="https://github.com/wyzula-jan/mag-opt-detective/releases">Releases</a> and the <a href="release-notes.html">release notes</a></li>
+</ul>
+<p>When you report a problem, please give the app's version (<b>Help › About</b>), your system, and what the log says (the <b>Log</b> button in the status bar). Never attach measurement data you cannot share; a few lines of a file usually show the problem.</p>
+
+<h2 id="screenshots">About the screenshots</h2>
+<p>Every screenshot on this site shows a made-up Landau fan, not a measurement. They are drawn by the app itself from synthetic files by <code>docs/make_screenshots.py</code> in the repository.</p>
+</div>
+</div>
