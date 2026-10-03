@@ -6,6 +6,7 @@ gives a map in the unit that is shown or exported.
 
 from __future__ import annotations
 
+import dataclasses
 from dataclasses import dataclass
 from enum import Enum, StrEnum
 
@@ -42,7 +43,12 @@ class ProcessOptions:
 
 @dataclass(frozen=True, eq=False)
 class ProcessResult:
-    """The processed maps, all with the energy axis in cm^-1."""
+    """The processed maps, all with the energy axis in cm^-1.
+
+    The baseline normalisation of *baseline_region* is applied to R(B)/R(0), R(B)/R(B-average)
+    and R(B)/R(B-dB), never to Data or the reference maps. *before_baseline* keeps the result
+    without it, so :meth:`with_baseline` can apply another region without processing again.
+    """
 
     data: FieldMap
     ratio: FieldMap
@@ -50,6 +56,8 @@ class ProcessResult:
     step: FieldMap | None = None  # None when there is only one field value
     reference_data: FieldMap | None = None
     reference_ratio: FieldMap | None = None
+    baseline_region: tuple[float, float] | None = None  # in cm^-1; None: not normalised
+    before_baseline: ProcessResult | None = None  # the same without the baseline, if applied
 
     def base(self, kind: PlotKind) -> FieldMap:
         kind = PlotKind(kind)
@@ -83,6 +91,28 @@ class ProcessResult:
             fmap = proc.derivative(fmap, axis, physical=physical)
         return fmap
 
+    def with_baseline(self, region: tuple[float, float] | None) -> ProcessResult:
+        """This result with the baseline normalisation of *region* (cm^-1; None: none)
+        instead of the one applied. Only the normalisation is computed (a shift per spectrum),
+        from the maps before it, so the result is the same as processing again with *region*.
+        """
+        base = self.before_baseline or self
+        if base.baseline_region is not None:
+            raise ValueError("this result does not keep its maps before the baseline")
+        if region is None:
+            return base
+        region = (float(region[0]), float(region[1]))
+        ratio = proc.baseline_normalize(base.ratio, region)
+        average = ratio if base.average is base.ratio else _baseline(base.average, region)
+        return dataclasses.replace(
+            base,
+            ratio=ratio,
+            average=average,
+            step=_baseline(base.step, region),
+            baseline_region=region,
+            before_baseline=base,
+        )
+
     @classmethod
     def from_map(
         cls, fmap: FieldMap, baseline_region: tuple[float, float] | None = None
@@ -94,9 +124,8 @@ class ProcessResult:
         to cm^-1 (if needed), the unit of *baseline_region*.
         """
         fmap = _field_sorted(fmap.to_unit(Unit.CM1))
-        corrected = _baseline(fmap, baseline_region)
-        step = _baseline(_step_or_none(fmap), baseline_region)
-        return cls(data=fmap, ratio=corrected, average=corrected, step=step)
+        result = cls(data=fmap, ratio=fmap, average=fmap, step=_step_or_none(fmap))
+        return result.with_baseline(baseline_region)
 
 
 def _field_sorted(fmap: FieldMap) -> FieldMap:
@@ -157,16 +186,12 @@ def process(
         data = proc.divide(data, ref_data)
         ratio = proc.divide(ratio, ref_ratio)
 
-    average = proc.ratio_to_average(data)
-    step = _step_or_none(ratio)
-    region = options.baseline_region
-    ratio, average, step = (_baseline(m, region) for m in (ratio, average, step))
-
-    return ProcessResult(
+    result = ProcessResult(
         data=data,
         ratio=ratio,
-        average=average,
-        step=step,
+        average=proc.ratio_to_average(data),
+        step=_step_or_none(ratio),
         reference_data=ref_data,
         reference_ratio=ref_ratio,
     )
+    return result.with_baseline(options.baseline_region)

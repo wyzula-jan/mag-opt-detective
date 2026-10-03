@@ -1,3 +1,6 @@
+import dataclasses
+import itertools
+
 import numpy as np
 import pytest
 
@@ -300,6 +303,45 @@ def test_process_step_ratio(sweep):
     with pytest.raises(ValueError, match="two field"):
         ProcessResult.from_map(single).get(PlotKind.STEP)
     np.testing.assert_allclose(ProcessResult.from_map(make_map()).step.field, [2.0, 3.0])
+
+
+@pytest.mark.parametrize("mode", [ReferenceMode.NONE, ReferenceMode.SELF])
+def test_with_baseline_equals_processing_again(tmp_path, mode):
+    """Another region applied to a result gives exactly the maps of processing with it."""
+    sample = load_measurement(*golden.write_sweep(tmp_path))
+    options = ProcessOptions(reference_mode=mode, smooth_reference=True, sg_window=5)
+    first = process(sample, options=dataclasses.replace(options, baseline_region=(450, 550)))
+    region = (900.0, 1100.0)
+    again = first.with_baseline(region)
+    fresh = process(sample, options=dataclasses.replace(options, baseline_region=region))
+    assert again.baseline_region == region and again.before_baseline is first.before_baseline
+    for kind, order in itertools.product(PlotKind, (0, 1)):
+        np.testing.assert_array_equal(again.get(kind, order).values, fresh.get(kind, order).values)
+    assert again.data is first.data  # never normalised, as the reference maps
+    assert again.reference_ratio is first.reference_ratio
+    mask = (again.ratio.energy >= 900) & (again.ratio.energy <= 1100)
+    np.testing.assert_allclose(again.ratio.values[mask].mean(axis=0), 1.0)
+
+    plain = process(sample, options=options)
+    off = again.with_baseline(None)
+    assert off is first.before_baseline and off.baseline_region is None
+    np.testing.assert_array_equal(off.ratio.values, plain.ratio.values)
+    np.testing.assert_array_equal(off.step.values, plain.step.values)
+    assert plain.with_baseline(None) is plain
+    np.testing.assert_array_equal(plain.with_baseline(region).average.values, fresh.average.values)
+    with pytest.raises(ValueError, match="contains no data"):
+        first.with_baseline((2000, 3000))
+
+
+def test_with_baseline_needs_the_maps_before_it():
+    fmap = make_map()
+    res = ProcessResult.from_map(fmap, baseline_region=(0, 2))
+    assert res.baseline_region == (0.0, 2.0) and res.before_baseline.ratio is fmap
+    assert res.ratio is res.average  # normalised once for both
+    np.testing.assert_allclose(res.with_baseline((8, 10)).ratio.values[-3:].mean(axis=0), 1.0)
+    bare = ProcessResult(data=fmap, ratio=res.ratio, average=res.ratio, baseline_region=(0, 2))
+    with pytest.raises(ValueError, match="before the baseline"):
+        bare.with_baseline((8, 10))
 
 
 @pytest.fixture(scope="module")
