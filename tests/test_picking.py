@@ -386,12 +386,24 @@ def test_auto_prominence_sits_between_noise_and_lines():
     assert [len(t) for t in rising] == [FIELD.size] * 2
 
 
+def test_auto_prominence_follows_the_smoothing():
+    fmap = line_map([sqrt_line], width=3.0, noise=0.03, seed=13)
+    raw = pk.auto_prominence(fmap, "rising")
+    smooth = pk.auto_prominence(fmap, "rising", smooth=(15, 2))
+    assert smooth < raw / 3  # the slope of smoothed spectra is far less noisy
+    options = {"max_jump": 1.5, "max_misses": 1, "history": 3}
+    found = pk.detect(fmap, feature="rising", smooth=(15, 2), prominence=smooth, **options)
+    assert len(found) == 1 and len(found[0]) >= 30
+    rising = sqrt_line(found[0].field) - 3.0 / np.sqrt(3)  # x0 - g/sqrt(3) of a Lorentzian
+    assert np.max(np.abs(found[0].energy - rising)) < 3 * STEP  # smoothing over 15 > the line
+
+
 def test_auto_prominence_of_a_map_without_noise_keeps_weak_lines():
     fmap = line_map([linear])
     weak = line_map([falling_line])
     fmap = fmap.with_values(fmap.values + 0.3 * weak.values)
     auto = pk.auto_prominence(fmap, "max")
-    assert auto == pytest.approx(0.1, rel=0.05)  # a tenth of the strongest line
+    assert 0.0 <= auto < 0.01
     assert len(pk.detect(fmap, feature="max", prominence=auto)) == 2
 
 
@@ -401,5 +413,7 @@ def test_auto_prominence_box_and_empty_cases():
     assert pk.auto_prominence(quiet, "max", e_range=(165.0, None)) == 0.0
     assert pk.auto_prominence(quiet, "max", b_range=(20.0, 30.0)) == 0.0
     boxed = pk.auto_prominence(fmap, "max", b_range=(2.0, 4.0), e_range=(100.0, 125.0))
-    assert 0.0 < boxed < 0.3  # noise only
+    assert boxed == pytest.approx(6 * 0.01, rel=0.2)  # six times the noise
     assert pk.auto_prominence(fmap, "min", columns=4) > 0.0
+    with pytest.raises(ValueError, match="odd"):
+        pk.auto_prominence(fmap, "max", smooth=(8, 2))

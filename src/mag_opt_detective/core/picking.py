@@ -11,6 +11,7 @@ from enum import StrEnum
 from typing import Literal
 
 import numpy as np
+from scipy.ndimage import median_filter
 from scipy.signal import find_peaks, savgol_filter
 
 from mag_opt_detective.core.spectra import FieldMap
@@ -26,12 +27,11 @@ Direction = Literal["both", "up", "down"]
 #: default linking distance of :func:`detect`, in median energy steps
 JUMP_SAMPLES = 3.0
 
-#: :func:`auto_prominence`: extrema at least this dense (one per so many samples) are noise,
-AUTO_SPACING = 50
-#: and the threshold is this many times their median prominence; sparser extrema are
-#: features, and the threshold is this part of the largest prominence
-AUTO_NOISE, AUTO_LARGEST = 4.0, 0.1
-#: columns of the box sampled at most
+#: :func:`auto_prominence`: the threshold in noise spreads (noise rarely reaches it) ...
+AUTO_NOISE = 6.0
+#: ... of the signal minus its running median over so many samples ...
+AUTO_TREND = 51
+#: ... in this many columns of the box at most
 AUTO_COLUMNS = 32
 
 
@@ -298,46 +298,46 @@ def auto_prominence(
     fmap: FieldMap,
     feature: Feature | str,
     *,
+    smooth: Smoothing | None = None,
     b_range: Range | None = None,
     e_range: Range | None = None,
     columns: int = AUTO_COLUMNS,
 ) -> float:
     """A prominence threshold for *feature* above the noise of *fmap* in the box.
 
-    The extrema of the searched signal (the values, or the slope ``dV/dE`` for RISING and
-    FALLING), unsmoothed, are taken from up to *columns* columns of the box *b_range* x
-    *e_range*, sampled evenly. When they are dense (one in :data:`AUTO_SPACING` samples or
-    more), noise makes most of them and the threshold is :data:`AUTO_NOISE` times their median
-    prominence; smoothing lowers the noise below it but keeps lines wider than its window.
-    Sparse extrema are features of a map with little noise: the threshold is then
-    :data:`AUTO_LARGEST` of the largest prominence. 0.0 when the box holds no extremum.
+    The searched signal (the values, or the slope ``dV/dE`` for RISING and FALLING, smoothed
+    as :func:`find_features` smooths it) of up to *columns* columns of the box *b_range* x
+    *e_range*, sampled evenly, minus its running median over :data:`AUTO_TREND` samples, is
+    mostly noise; its robust spread (1.4826 x the median absolute deviation) times
+    :data:`AUTO_NOISE` is the threshold. Smoothing lowers it, lines and slow backgrounds hardly
+    change it, and a map without noise gets a threshold near 0.0 (0.0 for an empty box).
     """
     feature = Feature(feature)
+    _check_smoothing(smooth)
     inside = np.flatnonzero(_inside(fmap.field, b_range))
     if inside.size > columns:
         inside = inside[np.linspace(0, inside.size - 1, columns).round().astype(int)]
-    found: list[np.ndarray] = []
-    samples = 0
+    residuals = []
     for j in inside:
         keep = np.flatnonzero(np.isfinite(fmap.energy) & np.isfinite(fmap.values[:, j]))
         keep = keep[np.argsort(fmap.energy[keep], kind="stable")]
         x, y = fmap.energy[keep], fmap.values[keep, j]
+        if x.size < 3 or np.any(np.diff(x) == 0):
+            continue
+        y = _smooth(y, smooth)
         if e_range is not None:
             cut = _inside(x, e_range)
             x, y = x[cut], y[cut]
-        if x.size < 3 or np.any(np.diff(x) == 0):
+        if x.size < 3:
             continue
-        sign = 1.0 if feature in (Feature.MAX, Feature.RISING) else -1.0
-        signal = sign * (y if feature in (Feature.MAX, Feature.MIN) else np.gradient(y, x))
-        found.append(find_peaks(signal, prominence=0.0)[1]["prominences"])
-        samples += x.size
-    prominences = np.concatenate(found) if found else np.array([])
-    prominences = prominences[np.isfinite(prominences) & (prominences > 0)]
-    if prominences.size == 0:
+        signal = y if feature in (Feature.MAX, Feature.MIN) else np.gradient(y, x)
+        trend = median_filter(signal, size=min(AUTO_TREND, signal.size), mode="nearest")
+        residuals.append(signal - trend)
+    if not residuals:
         return 0.0
-    if prominences.size * AUTO_SPACING >= samples:
-        return float(AUTO_NOISE * np.median(prominences))
-    return float(AUTO_LARGEST * prominences.max())
+    residual = np.concatenate(residuals)
+    spread = 1.4826 * float(np.median(np.abs(residual - np.median(residual))))
+    return AUTO_NOISE * spread
 
 
 class _Open:
