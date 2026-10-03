@@ -4,6 +4,20 @@ All notable changes to Magneto-Optical Detective, newest first. The format is ba
 Changelog, and the versions follow Semantic Versioning. `tools/release.py` writes each section
 from the commit messages when a version is released (see Releases in CONTRIBUTING.md).
 
+## 0.5.0 - 2026-10-04
+
+### Added
+
+- **gui:** update notifications. Once a day, a few seconds after the start, the app asks GitHub whether a newer version is released (one anonymous request, nothing about you or your data; silent when offline). A newer version shows a notice with Download, Release notes and Skip this version, which stays until you close it. Help › Check for updates… asks at once, and Help › Check for updates at startup switches the daily check off. Nothing is ever installed by itself.
+
+### Changed
+
+- **docs:** the screenshots on the documentation site and in the README follow the reader's light or dark appearance.
+
+### Fixed
+
+- **gui:** a window whose building failed now closes without an error.
+
 ## 0.4.0 - 2026-10-03
 
 ### Added
