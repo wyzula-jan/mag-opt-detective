@@ -20,6 +20,12 @@ from mag_opt_detective.export.presets import (
 )
 from mag_opt_detective.export.state import Curve, FigureState, PointSet, StackedOptions
 from mag_opt_detective.export.style import FigureStyle, TickStyle
+from mag_opt_detective.export.user_presets import (
+    PresetError,
+    UserPreset,
+    presets_from_json,
+    presets_to_json,
+)
 
 __all__ = [
     "APS",
@@ -32,11 +38,15 @@ __all__ = [
     "FigureStyle",
     "JournalPreset",
     "PointSet",
+    "PresetError",
     "StackedOptions",
     "TickStyle",
+    "UserPreset",
     "colormap",
     "energy_label",
     "get_preset",
+    "presets_from_json",
+    "presets_to_json",
     "rasterize",
     "render",
     "resolve_font",

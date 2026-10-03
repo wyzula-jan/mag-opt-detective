@@ -1,4 +1,5 @@
 import dataclasses
+import json
 import logging
 import re
 import subprocess
@@ -29,17 +30,22 @@ from mag_opt_detective.export import (
     FigureState,
     FigureStyle,
     PointSet,
+    PresetError,
     StackedOptions,
     TickStyle,
+    UserPreset,
     colormap,
     energy_label,
     get_preset,
+    presets_from_json,
+    presets_to_json,
     rasterize,
     render,
     resolve_font,
     save,
 )
 from mag_opt_detective.export.figure import FIELD_LABEL, INTENSITY_LABEL, figure_rc
+from mag_opt_detective.export.user_presets import FIGURE_FORMATS, stored_presets
 
 MM = 25.4
 
@@ -748,3 +754,90 @@ def test_style_checks_and_round_trip():
     assert FigureStyle.from_dict({}) == FigureStyle()  # missing keys: the defaults
     with pytest.raises(ValueError):
         FigureStyle.from_dict({"ticks": {"direction": 3}})
+
+
+# ---------------------------------------------------------------------- user presets
+def _preset(name="Thesis", **changes) -> UserPreset:
+    values = dict(
+        name=name,
+        journal="aps",
+        width="double",
+        width_mm=None,
+        height_mm=80.0,
+        font_pt=9.0,
+        line_pt=1.0,
+        format="eps",
+        dpi=900.0,
+        colorbar=True,
+        style=FigureStyle("top", TickStyle("in", True, minor=True, minor_intervals=4)),
+        colour_range="fixed",
+    )
+    return UserPreset(**{**values, **changes})
+
+
+def test_user_presets_round_trip_through_json():
+    presets = [
+        _preset(),
+        _preset("Free", journal="custom", width="", width_mm=140.0, colour_range="auto"),
+        _preset("Plain", journal="nature", width="single", style=FigureStyle()),
+    ]
+    text = presets_to_json(presets)
+    data = json.loads(text)
+    assert data["version"] == 1 and len(data["presets"]) == 3
+    assert data["presets"][0]["ticks"]["direction"] == "in"
+    assert presets_from_json(text) == presets
+    assert presets_from_json(text.encode()) == presets
+    assert presets[0].same_settings(_preset("Another name"))
+    assert not presets[0].same_settings(_preset(height_mm=81.0))
+    assert set(FIGURE_FORMATS) == {"pdf", "svg", "eps", "png", "tif"}
+
+
+def test_a_preset_without_some_settings_takes_the_journals():
+    text = json.dumps({"version": 1, "presets": [{"name": " Short   one ", "journal": "nature"}]})
+    (preset,) = presets_from_json(text)
+    assert preset.name == "Short one"
+    assert (preset.width, preset.height_mm, preset.font_pt, preset.dpi) == ("single", 70, 7, 450)
+    assert preset.style == FigureStyle() and preset.colour_range == "window"
+
+
+@pytest.mark.parametrize(
+    ("text", "message"),
+    [
+        ("{not json", "cannot be read"),
+        ("[1, 2]", "no list of presets"),
+        ('{"presets": []}', "no format version"),
+        ('{"version": 2, "presets": []}', "newer version of the app (format 2)"),
+        ('{"version": 1, "presets": [{"journal": "aps"}]}', "needs a name"),
+        ('{"version": 1, "presets": [{"name": "A", "journal": "cell"}]}', "unknown journal"),
+        ('{"version": 1, "presets": [{"name": "A", "journal": "aps", "width": "1.5"}]}', "column"),
+        ('{"version": 1, "presets": [{"name": "A", "journal": "custom"}]}', ""),
+        ('{"version": 1, "presets": [{"name": "A", "journal": "aps", "dpi": -1}]}', "resolution"),
+        ('{"version": 1, "presets": [{"name": "A", "journal": "aps", "format": "bmp"}]}', "format"),
+        ('{"version": 1, "presets": [{"name": "A", "journal": "aps", "ticks": []}]}', "ticks"),
+        (
+            '{"version": 1, "presets": [{"name": "A", "journal": "aps", "colour_range": "x"}]}',
+            "colour range",
+        ),
+        (
+            '{"version": 1, "presets": [{"name": "A", "journal": "aps"}, '
+            '{"name": "a", "journal": "nature"}]}',
+            "used twice",
+        ),
+    ],
+)
+def test_bad_preset_files_are_refused_clearly(text, message):
+    if message == "":  # a Custom preset without width takes the free default width
+        (preset,) = presets_from_json(text)
+        assert preset.width_mm == CUSTOM.default_width_mm
+        return
+    with pytest.raises(PresetError, match=re.escape(message)):
+        presets_from_json(text)
+
+
+def test_stored_presets_skip_the_bad_ones():
+    good = _preset().to_dict()
+    text = json.dumps({"version": 1, "presets": [good, {"name": "Bad", "journal": "x"}, 3]})
+    presets, problems = stored_presets(text)
+    assert [p.name for p in presets] == ["Thesis"] and len(problems) == 2
+    presets, problems = stored_presets("nonsense")
+    assert presets == [] and "cannot be read" in problems[0]
