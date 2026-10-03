@@ -64,8 +64,8 @@ DIRAC_FORMULA = (
     "n\u00a0=\u00a00\u00a0…\u00a0N-1"
 )
 EXPRESSION_HINT = (
-    "One branch per line in B (T); # starts its label. Constants muB, hbar, kB, e, c, pi; "
-    "sqrt, exp, log, tanh, hypot, …"
+    "One branch per line in B (T); # starts its label. muB, hbar and kB are in the output "
+    "unit (muB per T, kB per K); also e, c, pi and sqrt, exp, log, tanh, hypot, …"
 )
 NO_PARAMETERS = "Every other name becomes a parameter, shared between the lines."
 FORMS = {
