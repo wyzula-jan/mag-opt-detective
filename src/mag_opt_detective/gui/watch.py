@@ -21,6 +21,7 @@ watched.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
 import time
@@ -240,7 +241,8 @@ class FolderWatcher(QObject):
         self._arrivals = Arrivals()
         self._accepted: Listing = {}  # files read as spectra, with their signature then
         self._handled: set[str] = set()  # keys of files listed once and still in the folder
-        self._held: set[str] = set()  # complete files held back for their energy axis
+        self._held: dict[str, str] = {}  # complete files held back for their axis: its text
+        self._held_note = ""  # says so while there are any
         self._axis_key: tuple | None = None  # (size, first, last) of the sweep's axis
         self._skips: list[tuple[str, str, str]] = []  # left out, not reported yet
         self._queued: tuple[list[str], list[str], bool] = ([], [], False)  # new, gone, changed
@@ -275,7 +277,11 @@ class FolderWatcher(QObject):
             return None
         files = self.controller.processing.sample_files
         count = len(files.zero) + len(files.field)
-        return WatchStatus(self._folder, count, self._last, self._note, self._level, self._brief)
+        note, level, brief = self._note, self._level, self._brief
+        if self._held_note and level != PROBLEM:
+            n = len(self._held)
+            note, level, brief = self._held_note, WAITING, f"{n} held back (energy axis)"
+        return WatchStatus(self._folder, count, self._last, note, level, brief)
 
     # --- start and stop ---------------------------------------------------------------------
     def start(self, folder: str | Path, replace: bool = False) -> None:
@@ -293,7 +299,7 @@ class FolderWatcher(QObject):
         self._arrivals = Arrivals(SETTLE_S)
         self._accepted = {}
         self._handled = self._listed()
-        self._held, self._axis_key, self._skips = set(), None, []
+        self._held, self._held_note, self._axis_key, self._skips = {}, "", None, []
         self._queued = ([], [], False)
         self._last_end = None
         self._first, self._failing = True, False
@@ -358,26 +364,26 @@ class FolderWatcher(QObject):
         self._handled &= {path_key(p) for p in listing}  # written again: a new file
         listed = self._listed()
         candidates = [p for p in arrivals.complete() if self._accepted.get(p) != listing[p]]
-        axis = None
-        if candidates or self._held:  # held files are tried again when the axis changes
-            axis = self._sweep_axis(listing, listed, set(candidates))
-        new: list[str] = []
-        changed = False
+        read: dict[str, np.ndarray] = {}  # the energy axes of the candidates that read
         for path in candidates:
             try:
-                x, _y = self.controller.read_spectrum(path)
+                read[path] = self.controller.read_spectrum(path)[0]
             except EXPECTED_ERRORS as exc:
                 if arrivals.failed(path):
                     self._skips.append((path, NOT_SPECTRUM, _reason(path, exc)))
-                continue
+        self._held = {p: text for p, text in self._held.items() if p in listing}
+        axis = self._sweep_axis(listing, listed, read) if read or self._held else None
+        new: list[str] = []
+        changed = False
+        for path, x in read.items():
             if axis is not None and not same_axis(x, axis):
-                self._held.add(path)  # perhaps still written (a text file parses half-way)
+                self._held[path] = _axis_text(x)  # perhaps still written (half a text file)
                 if arrivals.failed(path):
                     detail = f"{_axis_text(x)}, the sweep has {_axis_text(axis)}"
                     self._skips.append((path, OTHER_AXIS, detail))
                 continue
             arrivals.passed(path)
-            self._held.discard(path)
+            self._held.pop(path, None)
             known = path in self._accepted
             self._accepted[path] = listing[path]
             if not known:
@@ -388,38 +394,53 @@ class FolderWatcher(QObject):
         gone = [p for p in self._accepted if p not in listing]
         for path in gone:
             del self._accepted[path]
-        self._held &= set(listing)
         gone = [p for p in gone if path_key(p) in listed]
+        self._show_held()
         if new or gone or changed or self._has_queued():
             self._queue(new, gone, changed)
 
-    def _sweep_axis(self, listing: Listing, listed: set[str], candidates: set[str]):
-        """The energy axis most of the sweep's spectra from this folder share (read from the
-        cache), or None before there are any; files held back for another axis are checked
-        again when it changes."""
-        axes: dict[tuple, np.ndarray] = {}
-        counts: Counter = Counter()
-        for path, signature in self._accepted.items():
-            if path in candidates or listing.get(path) != signature:
-                continue
-            if path_key(path) not in listed:
-                continue
-            try:
-                x, _y = self.controller.read_spectrum(path)
-            except EXPECTED_ERRORS:
-                continue
+    def _sweep_axis(self, listing: Listing, listed: set[str], read: dict[str, np.ndarray]):
+        """The energy axis most spectra of the folder share: the listed ones, the complete new
+        ones (*read*: their axes) and those held back for their axis; a tie goes to the listed
+        ones, then to the axis before. None without spectra. Whenever the axis changes, the
+        files held back are checked again."""
+        votes: dict[tuple, list] = {}  # axis key -> [spectra, listed spectra, axis]
+
+        def vote(x: np.ndarray, is_listed: bool) -> None:
             key = (x.size, float(x[0]), float(x[-1])) if x.size else (0,)
-            axes.setdefault(key, x)
-            counts[key] += 1
-        if not counts:
-            return None
-        key = counts.most_common(1)[0][0]
+            entry = votes.setdefault(key, [0, 0, x])
+            entry[0] += 1
+            entry[1] += is_listed
+
+        for path, signature in self._accepted.items():
+            if path not in read and listing.get(path) == signature and path_key(path) in listed:
+                with contextlib.suppress(*EXPECTED_ERRORS):
+                    vote(self.controller.read_spectrum(path)[0], True)
+        for x in read.values():
+            vote(x, False)
+        for path in self._held.keys() - read.keys():  # left out after their checks
+            with contextlib.suppress(*EXPECTED_ERRORS):
+                vote(self.controller.read_spectrum(path)[0], False)
+        key = None
+        if votes:
+            key = max(votes, key=lambda k: (votes[k][0], votes[k][1], k == self._axis_key))
         if key != self._axis_key:
-            if self._axis_key is not None:
-                for path in self._held:
-                    self._arrivals.retry(path)
+            for path in self._held:
+                self._arrivals.retry(path)
             self._axis_key = key
-        return axes[key]
+        return None if key is None else votes[key][2]
+
+    def _show_held(self) -> None:
+        """Say how many complete files are held back for another energy axis (WatchStatus)."""
+        n = len(self._held)
+        note = ""
+        if n:
+            text = Counter(self._held.values()).most_common(1)[0][0]
+            files = "1 new file has" if n == 1 else f"{n} new files have"
+            note = f"{files} another energy axis: {text}"
+        if note != self._held_note:
+            self._held_note = note
+            self.changed.emit()
 
     def _schedule(self) -> None:
         if self._folder is None:

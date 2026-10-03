@@ -525,6 +525,80 @@ def test_held_files_are_tried_again_when_the_sweep_is_complete(window, clock, tm
     assert window.controller.result.ratio.energy.size == X.size
 
 
+FINE = np.linspace(100.0, 1000.0, 181)  # another resolution
+
+
+def fine(folder: Path, name: str, scale: float = 1.0) -> str:
+    """A spectrum on the finer axis FINE."""
+    return str(write_text(folder / name, FINE, scale * (1.0 + 0.5 * np.sin(FINE / 50.0))))
+
+
+def test_new_files_held_back_for_their_axis_are_shown(window, clock, tmp_path):
+    zero(tmp_path, old=True)
+    for b in (0.5, 1.0, 1.5):
+        spectrum(tmp_path, b, old=True)
+    watcher = window.folder_watch
+    watcher.start(tmp_path)
+    for b in (2.0, 2.5):  # the resolution was changed during the sweep
+        fine(tmp_path, sweep_name(b))
+        arrive(window, clock)
+    assert fields(window) == [0.5, 1.0, 1.5]
+    text = "2 new files have another energy axis: 181 points, 100 – 1000 cm⁻¹"
+    assert state_text(window) == f"{text} · 4 files"
+    assert chip(window).text().endswith("· 4 files · 2 held back (energy axis)")
+    os.remove(tmp_path / sweep_name(2.0))
+    os.remove(tmp_path / sweep_name(2.5))
+    watcher.check_now()
+    assert state_text(window).startswith("Watching · 4 files")
+
+
+def test_the_axis_most_files_share_wins(window, clock, tmp_path):
+    watcher = window.folder_watch
+    watcher.start(tmp_path, replace=True)
+    c = window.controller
+    odd = fine(tmp_path, BEFORE)  # the zero field was measured with other settings
+    arrive(window, clock)
+    spectrum(tmp_path, 0.5)
+    arrive(window, clock)
+    for _ in range(watch.MAX_FAILURES):
+        clock.now += 1.0
+        watcher.check_now()
+    assert c_files(window) == []  # one against one: the listed file's axis
+    spectrum(tmp_path, 1.0)
+    arrive(window, clock)
+    clock.now += watch.MIN_GAP_S
+    watcher.check_now()  # the file left out before is tried again with the new axis
+    assert c_files(window) == [sweep_name(0.5), sweep_name(1.0)]
+
+    os.remove(odd)  # without the odd file the sweep needs a zero field like the others
+    zero(tmp_path)
+    arrive(window, clock)
+    clock.now += watch.MIN_GAP_S
+    watcher.check_now()
+    assert fields(window) == [0.5, 1.0]
+    assert [Path(p).name for p in c.processing.sample_files.zero] == [BEFORE]
+
+
+def test_removing_the_odd_file_releases_the_held_ones(window, clock, tmp_path):
+    watcher = window.folder_watch
+    watcher.start(tmp_path, replace=True)
+    odd = fine(tmp_path, BEFORE)
+    arrive(window, clock)
+    spectrum(tmp_path, 0.5)
+    arrive(window, clock)
+    for _ in range(watch.MAX_FAILURES):
+        clock.now += 1.0
+        watcher.check_now()
+    assert c_files(window) == []  # held back, then left out
+    os.remove(odd)
+    clock.now += watch.MIN_GAP_S
+    watcher.check_now()  # the axis changes: the files held back are checked again
+    clock.now += watch.MIN_GAP_S
+    watcher.check_now()
+    assert c_files(window) == [sweep_name(0.5)]
+    assert state_text(window).startswith("Waiting for a zero-field spectrum")
+
+
 def test_a_custom_field_range_waits_for_its_files(window, clock, tmp_path, errors):
     c = window.controller
     c.set_processing(custom_field=True, sample_field=FieldRange(0.5, 0.5, 2.0))
