@@ -1,6 +1,9 @@
 """The Auto-pick tool: Track and Detect on the map, the preview, Accept/Discard, options, units."""
 
+import math
+
 import numpy as np
+import pyqtgraph as pg
 import pytest
 from PySide6.QtCore import QPoint, QPointF, QSettings, Qt
 from PySide6.QtTest import QTest
@@ -253,7 +256,15 @@ def _viewport_pos(window, b: float, energy: float) -> QPoint:
     return plot.view.mapFromScene(scene)
 
 
-def test_a_box_dragged_on_the_map_detects_without_panning(shown):
+def _move_pause_ms() -> int:
+    """How long a drag on the plot scene waits before its move, as a real drag does: pyqtgraph
+    drops a mouse move within 1/mouseRateLimit s of the last one it took, and a press and
+    release without a move is a click."""
+    rate = pg.getConfigOption("mouseRateLimit")
+    return 2 * math.ceil(1000 / rate) if rate > 0 else 0
+
+
+def test_a_box_dragged_on_the_map_detects_without_panning(shown, qtbot):
     w, tool = shown, shown.autopick
     viewport = w.plots.map.view.viewport()
     vb = w.plots.map.plot.vb
@@ -277,6 +288,7 @@ def test_a_box_dragged_on_the_map_detects_without_panning(shown):
     assert tool.chosen == 1 and tool.target.box == ((b0, b1), (e0, e1))
     tool.bar.mode.set_value("track")  # Track leaves left-drags to panning
     QTest.mousePress(viewport, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, start)
+    qtbot.wait(_move_pause_ms())
     QTest.mouseMove(viewport, end)
     QTest.mouseRelease(viewport, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, end)
     assert tool.target is None and vb.viewRange() != before
