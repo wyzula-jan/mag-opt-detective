@@ -125,6 +125,17 @@ def test_range_slider_handles_stay_in_the_extent(qtbot, slider, start, press_at,
     assert slider.values() == pytest.approx((99.0, 100.0))
 
 
+def test_range_slider_groove_press_beside_handles_on_top_of_each_other(qtbot, slider):
+    slider.show()
+    qtbot.waitExposed(slider)
+    y = slider.height() // 2
+    for press, expected in ((70.0, (50.0, 70.0)), (30.0, (30.0, 50.0))):
+        slider.set_values(50.0, 50.0)  # the handle on the side of the press moves there
+        at = QPoint(round(slider.x_for(press)), y)
+        qtbot.mouseClick(slider, Qt.MouseButton.LeftButton, pos=at)
+        assert slider.values() == pytest.approx(expected, abs=1.0)
+
+
 def record(slider) -> tuple[list, list]:
     """The values of every valuesChanged and a list that grows on every editingFinished."""
     moves, finished = [], []

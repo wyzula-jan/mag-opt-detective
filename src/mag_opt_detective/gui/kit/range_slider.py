@@ -233,7 +233,8 @@ class RangeSlider(QWidget):
             self._origin = (self._value_at(x), self._lo, self._hi)
         elif part is None:
             value = self._value_at(x)
-            part = LO if abs(value - self._lo) <= abs(value - self._hi) else HI
+            d_lo, d_hi = abs(value - self._lo), abs(value - self._hi)
+            part = LO if d_lo < d_hi or (d_lo == d_hi and value <= self._lo) else HI
             self._grab = 0.0
             self._active = part
             self._move(part, value)
