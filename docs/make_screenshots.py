@@ -1,19 +1,26 @@
-"""Screenshots of the app for the README and the docs site, drawn offscreen from a synthetic
-measurement.
+"""Screenshots of the app for the README and the docs site, in light and dark.
 
-    python docs/make_screenshots.py              # the README images, into docs/images/
-    python docs/make_screenshots.py --site       # the docs site's images, into docs/site/images/
-    python docs/make_screenshots.py OUT --all    # every scene in light and dark, into OUT
+    python docs/make_screenshots.py                # every image of the site and the README
+    python docs/make_screenshots.py --scene fit    # only some scenes (repeat --scene)
+    python docs/make_screenshots.py OUT --all      # every scene, also the extra ones, into OUT
+
+The scenes are listed in docs/screenshot_list.py. Each is drawn offscreen twice, by the same
+steps in a new window each time, as ``<scene>-light.webp`` and ``<scene>-dark.webp`` in
+docs/site/images/; the README's are copied into docs/images/, so git keeps each picture
+once. The site and the README show the one that matches the reader's appearance
+(``<picture>`` with ``prefers-color-scheme``).
 
 The sweep is a made-up Landau fan (no measurement data), the random numbers are seeded and
-the clock is fixed, so the images change only when the app does. Each image is 1400 × 900
-(the export window: its own size), saved as an optimised RGB PNG (under 400 kB).
+the clock is fixed, so the images change only when the app does. Each image is 1400 × 900,
+the export window 1120 × 720 (the same shape), saved as lossless WebP (pixel for pixel the
+window, 90 to 150 kB).
 """
 
 from __future__ import annotations
 
 import argparse
 import os
+import shutil
 import sys
 import tempfile
 import time
@@ -28,6 +35,7 @@ import numpy as np
 from PIL import Image
 from PySide6.QtCore import QBuffer, QEventLoop, QIODevice, QTimer
 from PySide6.QtWidgets import QApplication, QWidget
+from screenshot_list import EXTRA, README, SCHEMES, SITE, SUFFIX, file_names
 
 from mag_opt_detective.core.models import dirac_interband
 from mag_opt_detective.gui import controller as controller_module
@@ -38,7 +46,8 @@ from mag_opt_detective.gui.theme import Theme
 IMAGES = Path(__file__).resolve().parent / "images"
 SITE_IMAGES = Path(__file__).resolve().parent / "site" / "images"
 SIZE = (1400, 900)
-MAX_BYTES = 400_000
+EXPORT_SIZE = (1120, 720)  # the export window, a little wider than its own: as SIZE, 14 : 9
+MAX_BYTES = 200_000  # as tests/test_site.py
 CM1_PER_MEV = 8.0656
 FIELDS = np.arange(0.25, 16.01, 0.25)
 VELOCITY, GAP = 5.4, 12.0  # 10^5 m/s and meV of the made-up Dirac material
@@ -132,15 +141,20 @@ def step(name: str, action: Callable[[], object]) -> None:
 
 # ---------------------------------------------------------------------- scenes
 def main_window_scene(window: MainWindow) -> QWidget:
+    """The Sample panel, the map with its legend and the inspector."""
     window.show_panel("sample")
+    step("legend", window.plot_area.legend_button.click)
     return window
 
 
 def points_scene(window: MainWindow) -> QWidget:
+    """Picking in meV with slim colour scales: the Colour section shows the histogram, and
+    View is folded so that the Models header is not cut by the bottom of the inspector."""
     step("slim colour scale", lambda: window.plot_area.scale_style_button.setChecked(True))
     step("unit", lambda: window.toolbar.unit.set_value("meV"))
     window.show_panel("points")
     step("pick tool", lambda: window.tools.set_active("pick"))
+    window.inspector["view"].set_expanded(False, animate=False)
     return window
 
 
@@ -190,7 +204,8 @@ def processing_scene(window: MainWindow) -> QWidget:
 
 def derivative_scene(window: MainWindow) -> QWidget:
     """The 1st derivative along the field per tesla in meV, bipolar with symmetric levels,
-    slim colour scales, the side panel closed and the Colour section open."""
+    slim colour scales, the side panel closed and only the Colour section open (as in
+    :func:`points_scene`)."""
     from mag_opt_detective.core.processing import Axis
 
     step("unit", lambda: window.toolbar.unit.set_value("meV"))
@@ -199,7 +214,7 @@ def derivative_scene(window: MainWindow) -> QWidget:
     step("slim colour scale", lambda: window.plot_area.scale_style_button.setChecked(True))
     window.side_panel.set_open(False, animate=False)
     for name, section in window.inspector.items():
-        section.set_expanded(name in ("view", "colour"), animate=False)
+        section.set_expanded(name == "colour", animate=False)
     return window
 
 
@@ -240,43 +255,30 @@ def fit_scene(window: MainWindow) -> QWidget:
 
 
 def export_scene(window: MainWindow) -> QWidget:
+    """The export window, at the shape of the other screenshots."""
     window.commands["export_figure"].trigger()
     dialog = window.export_dialog
+    dialog.resize(*EXPORT_SIZE)
+    settle(QApplication.instance())
     wait(lambda: dialog.preview.image() is not None and dialog.is_idle())
     return dialog
 
 
-# name -> (scene, colour scheme in the README)
-SCENES: dict[str, tuple[Callable[[MainWindow], QWidget], str]] = {
-    "main-window": (main_window_scene, "light"),
-    "points-dark": (points_scene, "dark"),
-    "export-window": (export_scene, "light"),
-}
-# more for the documentation (--all)
-EXTRA_SCENES = {
-    "reference": reference_scene,
-    "stacked": stacked_scene,
-    "library": library_scene,
-    "models": models_scene,
+# name -> scene, in the order of screenshot_list
+SCENES: dict[str, Callable[[MainWindow], QWidget]] = {
+    "main-window": main_window_scene,
+    "points": points_scene,
+    "export-window": export_scene,
     "processing": processing_scene,
+    "stacked": stacked_scene,
     "derivative": derivative_scene,
     "autopick": autopick_scene,
+    "models": models_scene,
     "fit": fit_scene,
+    "library": library_scene,
+    "reference": reference_scene,
 }
-# the docs site's images (--site): file name -> (scene, colour scheme)
-SITE_SHOTS: dict[str, tuple[Callable[[MainWindow], QWidget], str]] = {
-    "main-window-light": (main_window_scene, "light"),
-    "main-window-dark": (main_window_scene, "dark"),
-    "processing-light": (processing_scene, "light"),
-    "stacked-light": (stacked_scene, "light"),
-    "derivative-dark": (derivative_scene, "dark"),
-    "points-dark": (points_scene, "dark"),
-    "autopick-light": (autopick_scene, "light"),
-    "models-light": (models_scene, "light"),
-    "fit-light": (fit_scene, "light"),
-    "library-light": (library_scene, "light"),
-    "export-window-light": (export_scene, "light"),
-}
+assert tuple(SCENES) == SITE + EXTRA, "SCENES and screenshot_list.py name other scenes"
 
 
 def render(app, theme, sweep: SweepFiles, scene, scheme: str, path: Path) -> None:
@@ -292,7 +294,7 @@ def render(app, theme, sweep: SweepFiles, scene, scheme: str, path: Path) -> Non
         step("Dirac model", lambda: show_dirac_model(window))
         widget = scene(window)
         settle(app)
-        save_png(widget, path)
+        save_image(widget, path)
     finally:
         dialog = getattr(window, "export_dialog", None)
         if dialog is not None:
@@ -302,13 +304,13 @@ def render(app, theme, sweep: SweepFiles, scene, scheme: str, path: Path) -> Non
         app.processEvents()
 
 
-def save_png(widget: QWidget, path: Path) -> None:
-    """Grab *widget* and write it as an optimised RGB PNG."""
+def save_image(widget: QWidget, path: Path) -> None:
+    """Grab *widget* and write it as a lossless WebP at the smallest size (slow but exact)."""
     buffer = QBuffer()
     buffer.open(QIODevice.OpenModeFlag.WriteOnly)
     widget.grab().save(buffer, "PNG")
     image = Image.open(BytesIO(bytes(buffer.data()))).convert("RGB")
-    image.save(path, optimize=True)
+    image.save(path, "WEBP", lossless=True, quality=100, method=6)
     size = path.stat().st_size
     note = "" if size <= MAX_BYTES else f" (over {MAX_BYTES // 1000} kB)"
     print(f"{path} {image.width}x{image.height} {size // 1000} kB{note}")
@@ -316,12 +318,17 @@ def save_png(widget: QWidget, path: Path) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("out", nargs="?", type=Path, help="folder (default: see --site)")
+    parser.add_argument("out", nargs="?", type=Path, help="folder (default: the site's)")
     choice = parser.add_mutually_exclusive_group()
-    choice.add_argument("--all", action="store_true", help="every scene, light and dark")
-    choice.add_argument("--site", action="store_true", help="the docs site's images")
+    choice.add_argument("--all", action="store_true", help="every scene, also the extra ones")
+    choice.add_argument(
+        "--scene", action="append", choices=SCENES, help="only this scene (repeatable)"
+    )
     args = parser.parse_args(argv)
-    out = args.out or (SITE_IMAGES if args.site else IMAGES)
+    scenes = args.scene or list(SCENES if args.all else SITE)
+    if args.out is None and not set(scenes) <= set(SITE):
+        parser.error("the site shows only its own scenes: give a folder for the others")
+    out = args.out or SITE_IMAGES
     out.mkdir(parents=True, exist_ok=True)
     controller_module.datetime = FixedClock  # "Processed 09:30"
     app = QApplication.instance() or QApplication(sys.argv[:1])
@@ -330,16 +337,15 @@ def main(argv: list[str] | None = None) -> int:
     theme.apply(app)
     with tempfile.TemporaryDirectory(prefix="mag-opt-docs-") as tmp:
         sweep = write_sweep(Path(tmp))
-        if args.all:
-            scenes = {name: scene for name, (scene, _scheme) in SCENES.items()}
-            for name, scene in {**scenes, **EXTRA_SCENES}.items():
-                base = name.removesuffix("-dark")
-                for scheme in ("light", "dark"):
-                    render(app, theme, sweep, scene, scheme, out / f"{base}-{scheme}.png")
-        else:
-            shots = SITE_SHOTS if args.site else SCENES
-            for name, (scene, scheme) in shots.items():
-                render(app, theme, sweep, scene, scheme, out / f"{name}.png")
+        for name in scenes:
+            for scheme in SCHEMES:
+                path = out / f"{name}-{scheme}{SUFFIX}"
+                render(app, theme, sweep, SCENES[name], scheme, path)
+    if args.out is None:  # the README's copies of the site's images
+        IMAGES.mkdir(exist_ok=True)
+        for name in file_names(scene for scene in README if scene in scenes):
+            shutil.copyfile(out / name, IMAGES / name)
+            print(f"{IMAGES / name} (copy)")
     return 0
 
 
