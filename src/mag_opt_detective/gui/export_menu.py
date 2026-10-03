@@ -52,6 +52,7 @@ DEFAULTS: dict[str, object] = {
     "minor_ticks": False,
     "minor_intervals": 2,
     "minor_length": None,  # pt; None follows the text size
+    "legend": False,  # the picked curves and models listed in the figure
 }
 
 

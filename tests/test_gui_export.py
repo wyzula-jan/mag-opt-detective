@@ -20,6 +20,7 @@ import gui_helpers
 from gui_helpers import (
     click_map,
     infobar_text,
+    inspector_page,
     load_sweep,
     open_from,
     process,
@@ -60,6 +61,7 @@ from mag_opt_detective.gui.export_state import (
     safe_name,
     with_format,
 )
+from mag_opt_detective.gui.inspector import model_state as ms
 from mag_opt_detective.gui.main_window import MainWindow
 
 window, errors = gui_helpers.window, gui_helpers.errors  # shared fixtures
@@ -1105,7 +1107,7 @@ def stored_document(ini) -> dict:
 def test_stored_presets_this_version_cannot_read_are_kept(qtbot, tmp_path, sweep, errors):
     ini = str(tmp_path / "settings.ini")
     bad = {"name": "From the future", "journal": "cell", "width": "single"}
-    good = {"name": "Mine", "journal": "nature", "legend": "upper right", "ticks": {"x": 1}}
+    good = {"name": "Mine", "journal": "nature", "grid": "major", "ticks": {"x": 1}}
     text = json.dumps({"version": 1, "presets": [good, bad]})
     QSettings(ini, QSettings.Format.IniFormat).setValue(PRESETS_KEY, text)
     w = make_window(qtbot, ini, sweep)
@@ -1116,7 +1118,7 @@ def test_stored_presets_this_version_cannot_read_are_kept(qtbot, tmp_path, sweep
     entries = stored_document(ini)["presets"]
     assert [e["name"] for e in entries] == ["Mine too", "New", "From the future"]
     assert entries[2] == bad  # unchanged
-    assert entries[0]["legend"] == "upper right" and entries[0]["ticks"]["x"] == 1
+    assert entries[0]["grid"] == "major" and entries[0]["ticks"]["x"] == 1
     for name in ("Mine too", "New"):
         dialog.my_presets.delete(name)
     assert stored_document(ini)["presets"] == [bad]
@@ -1174,3 +1176,70 @@ def test_preset_store_reads_and_writes_its_key(tmp_path):
     store.set_text("")
     assert QSettings(ini, QSettings.Format.IniFormat).value(PRESETS_KEY) is None
     assert PresetStore().text == ""  # no settings: kept in memory only
+
+
+# ---------------------------------------------------------------------- legend
+def zeeman_with_branches(window, n: int = 2):
+    """A Zeeman model of *n* branches in the window's Models section."""
+    models = inspector_page(window, "models").models
+    entry = models.add("zeeman")
+    for _ in range(n - 1):
+        ms.add_branch(entry)
+    models.edited(entry, structure=True)
+    return entry
+
+
+def test_the_legend_lists_the_names_of_the_window(processed, qtbot, no_dialogs):
+    w, c = processed, processed.controller
+    c.record_points([1.0, 1.5], [300.0, 320.0], unit="cm-1")
+    zeeman_with_branches(w)
+    dialog = open_export(w, qtbot)
+    assert not dialog.legend.isChecked() and not dialog.current_style().legend  # off at first
+    state = dialog.figure_state()
+    assert [curve.label for curve in state.curves] == ["Zeeman / magnon"] * 2
+    assert [points.label for points in state.points] == ["LL 1"]
+    assert dialog.legend_row.description_label.text() == "1 picked curve, 1 model"
+
+    dialog.legend.setChecked(True)
+    assert dialog.current_style().legend
+    redraw(dialog, qtbot)
+    job = dialog.job(150)
+    fig = executor().submit(job.figure).result()  # matplotlib draws on the export thread only
+    texts = [t.get_text() for t in fig.axes[0].get_legend().get_texts()]
+    assert texts == ["LL 1", "Zeeman / magnon"]  # the model once, with its name
+
+    dialog.models.setChecked(False)  # what the figure leaves out, its legend does too
+    redraw(dialog, qtbot)
+    assert dialog.legend_row.description_label.text() == "1 picked curve"
+    dialog.view.set_value("stacked")
+    dialog.points.setChecked(False)
+    redraw(dialog, qtbot)
+    assert dialog.legend_row.description_label.text() == "Nothing to list"
+    job = dialog.job(150)
+    fig = executor().submit(job.figure).result()
+    assert fig.axes[0].get_legend() is None
+
+
+def test_the_legend_switch_is_remembered_and_kept_in_presets(qtbot, tmp_path, sweep, errors):
+    ini = str(tmp_path / "settings.ini")
+    w = make_window(qtbot, ini, sweep)
+    dialog = open_export(w, qtbot)
+    dialog.legend.setChecked(True)
+    name_preset(dialog, "save", "With legend")
+    (preset,) = dialog.my_presets.presets()
+    assert preset.style.legend and preset.to_dict()["legend"] is True
+    dialog.legend.setChecked(False)
+    assert dialog.my_presets.button.text() == "My presets"  # no longer the preset
+    dialog.my_presets.apply("With legend")
+    assert dialog.legend.isChecked() and dialog.my_presets.button.text() == "With legend"
+    w.close()
+    stored = json.loads(QSettings(ini, QSettings.Format.IniFormat).value("v2/export/figure"))
+    assert stored["legend"] is True and DEFAULTS["legend"] is False
+
+    w2 = make_window(qtbot, ini, sweep)
+    dialog = open_export(w2, qtbot)
+    assert dialog.legend.isChecked() and dialog.current_style().legend
+    assert dialog.my_presets.presets()[0].style.legend
+    w2.reset_settings()
+    assert not dialog.legend.isChecked()
+    assert not errors

@@ -6,7 +6,7 @@ user's own presets, :mod:`~mag_opt_detective.gui.export_presets`), the size, tex
 file format, what the figure includes, its colour range and colour bar, the ticks and the
 labels. Problems show inline under the preview, never as dialogs. While it is open the window
 follows the main window (unit, plot, ranges, colours, models, points), and it remembers its
-choices (``export/figure``).
+choices (``export/figure``). The legend lists the model and curve names of the main window.
 """
 
 from __future__ import annotations
@@ -83,6 +83,7 @@ from mag_opt_detective.gui.panels.common import (
     scaled_font,
     section_label,
 )
+from mag_opt_detective.gui.plot_legend import model_names
 from mag_opt_detective.gui.theme import current_tokens
 from mag_opt_detective.gui.widgets import FloatEdit, Separator, last_dir, parse_float, set_last_dir
 
@@ -383,6 +384,7 @@ class ExportDialog(QDialog):
         self._preview_error = ""
         self._note: tuple[str, str] | None = None  # the last save or preset action
         self._snapshot_counts = (0, 0, 0)  # model curves, point curves, points
+        self._legend_counts = (0, 0)  # picked curves and models the legend lists
         self._fixed: dict[str, tuple[float, float]] = {}  # level key -> levels (cm^-1 based)
         self._shown_levels: tuple | None = None  # (key, unit) of the fixed levels shown
         self._layout_problem = ""  # what does not fit in the last drawing
@@ -464,6 +466,8 @@ class ExportDialog(QDialog):
         self.points_scope.add_option(POINTS_ALL, "All curves", "Every curve with points")
         self.points_scope.set_value(POINTS_ALL)
         self.points_scope.setAccessibleName("Picked points of")
+        self.legend_row = SwitchRow("Legend", "")
+        self.legend = self.legend_row.switch
         self.panel_label = SegmentedControl(size="xs", expand=True)
         self.panel_label.add_option(NO_PANEL, "None", "No panel label")
         for letter in PANEL_LETTERS:
@@ -558,6 +562,7 @@ class ExportDialog(QDialog):
                 labelled("View", self.view),
                 self.models_row,
                 self.points_box,
+                self.legend_row,
                 panel_box,
                 spacing=12,
             )
@@ -656,7 +661,8 @@ class ExportDialog(QDialog):
             field.edit.textChanged.connect(self._changed)
         self.format.valueChanged.connect(self._changed)
         self.view.valueChanged.connect(self._on_view)
-        for switch in (self.colorbar, self.models, self.points, self.tick_mirror, self.minor_ticks):
+        switches = (self.colorbar, self.models, self.points, self.legend)
+        for switch in (*switches, self.tick_mirror, self.minor_ticks):
             switch.toggled.connect(self._changed)
         for control in (
             self.points_scope,
@@ -744,7 +750,7 @@ class ExportDialog(QDialog):
         )
 
     def style_check(self) -> StyleCheck:
-        """The colour bar place and the ticks as typed, with their errors."""
+        """The colour bar place, the ticks and the legend as typed, with their errors."""
         return figure_style(
             colorbar_location=self.colorbar_position.value(),
             direction=self.tick_direction.value(),
@@ -754,6 +760,7 @@ class ExportDialog(QDialog):
             minor=self.minor_ticks.isChecked(),
             minor_intervals=self.minor_intervals.value(),
             minor_length=self.minor_length.edit.text(),
+            legend=self.legend.isChecked(),
         )
 
     def current_style(self) -> FigureStyle:
@@ -812,7 +819,8 @@ class ExportDialog(QDialog):
 
     def figure_state(self):
         """What the figure shows now (export FigureState), as it would be saved."""
-        return figure_state(self.controller, self.content())
+        names = model_names(self.main_window)
+        return figure_state(self.controller, self.content(), model_names=names)
 
     def job(self, dpi: float, state=None) -> FigureJob:
         problems = self.problems()
@@ -1021,6 +1029,7 @@ class ExportDialog(QDialog):
             self.minor_intervals.setValue(intervals if lo <= intervals <= hi else 2)
             for name, field in self._tick_fields().items():
                 field.edit.setText(_number_text(v[name]))
+            self.legend.setChecked(bool(v["legend"]))
         self._shown_levels = None
         self._changed()
 
@@ -1034,6 +1043,7 @@ class ExportDialog(QDialog):
         self.tick_length.edit.setText(_number_text(ticks.length_pt))
         self.tick_width.edit.setText(_number_text(ticks.width_pt))
         self.minor_length.edit.setText(_number_text(ticks.minor_length_pt))
+        self.legend.setChecked(style.legend)
 
     def _set_preset_defaults(self, key: str) -> None:
         preset = get_preset(key)
@@ -1194,6 +1204,9 @@ class ExportDialog(QDialog):
         self.points_row.description_label.setVisible(True)
         self.points_scope.setEnabled(n_points > 0 and self.points.isChecked())
 
+        self.legend_row.description_label.setText(legend_text(*self._legend_counts))
+        self.legend_row.description_label.setVisible(True)
+
         minor = self.minor_ticks.isChecked()
         self.minor_intervals.setEnabled(minor)
         self.minor_length.setEnabled(minor)
@@ -1254,6 +1267,7 @@ class ExportDialog(QDialog):
             minor_ticks=self.minor_ticks.isChecked(),
             minor_intervals=self.minor_intervals.value(),
             minor_length=number(self.minor_length),
+            legend=self.legend.isChecked(),
         )
 
     def _map_colorbar_label(self) -> str:
@@ -1275,7 +1289,13 @@ class ExportDialog(QDialog):
         )
         self._sync_level_fields(snapshot)
         self._keep_shown_levels()
-        return figure_state(self.controller, self.content(), snapshot=snapshot)
+        names = model_names(self.main_window)
+        state = figure_state(self.controller, self.content(), snapshot, model_names=names)
+        self._legend_counts = (
+            sum(bool(s.label) for s in state.points),
+            len({c.label for c in state.curves if c.label}),
+        )
+        return state
 
     def _draw_preview(self) -> None:
         if not self.isVisible():
@@ -1368,6 +1388,16 @@ class ExportDialog(QDialog):
         super().changeEvent(event)
         if event.type() == QEvent.Type.ActivationChange and self.isActiveWindow():
             self._follow_window()  # e.g. a model changed in the window's inspector
+
+
+def legend_text(curves: int, models: int) -> str:
+    """What the figure's legend lists, e.g. "2 picked curves, 1 model"."""
+    parts = []
+    if curves:
+        parts.append(f"{curves} picked curve{'s' if curves != 1 else ''}")
+    if models:
+        parts.append(f"{models} model{'s' if models != 1 else ''}")
+    return ", ".join(parts) if parts else "Nothing to list"
 
 
 def _is_level_key(key) -> bool:

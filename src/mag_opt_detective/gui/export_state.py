@@ -1,10 +1,11 @@
 """What the export window draws: the window's plot as an export :class:`FigureState`, the
-print size checked against a journal preset, the style (colour bar place, ticks), the colour
-range and the default file name.
+print size checked against a journal preset, the style (colour bar place, ticks, legend), the
+colour range and the default file name.
 
 :func:`figure_state` adapts :meth:`AppController.figure_state` (the map as shown: display unit,
 plot kind and derivative, ranges, colour map and the levels in effect, model overlays and the
-picked points) and the stacked options of the view; the map's colour range is the window's, the
+picked points, labelled with the model and curve names for a legend) and the stacked options
+of the view; the map's colour range is the window's, the
 1st-99th percentile of the whole map, or fixed. :func:`print_size` and :func:`figure_style` turn
 the typed values into the ones drawn with, plus the errors that block saving and the warnings
 shown inline.
@@ -14,6 +15,7 @@ from __future__ import annotations
 
 import math
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -93,19 +95,23 @@ def _label(text: str) -> str | None:
     return None if not text else text.strip()
 
 
-def model_curves(snapshot) -> list[Curve]:
-    """The model overlays of the window as dashed figure curves."""
+def model_curves(snapshot, names: Mapping[str, str] | None = None) -> list[Curve]:
+    """The model overlays of the window as dashed figure curves, labelled with the model's name
+    (*names*: overlay key -> name; the key itself without one). The branches of a model share
+    the label, so a legend lists the model once."""
+    names = {} if names is None else names
     curves = []
-    for name, lines in snapshot.overlays.items():
+    for key, lines in snapshot.overlays.items():
         for b, e in lines:
             b, e = np.asarray(b, float), np.asarray(e, float)
             if b.size and np.isfinite(e).any():
-                curves.append(Curve(b, e, style="model", label=name))
+                curves.append(Curve(b, e, style="model", label=names.get(key, key)))
     return curves
 
 
 def point_sets(snapshot, which: str = POINTS_ALL) -> list[PointSet]:
-    """The picked points of *which* curves (the current one drawn filled); empty ones skipped."""
+    """The picked points of *which* curves (the current one drawn filled), labelled with the
+    curve's name; empty ones skipped."""
     if which == POINTS_NONE:
         return []
     sets = []
@@ -128,10 +134,16 @@ def map_levels(snapshot, content: FigureContent) -> tuple[float, float]:
     return float(snapshot.levels[0]), float(snapshot.levels[1])
 
 
-def figure_state(controller, content: FigureContent, snapshot=None) -> FigureState:
+def figure_state(
+    controller,
+    content: FigureContent,
+    snapshot=None,
+    model_names: Mapping[str, str] | None = None,
+) -> FigureState:
     """The plot on screen as an export figure, in the display unit.
 
-    *snapshot*: ``controller.figure_state()`` if taken already. ValueError without data.
+    *snapshot*: ``controller.figure_state()`` if taken already; *model_names*: the name of each
+    model overlay by its key (the curves' labels). ValueError without data.
     """
     if content.kind not in KINDS:
         raise ValueError(f"unknown figure view {content.kind!r}; choose from {KINDS}")
@@ -152,7 +164,7 @@ def figure_state(controller, content: FigureContent, snapshot=None) -> FigureSta
             levels=map_levels(snapshot, content),
             cmap=snapshot.colormap,
             colorbar=content.colorbar,
-            curves=model_curves(snapshot) if content.models else [],
+            curves=model_curves(snapshot, model_names) if content.models else [],
             **common,
         )
     return FigureState(
@@ -254,8 +266,10 @@ def figure_style(
     minor: bool = False,
     minor_intervals: int = 2,
     minor_length: str = "",
+    legend: bool = False,
 ) -> StyleCheck:
-    """The colour bar place and the ticks from the typed values (empty sizes: automatic)."""
+    """The colour bar place, the ticks and the legend from the typed values (empty sizes:
+    automatic)."""
     errors: list[str] = []
     invalid: set[str] = set()
     lengths = TICK_LENGTH_LIMITS_PT
@@ -272,7 +286,7 @@ def figure_style(
             "minor_length", "minor tick length", minor_length, lengths, errors, invalid
         ),
     )
-    style = FigureStyle(colorbar_location=colorbar_location, ticks=ticks)
+    style = FigureStyle(colorbar_location=colorbar_location, ticks=ticks, legend=legend)
     return StyleCheck(style, errors, frozenset(invalid))
 
 
