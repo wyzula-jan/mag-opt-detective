@@ -312,16 +312,28 @@ class FitArea(QWidget):
     # --- editing --------------------------------------------------------------------------
     def _on_mode(self, value: str) -> None:
         for name, combo in self.combos.items():  # what is shown carries over (a skip stays)
-            self.entry.fit.mapping.setdefault(name, combo.currentData())
+            if name not in self.entry.fit.mapping:
+                self._record(name, combo.currentData())
         self.entry.fit.assignment = Assignment(value)
         self._fill_combos()
 
     def _on_combo(self, name: str) -> None:
-        combo = self.combos[name]
-        self.entry.fit.mapping[name] = combo.currentData()
+        self._record(name, self.combos[name].currentData())
         # the other curves keep what they show (their defaults become explicit)
         for other, box in self.combos.items():
-            self.entry.fit.mapping.setdefault(other, box.currentData())
+            if other not in self.entry.fit.mapping:
+                self._record(other, box.currentData())
+
+    def _record(self, name: str, branch: int | None) -> None:
+        """Remember the choice for curve *name*. "Use" (nearest) keeps the branch the curve
+        had (or gets by default), so By branch and Sorted show it again."""
+        mapping = self.entry.fit.mapping
+        if self.entry.fit.assignment is Assignment.NEAREST and branch is not None:
+            old = mapping.get(name)
+            if old is None:
+                old = ms.default_branch(self.entry, list(self.combos), name)
+            branch = 0 if old is None else old
+        mapping[name] = branch
 
     def _on_fit(self) -> None:
         self.show_error(None)

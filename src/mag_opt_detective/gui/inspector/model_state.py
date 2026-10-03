@@ -334,6 +334,12 @@ def resolve_mapping(entry: ModelEntry, curves: Sequence[str]) -> dict[str, int |
     return mapping
 
 
+def default_branch(entry: ModelEntry, curves: Sequence[str], name: str) -> int | None:
+    """The branch of picked curve *name* by default: the i-th curve on branch i."""
+    i = list(curves).index(name)
+    return i if i < len(entry.branch_names()) else None
+
+
 def mapping_text(mapping: Mapping[str, int | None], entry: ModelEntry) -> str:
     """The assignment as text, e.g. ``LL 1 -> Branch 1, LL 2 skipped``."""
     names = entry.branch_names()

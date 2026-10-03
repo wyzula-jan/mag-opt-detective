@@ -12,6 +12,7 @@ from PySide6.QtWidgets import QApplication, QLabel
 import gui_helpers
 from gui_helpers import inspector_page, load_sweep, process, save_to, set_unit
 from mag_opt_detective.core.expressions import ExpressionError, parse
+from mag_opt_detective.core.fitting import Assignment
 from mag_opt_detective.core.models import dirac_interband
 from mag_opt_detective.core.points import PointTable
 from mag_opt_detective.core.units import Unit, convert
@@ -422,6 +423,34 @@ def test_fit_a_custom_expression(window, sweep, tmp_path, errors):
     assert float(editor.rows["E0"].value.text()) == pytest.approx(
         ms.params(entry)["E0"].value, rel=1e-5
     )
+    assert not errors
+
+
+def test_nearest_keeps_the_branches_of_the_other_modes(window, sweep, tmp_path, errors):
+    load_sweep(window, sweep)
+    process(window)
+    field, columns = zeeman_points(np.random.default_rng(2))
+    load_table(window, tmp_path, field, columns)
+    entry = add(window, "zeeman")
+    card = card_of(window, entry)
+    card.editor.add_button.click()
+    entry.fit.assignment = Assignment.NEAREST  # e.g. restored: nothing chosen yet
+    card.fit_button.click()
+    area = card.fit_area
+
+    def shown():
+        return [area.combos[n].currentText() for n in area.combos]
+
+    assert shown() == ["Use", "Use"]
+    choose(area, "LL 1", "Skip")
+    area.mode.set_value("branch")
+    assert shown() == ["Skip", "Branch 2"]  # not Branch 1, the "Use" it showed
+    area.mode.set_value("nearest")
+    choose(area, "LL 2", "Skip")
+    choose(area, "LL 2", "Use")
+    choose(area, "LL 1", "Use")
+    area.mode.set_value("branch")
+    assert shown() == ["Branch 1", "Branch 2"]
     assert not errors
 
 
