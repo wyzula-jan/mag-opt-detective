@@ -248,6 +248,14 @@ QFrame[kit="infobar"][level="info"] {{
 }}
 QLabel[kit="muted"], QLabel[kit="note"] {{ color: {c["muted"]}; }}
 QLabel[kit="note"][error="true"] {{ color: {c["err"]}; }}
+QSpinBox[kit="field"] {{
+    background: {c["surface"]}; border: 1px solid {c["line-strong"]}; border-radius: 5px;
+    padding: 3px 6px; color: {c["fg"]};
+}}
+QSpinBox[kit="field"]:focus {{ border-color: {c["accent"]}; }}
+QSpinBox[kit="field"]:disabled {{
+    background: {c["sunken"]}; border-color: {c["line"]}; color: {c["faint"]};
+}}
 *[kit="range"] QAbstractSpinBox {{
     background: {c["surface"]}; border: 1px solid {c["line-strong"]}; border-radius: 5px;
     padding: 2px 4px; color: {c["fg"]};

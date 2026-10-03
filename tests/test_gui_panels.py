@@ -5,7 +5,7 @@ import pytest
 from PySide6.QtCore import QMimeData, QPointF, QSettings, Qt, QUrl
 from PySide6.QtGui import QDropEvent
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QFileDialog
+from PySide6.QtWidgets import QAbstractSpinBox, QFileDialog
 
 import gui_helpers
 from gui_helpers import load_sweep, process, save_to, set_unit
@@ -15,7 +15,7 @@ from mag_opt_detective.core.units import Unit
 from mag_opt_detective.gui.controller import FieldRange, SweepFiles, common_prefix
 from mag_opt_detective.gui.main_window import MainWindow
 from mag_opt_detective.gui.panels import library
-from mag_opt_detective.gui.panels.common import FileDrops
+from mag_opt_detective.gui.panels.common import CheckBox, FileDrops
 from mag_opt_detective.gui.panels.files import (
     FileTableModel,
     breakable,
@@ -25,6 +25,7 @@ from mag_opt_detective.gui.panels.files import (
 )
 from mag_opt_detective.gui.panels.processing import APPLIED, CHANGED, VIEW_ENERGY_LINK
 from mag_opt_detective.gui.panels.reference import HINTS
+from mag_opt_detective.gui.theme import current_tokens
 
 window, errors = gui_helpers.window, gui_helpers.errors  # shared fixtures
 
@@ -575,3 +576,25 @@ def test_panel_settings_round_trip(qtbot, tmp_path):
     assert not w2.panels["library"].auto_field.isChecked()
     assert c.processing.sample_files == SweepFiles()  # files are not remembered
     assert c.unit is Unit.MEV
+
+
+def test_controls_use_the_kit_style(window, sweep):
+    """Smoothing fields are kit number fields (no arrows); ticks are drawn in the accent."""
+    panel = window.panels["reference"]
+    for spin in (panel.sg_window, panel.sg_poly):
+        assert spin.property("kit") == "field"
+        assert spin.buttonSymbols() == QAbstractSpinBox.ButtonSymbols.NoButtons
+    load_sweep(window, sweep)
+    process(window)
+    library_panel = window.panels["library"]
+    library_panel.save_button.click()
+    (row,) = library_panel.rows.values()
+    tick = row.use
+    assert isinstance(tick, CheckBox)
+    tick.resize(tick.sizeHint())
+    tick.setChecked(True)
+    image = tick.grab().toImage()
+    inside = image.pixelColor(int(4 * image.devicePixelRatio()), image.height() // 2 - 3)
+    assert inside.name() == current_tokens()["accent"].name()
+    tick.click()  # the whole box takes the click
+    assert not tick.isChecked()

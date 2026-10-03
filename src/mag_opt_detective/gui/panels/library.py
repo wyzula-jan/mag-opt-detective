@@ -15,7 +15,6 @@ import numpy as np
 from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtGui import QPainter
 from PySide6.QtWidgets import (
-    QCheckBox,
     QGridLayout,
     QHBoxLayout,
     QLabel,
@@ -32,6 +31,7 @@ from mag_opt_detective.gui.controller import LibraryEntry, in_panel, user_action
 from mag_opt_detective.gui.display import format_range, unit_text
 from mag_opt_detective.gui.panels.common import (
     Card,
+    CheckBox,
     Divider,
     DropZone,
     FileDrops,
@@ -161,7 +161,7 @@ class EntryRow(QWidget):
     def __init__(self, entry: LibraryEntry, parent=None):
         super().__init__(parent)
         self.key = entry.key
-        self.use = QCheckBox()
+        self.use = CheckBox()
         self.use.setAccessibleName(f"Use {entry.name}")
         self.use.setToolTip("Ticked maps are merged or averaged")
         self.name_label = PartsLabel(mode=Qt.TextElideMode.ElideMiddle)

@@ -9,9 +9,10 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, QObject, QRectF, QSize, Qt, Signal
+from PySide6.QtCore import QEvent, QObject, QPointF, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QFont, QFontDatabase, QPainter, QPalette, QPen
 from PySide6.QtWidgets import (
+    QCheckBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -517,10 +518,15 @@ class SwitchRow(QWidget):
 
 
 class SpinBox(QSpinBox):
-    """A spin box that ignores the mouse wheel unless it has the focus (panels scroll)."""
+    """A whole-number field drawn as the kit's number fields (``kit="field"``: a rounded box,
+    no arrows; the arrow keys still step it). It ignores the mouse wheel unless it has the
+    focus (panels scroll)."""
 
     def __init__(self, minimum: int, maximum: int, value: int, step: int = 1, parent=None):
         super().__init__(parent)
+        self.setProperty("kit", "field")
+        self.setButtonSymbols(QSpinBox.ButtonSymbols.NoButtons)
+        self.setFont(mono_font())
         self.setRange(minimum, maximum)
         self.setSingleStep(step)
         self.setValue(value)
@@ -533,6 +539,68 @@ class SpinBox(QSpinBox):
             super().wheelEvent(event)
         else:
             event.ignore()
+
+
+class CheckBox(QCheckBox):
+    """A tick box as the mockup's ``.cb``: filled with the accent colour and a tick when
+    checked, a line box when not; text, if any, follows it."""
+
+    SIZE = 15
+    GAP = 6
+
+    def sizeHint(self) -> QSize:
+        size = self.SIZE + 2
+        if not self.text():
+            return QSize(size, size)
+        metrics = self.fontMetrics()
+        width = size + self.GAP + metrics.horizontalAdvance(self.text())
+        return QSize(width, max(size, metrics.height()))
+
+    def minimumSizeHint(self) -> QSize:
+        return self.sizeHint()
+
+    def hitButton(self, pos) -> bool:
+        return self.rect().contains(pos)
+
+    def paintEvent(self, event) -> None:
+        tokens = current_tokens()
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        top = (self.height() - self.SIZE) / 2
+        box = QRectF(1.5, top + 0.5, self.SIZE - 1, self.SIZE - 1)
+        checked, enabled = self.isChecked(), self.isEnabled()
+        if checked:
+            fill = tokens["accent"] if enabled else tokens["line-strong"]
+            border = fill
+        else:
+            fill = tokens["surface"] if enabled else tokens["sunken"]
+            border = tokens["line-strong"] if enabled else tokens["line"]
+        if self.hasFocus():
+            ring = QColor(tokens["accent"])
+            ring.setAlphaF(0.35)
+            painter.setPen(QPen(ring, 3))
+            painter.drawRoundedRect(box, 3, 3)
+        painter.setPen(QPen(border, 1))
+        painter.setBrush(fill)
+        painter.drawRoundedRect(box, 3, 3)
+        if checked:
+            pen = QPen(tokens["accent-fg"], 1.8)
+            pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+            pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+            painter.setPen(pen)
+            left, bottom = box.left(), box.bottom()
+            painter.drawPolyline(
+                [
+                    QPointF(left + 3.5, box.center().y() + 0.5),
+                    QPointF(left + 6.2, bottom - 3.6),
+                    QPointF(box.right() - 3.2, box.top() + 4.0),
+                ]
+            )
+        if self.text():
+            painter.setPen(tokens["fg"] if enabled else tokens["faint"])
+            text_rect = self.rect().adjusted(self.SIZE + 2 + self.GAP, 0, 0, 0)
+            painter.drawText(text_rect, int(Qt.AlignmentFlag.AlignVCenter), self.text())
+        painter.end()
 
 
 def small_button(text: str, icon: str | None = None, tooltip: str = "") -> QToolButton:

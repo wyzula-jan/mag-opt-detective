@@ -13,7 +13,6 @@ from typing import Protocol
 from PySide6.QtCore import QRectF, QSignalBlocker, Qt
 from PySide6.QtGui import QFont, QPainter, QPen
 from PySide6.QtWidgets import (
-    QCheckBox,
     QGridLayout,
     QHBoxLayout,
     QLabel,
@@ -42,6 +41,7 @@ from mag_opt_detective.gui.inspector.model_widgets import (
 )
 from mag_opt_detective.gui.kit import SegmentedControl, Switch
 from mag_opt_detective.gui.panels.common import (
+    CheckBox,
     Divider,
     ElidedLabel,
     LinkButton,
@@ -406,7 +406,7 @@ class ParamRow:
         self.label = mono_label(name)
         self.label.setToolTip(name)
         self.value = NumberField(name=f"{name} value")
-        self.fixed = QCheckBox()
+        self.fixed = CheckBox()
         self.fixed.setToolTip(f"Hold {name} fixed in fits")
         self.fixed.setAccessibleName(f"{name} fixed")
         self.lo = NumberField(name=f"{name} minimum", optional=True, placeholder="-∞")
