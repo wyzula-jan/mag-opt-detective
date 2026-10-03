@@ -222,7 +222,7 @@ def hold_unused_g(model: ZeemanModel) -> None:
 
 
 def next_branch(model: ZeemanModel) -> Branch:
-    """A new branch below the others: like the last one, 10 % higher, labelled "Branch n"."""
+    """A branch after the others: like the last one, 10 % higher, labelled "Branch n"."""
     branches = model.branches
     labels = {b.label for b in branches}
     n = len(branches) + 1
