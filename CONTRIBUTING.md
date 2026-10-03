@@ -102,6 +102,14 @@ workflow builds and smoke-tests the bundles on Linux, macOS and Windows for pull
 that touch the packaging and for version tags, which also publish a release. The README
 screenshots are rendered by `docs/make_screenshots.py` (synthetic data only).
 
+## Docs site
+
+The documentation and download site lives in `docs/site/` (see its README): page fragments,
+one layout and a standard-library build script, `python docs/site/build.py`.
+`tests/test_site.py` builds it and checks its links and images. Its screenshots come from
+`python docs/make_screenshots.py --site`. The *Docs site* workflow deploys it to GitHub Pages
+and runs only when started by hand.
+
 ## Branches and the task board
 
 `main` always works. Do the work on a short-lived branch (`feat/merge-by-field`,

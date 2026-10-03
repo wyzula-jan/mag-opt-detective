@@ -11,6 +11,9 @@ text files written by the OPUS export macro.
 *All screenshots show a synthetic Landau fan, drawn by
 [`docs/make_screenshots.py`](docs/make_screenshots.py).*
 
+The documentation and download site ([`docs/site`](docs/site)) will be published at
+<https://wyzula-jan.github.io/mag-opt-detective/>.
+
 ## Features
 
 The window is a workbench: a rail of panels on the left (**Sample**, **Reference**,
