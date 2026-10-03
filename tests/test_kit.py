@@ -15,6 +15,7 @@ from mag_opt_detective.gui.kit import (
     SmallButton,
     Switch,
 )
+from mag_opt_detective.gui.kit.range_slider import BOTH, HI, LO
 from mag_opt_detective.gui.settings import PREFIX, Persistence
 
 
@@ -158,7 +159,7 @@ def test_range_slider_drag_between_the_handles_moves_the_range(qtbot, slider):
     qtbot.waitExposed(slider)
     moves, finished = record(slider)
     x = slider.x_for
-    assert slider.part_at(x(50.0)) == 2
+    assert slider.part_at(x(50.0)) == BOTH
     drag(qtbot, slider, x(50.0), x(55.0), x(60.0), x(60.0))
     assert len(moves) == 2  # one per move that changed the values
     assert len(finished) == 1
@@ -188,11 +189,11 @@ def test_range_slider_handles_win_on_a_narrow_range(qtbot, slider):
     slider.show()
     qtbot.waitExposed(slider)
     x = slider.x_for
-    assert slider.part_at(x(80.0) - 4) == 1  # where a handle overlaps the bar, it wins
+    assert slider.part_at(x(80.0) - 4) == HI  # where a handle overlaps the bar, it wins
     assert slider.part_at(x(10.0)) is None  # the groove
     slider.set_values(40.0, 51.0)  # 22 px apart: 3 px of bar between the handles' reach
-    assert slider.part_at(x(45.0)) == 0  # too little to grab: the nearer handle
-    assert slider.part_at(x(46.0)) == 1
+    assert slider.part_at(x(45.0)) == LO  # too little to grab: the nearer handle
+    assert slider.part_at(x(46.0)) == HI
 
     slider.set_values(50.0, 52.0)  # nearly on top of each other
     _, finished = record(slider)
@@ -240,9 +241,26 @@ def test_range_slider_shift_keys_move_the_range(qtbot, slider):
     assert slider.values() == pytest.approx((89.0, 99.0))
 
     slider.set_values(0.0, 100.0)  # a range that fills the extent cannot move
-    assert slider.part_at(slider.x_for(50.0)) is None  # a press moves the nearest handle
     with qtbot.assertNotEmitted(slider.valuesChanged):
         qtbot.keyClick(slider, Qt.Key.Key_Right, shift)
+
+
+@pytest.mark.parametrize("values", [(0.0, 100.0), (-5.0, 105.0)])
+def test_range_slider_bar_of_a_range_that_cannot_move(qtbot, slider, values):
+    slider.show()
+    qtbot.waitExposed(slider)
+    slider.set_values(*values)  # fills the extent (as on Auto) or goes beyond it
+    moves, finished = record(slider)
+    x, y = slider.x_for(50.0), slider.height() // 2
+    assert slider.part_at(x) == BOTH  # grabbed as a bar, as a narrower range would be
+    qtbot.mousePress(slider, Qt.MouseButton.LeftButton, pos=QPoint(round(x), y))
+    assert slider.cursor().shape() == Qt.CursorShape.ArrowCursor  # no closed hand
+    for to in (x + 40, x - 40, slider.width() + 40, -40):
+        qtbot.mouseMove(slider, QPoint(round(to), y))
+    slider.grab()
+    qtbot.mouseRelease(slider, Qt.MouseButton.LeftButton, pos=QPoint(-40, y))
+    assert slider.values() == values
+    assert (moves, finished) == ([], [])  # nothing changed: no signal at all
 
 
 def test_range_slider_cursor_and_hover_over_the_range(qtbot, slider):
@@ -426,6 +444,21 @@ def test_range_control_range_drag_switches_to_fixed(qtbot, control):
     assert edited.args == pytest.approx([lo - 0.1575, hi - 0.1575])
     assert not control.is_auto()
     assert control.hi_spin.value() == pytest.approx(hi - 0.1575, abs=1e-4)
+
+
+@pytest.mark.parametrize("data_range", [(0.25, 16.0), (0.0, 20.0)])
+def test_range_control_bar_drag_on_auto_range_changes_nothing(qtbot, control, data_range):
+    control.resize(300, control.sizeHint().height())
+    control.show()
+    qtbot.waitExposed(control)
+    control.set_range(*data_range)  # Auto: the data range fills the slider (or goes beyond)
+    slider = control.slider
+    with qtbot.assertNotEmitted(control.rangeEdited):
+        drag(qtbot, slider, slider.x_for(8.0), slider.x_for(8.0) + 40, slider.x_for(8.0) - 40)
+    assert control.range() == data_range
+    assert control.is_auto()
+    assert control.mode.value() == "auto"
+    assert slider.is_muted()
 
 
 def test_range_control_settings_protocol(control):

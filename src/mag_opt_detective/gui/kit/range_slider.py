@@ -34,15 +34,16 @@ class RangeSlider(QWidget):
     pick the handle (then leave the widget), arrows move it by 1 % of the extent, Page
     Up/Down by 10 %, Home/End jump to the ends; with Shift the same keys move the range.
     ``valuesChanged`` fires on every user change, ``editingFinished`` when the mouse button
-    or key is released. :meth:`set_values` is programmatic and silent; values outside the
-    extent are kept and drawn at the ends.
+    or key is released after a change (and after every handle drag). :meth:`set_values` is
+    programmatic and silent; values outside the extent are kept and drawn at the ends.
 
     Moving the range keeps its width, so the minimum span never applies to it. It moves only
-    while an end has room inside the extent: on a range that fills the extent (as on Auto) a
-    press between the handles moves the nearest handle, as on the groove. Muted is a colour
-    only: every drag and key works, so a RangeControl on Auto switches to Fixed. Handles
-    pinned at an end (min span apart) still move away from it together, by the bar when it
-    is wide enough to grab, or by Shift+arrows.
+    while an end has room inside the extent: a range that fills the extent (as on Auto) or
+    goes beyond it is still grabbed by its bar, but stays put and emits nothing, and its bar
+    shows no hover state. Muted is a colour only: every drag and key works, so a
+    RangeControl on Auto switches to Fixed once something changes. Handles pinned at an end
+    (min span apart) still move away from it together, by the bar when it is wide enough to
+    grab, or by Shift+arrows.
     """
 
     valuesChanged = Signal(float, float)
@@ -63,8 +64,9 @@ class RangeSlider(QWidget):
         self._drag: int | None = None
         self._grab = 0.0  # handle drags: press x minus the handle's x
         self._origin = (0.0, 0.0, 0.0)  # range drags: value under the press, lo, hi
+        self._moved = False  # the range drag changed the values
         self._hover_x: float | None = None
-        self._hot = False  # the bar is under the mouse and can be dragged
+        self._hot = False  # the bar is under the mouse (or dragged) and can move
         self._cursor: Qt.CursorShape | None = None
         self._key_changed = False
         self._muted = False
@@ -133,7 +135,11 @@ class RangeSlider(QWidget):
             return None
         if x_hi - x_lo - 2 * self._reach() < self.MIN_GRAB:  # too narrow: the handles win
             return self._handle_at(x, reach=math.inf)
-        return BOTH if self._lo > self._a or self._hi < self._b else None
+        return BOTH
+
+    def _movable(self) -> bool:
+        """True if the range has room to move inside the extent."""
+        return self._lo > self._a or self._hi < self._b
 
     def _width(self) -> float:
         return (self._b - self._a) or 1.0
@@ -231,6 +237,7 @@ class RangeSlider(QWidget):
         part = self.part_at(x)
         if part == BOTH:
             self._origin = (self._value_at(x), self._lo, self._hi)
+            self._moved = False
         elif part is None:
             value = self._value_at(x)
             d_lo, d_hi = abs(value - self._lo), abs(value - self._hi)
@@ -255,7 +262,8 @@ class RangeSlider(QWidget):
             return
         if self._drag == BOTH:
             start, lo, hi = self._origin
-            self._shift(lo, hi, self._value_at(x) - start)
+            if self._shift(lo, hi, self._value_at(x) - start):
+                self._moved = True
         else:
             self._move(self._drag, self._value_at(x - self._grab))
         event.accept()
@@ -264,13 +272,15 @@ class RangeSlider(QWidget):
         if self._drag is None or event.button() != Qt.MouseButton.LeftButton:
             super().mouseReleaseEvent(event)
             return
+        unchanged = self._drag == BOTH and not self._moved  # e.g. a range that fills the extent
         self._drag = None
         inside = self.rect().contains(event.position().toPoint())
         self._hover_x = event.position().x() if inside else None
         self._refresh_hover()
         self.update()
         event.accept()
-        self.editingFinished.emit()
+        if not unchanged:
+            self.editingFinished.emit()
 
     def leaveEvent(self, event: QEvent) -> None:
         self._hover_x = None
@@ -279,12 +289,13 @@ class RangeSlider(QWidget):
 
     def _refresh_hover(self) -> None:
         """Hover state and cursor: an open hand over a bar that can move, closed while
-        moving it."""
+        moving it; nothing over a bar that cannot move."""
         if self._drag == BOTH:
-            hot, shape = True, Qt.CursorShape.ClosedHandCursor
+            hot = self._movable()
+            shape = Qt.CursorShape.ClosedHandCursor if hot else None
         else:
             hot = self._drag is None and self._hover_x is not None
-            hot = hot and self.part_at(self._hover_x) == BOTH
+            hot = hot and self.part_at(self._hover_x) == BOTH and self._movable()
             shape = Qt.CursorShape.OpenHandCursor if hot else None
         if hot != self._hot:
             self._hot = hot
@@ -385,7 +396,7 @@ class RangeSlider(QWidget):
             handles.reverse()  # the active handle on top
         for handle, x in handles:
             centre = QPointF(x, cy)
-            if self.hasFocus() and handle == self._active and self._drag != BOTH:
+            if self.hasFocus() and handle == self._active and not (hot and self._drag == BOTH):
                 ring = QColor(accent)
                 ring.setAlphaF(0.45)
                 p.setPen(QPen(ring, 2))
