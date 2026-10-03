@@ -104,6 +104,7 @@ MAX_FIELD_VALUES = 100_000  # of a custom field range
 DATA_EMPTY, DATA_CHANGED, DATA_CURRENT = "empty", "changed", "current"
 DATA_PARTS = ("sample", "reference")
 NO_REFERENCE_FILES = "Reference sweep has no files – shown without reference."
+LIBRARY_KEEPS_BASELINE = "the library map shown keeps the baseline it was plotted with"
 
 Curve = tuple[np.ndarray, np.ndarray]
 
@@ -513,6 +514,7 @@ class AppController(QObject):
         self._processing = ProcessingState()
         self._processed_with: ProcessingState | None = None
         self._changed = False
+        self._live_baseline = False  # the baseline region is applied as it changes
         self._data_states = {part: DATA_EMPTY for part in DATA_PARTS}
         self._restoring = 0
         self.curve = "LL 1"
@@ -714,6 +716,8 @@ class AppController(QObject):
 
     def _update_changed(self) -> None:
         used = self._processed_with
+        if used is not None and self._baseline_is_live():  # applied at once (apply_baseline)
+            used = dataclasses.replace(used, baseline=self._processing.baseline)
         changed = used is not None and used.effective() != self._processing.effective()
         if changed != self._changed:
             self._changed = changed
@@ -885,6 +889,61 @@ class AppController(QObject):
         result = ProcessResult.from_map(fmap, baseline)
         self.set_result(result, processed=False)
         return result
+
+    # --- live baseline -----------------------------------------------------------------
+    # With Live on, the baseline region is applied to the maps of the last Process as it
+    # changes (apply_baseline, which the Processing panel calls at most about ten times a
+    # second while the region is dragged), so changing it never makes the map out of date.
+    # Nothing is loaded or processed again; a library map keeps the baseline it was plotted with.
+    def live_baseline(self) -> bool:
+        return self._live_baseline
+
+    def set_live_baseline(self, live: bool) -> None:
+        """Count the baseline region as applied whenever :meth:`apply_baseline` can apply it."""
+        if bool(live) != self._live_baseline:
+            self._live_baseline = bool(live)
+            self._update_changed()
+
+    def can_apply_baseline(self) -> bool:
+        """A map made by Process is shown (a library map keeps its baseline)."""
+        return self.result is not None and self.result_source == "process"
+
+    def _baseline_is_live(self) -> bool:
+        """Live is on and the region can be applied to the map shown."""
+        if not (self._live_baseline and self.can_apply_baseline()):
+            return False
+        try:
+            region = self._baseline()
+        except ValueError:
+            return False
+        return region is None or bool(energy_mask(self.result.ratio.energy, *region).any())
+
+    def apply_baseline(self) -> bool:
+        """Apply the baseline region of the processing options (none when it is off) to the
+        map of the last Process: only the normalisation is computed
+        (:meth:`ProcessResult.with_baseline`). The points, view ranges and colour levels stay,
+        and the region counts as processed. Returns whether the map changed.
+
+        ValueError (in the display unit) without a processed map or for a region that cannot
+        be used; :attr:`referenceMissing` is never emitted.
+        """
+        result = self.result
+        if result is None or not self.can_apply_baseline():
+            why = "no map is processed yet" if result is None else LIBRARY_KEEPS_BASELINE
+            raise panel_error(f"baseline region not applied: {why}", "processing")
+        region = self._baseline()
+        if region is not None:
+            self.check_energy_range("baseline region", region, result.ratio.energy, "processing")
+        changed = region != result.baseline_region
+        if changed:
+            self.result = result.with_baseline(region)
+            logger.debug("Baseline re-applied: %s cm-1", region)
+            self.resultChanged.emit()
+        if self._processed_with is not None:
+            baseline = self._processing.baseline
+            self._processed_with = dataclasses.replace(self._processed_with, baseline=baseline)
+        self._update_changed()
+        return changed
 
     # --- figure ------------------------------------------------------------------------
     def set_overlay(self, name: str, curves: Callable[[Unit], list[Curve]] | None) -> None:
