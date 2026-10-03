@@ -56,7 +56,7 @@ from PySide6.QtWidgets import (
 from mag_opt_detective.core.units import from_cm1
 from mag_opt_detective.gui import icons
 from mag_opt_detective.gui.controller import CURVE_NAME, user_action
-from mag_opt_detective.gui.kit import SegmentedControl, Switch
+from mag_opt_detective.gui.kit import SegmentedControl, SmallButton, Switch
 from mag_opt_detective.gui.kit._common import set_style_property
 from mag_opt_detective.gui.plot_panel import PlotClick
 from mag_opt_detective.gui.points_model import CurvePointsModel
@@ -451,14 +451,12 @@ class PointsPanel(QWidget):
             "Start a new table on the next Process", "Off keeps the picked points across runs."
         )
         self.new_table = self.new_table_row.switch
-        self.import_button = QPushButton("Import…")
-        self.import_button.setProperty("kit", "button")
-        self.import_button.setToolTip("Read a point table (replaces the curves; undo restores)")
-        icons.set_icon(self.import_button, "upload")
-        self.export_button = QPushButton("Export…")
-        self.export_button.setProperty("kit", "button")
-        self.export_button.setToolTip("Save the table: one column per curve, one row per field")
-        icons.set_icon(self.export_button, "download")
+        self.import_button = SmallButton(
+            "Import…", "upload", "Read a point table (replaces the curves; undo restores)"
+        )
+        self.export_button = SmallButton(
+            "Export…", "download", "Save the table: one column per curve, one row per field"
+        )
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(14, 12, 14, 16)

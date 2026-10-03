@@ -6,6 +6,7 @@ Widgets that hold state implement the settings protocol used by ``gui.settings.P
 """
 
 from mag_opt_detective.gui.kit._common import TightToolButton
+from mag_opt_detective.gui.kit.button import SmallButton
 from mag_opt_detective.gui.kit.collapsible import CollapsibleSection
 from mag_opt_detective.gui.kit.empty_state import EmptyState
 from mag_opt_detective.gui.kit.infobar import InfoBar
@@ -23,6 +24,7 @@ __all__ = [
     "RangeSlider",
     "SegmentedControl",
     "SlidePanel",
+    "SmallButton",
     "Switch",
     "TightToolButton",
 ]

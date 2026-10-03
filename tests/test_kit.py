@@ -12,6 +12,7 @@ from mag_opt_detective.gui.kit import (
     RangeSlider,
     SegmentedControl,
     SlidePanel,
+    SmallButton,
     Switch,
 )
 from mag_opt_detective.gui.settings import PREFIX, Persistence
@@ -333,6 +334,20 @@ def test_segments_are_as_wide_as_their_text_and_padding(segmented):
         text = button.fontMetrics().horizontalAdvance(button.text())
         assert text + 2 * 9 <= button.sizeHint().width() <= text + 2 * 9 + 5
         assert button.minimumSizeHint() == button.sizeHint()
+
+
+def test_small_button_puts_the_mockup_gap_between_icon_and_text(qtbot):
+    """As the mockup's ``.btn.sm``: a 14 px icon and 6 px before the text (Qt leaves 2 px)."""
+    sheet = theme.build_stylesheet(theme.tokens_for(False))
+    plain, with_icon = SmallButton("Save current map"), SmallButton("Save current map", "save")
+    for button in (plain, with_icon):
+        qtbot.addWidget(button)
+        button.setStyleSheet(sheet)
+    assert with_icon.property("kit") == "button" and with_icon.toolTip() == ""
+    assert with_icon.sizeHint().width() - plain.sizeHint().width() == 14 + 6
+    with_icon.setCheckable(True)
+    with_icon.setChecked(True)  # painted in the accent colour, as the stylesheet's checked one
+    assert not with_icon.grab().isNull()
 
 
 def test_segmented_settings_protocol(segmented):

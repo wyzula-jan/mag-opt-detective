@@ -6,9 +6,10 @@ from collections.abc import Callable
 
 from PySide6.QtCore import QEvent, QSize, Qt
 from PySide6.QtGui import QPainter
-from PySide6.QtWidgets import QLabel, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
 
 from mag_opt_detective.gui import icons
+from mag_opt_detective.gui.kit.button import SmallButton
 from mag_opt_detective.gui.theme import current_tokens
 
 ICON_SIZE = 30
@@ -43,8 +44,7 @@ class EmptyState(QWidget):
         self.text_label.setTextFormat(Qt.TextFormat.PlainText)
         self.text_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.text_label.setWordWrap(True)
-        self.action_button = QPushButton()
-        self.action_button.setProperty("kit", "button")
+        self.action_button = SmallButton("")  # the mockup's .btn.sm
         self.action_button.setVisible(False)
         self.action_button.clicked.connect(self._on_action)
 

@@ -24,7 +24,7 @@ from PySide6.QtWidgets import (
 )
 
 from mag_opt_detective.gui import icons
-from mag_opt_detective.gui.kit import Switch
+from mag_opt_detective.gui.kit import SmallButton, Switch
 from mag_opt_detective.gui.theme import current_tokens
 
 LEVEL_ICONS = {"ok": "check", "warn": "triangle-alert", "err": "triangle-alert", "info": "info"}
@@ -603,20 +603,9 @@ class CheckBox(QCheckBox):
         painter.end()
 
 
-def small_button(text: str, icon: str | None = None, tooltip: str = "") -> QToolButton:
+def small_button(text: str, icon: str | None = None, tooltip: str = "") -> SmallButton:
     """A compact text button (Plot, Save current map, ...) with an optional icon."""
-    button = QToolButton()
-    button.setProperty("kit", "button")
-    button.setText(text)
-    button.setToolTip(tooltip)
-    button.setFont(scaled_font(button, 0.94))
-    if icon is not None:
-        icons.set_icon(button, icon)
-        button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
-    else:
-        button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
-    button.setIconSize(QSize(14, 14))
-    return button
+    return SmallButton(text, icon, tooltip)
 
 
 def labelled(text: str, widget: QWidget) -> QWidget:
