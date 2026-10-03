@@ -4,6 +4,12 @@ All notable changes to Magneto-Optical Detective, newest first. The format is ba
 Changelog, and the versions follow Semantic Versioning. `tools/release.py` writes each section
 from the commit messages when a version is released (see Releases in CONTRIBUTING.md).
 
+## 0.1.1 - 2026-10-03
+
+### Fixed
+
+- **gui:** pace live baseline updates by their full cost, drawing included, so a large map keeps updating during a drag of the baseline region, and a single slow update no longer switches it to updating on release.
+
 ## 0.1.0 - 2026-10-03
 
 The first release. Magneto-Optical Detective plots, picks, fits and exports magneto-optical FTIR field sweeps recorded with Bruker OPUS, as OPUS binary files or as two-column text files.

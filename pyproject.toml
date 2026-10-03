@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "mag-opt-detective"
-version = "0.1.0"
+version = "0.1.1"
 description = "Plot, pick, fit and export magneto-optical FTIR field sweeps (OPUS and OPUS-macro text files)."
 readme = "README.md"
 license = "GPL-3.0-only"
