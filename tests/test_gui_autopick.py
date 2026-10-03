@@ -2,13 +2,14 @@
 
 import numpy as np
 import pytest
-from PySide6.QtCore import QPoint, QPointF, Qt
+from PySide6.QtCore import QPoint, QPointF, QSettings, Qt
 from PySide6.QtTest import QTest
 
 import gui_helpers
 from gui_helpers import click_map, process, select, set_unit
 from helpers import sweep_name, write_text
 from mag_opt_detective.gui.controller import SweepFiles
+from mag_opt_detective.gui.main_window import MainWindow
 from mag_opt_detective.gui.tools import autopick
 from mag_opt_detective.gui.tools.autopick import (
     Candidate,
@@ -371,6 +372,27 @@ def test_prominence_of_per_unit_derivatives_scales_with_the_unit(picked):
     assert prominence_scale(s, "meV", "rising") == pytest.approx(MEV**2)
     select(w, per_unit=False)
     assert prominence_scale(c.selection, "meV", "min") == 1.0
+
+
+def test_options_are_remembered(qtbot, tmp_path):
+    ini = str(tmp_path / "settings.ini")
+    first = MainWindow(settings=QSettings(ini, QSettings.Format.IniFormat))
+    qtbot.addWidget(first)
+    bar = first.autopick.bar
+    bar.mode.set_value("detect")
+    bar.feature.set_value("rising")
+    bar.smooth.set_value("9")
+    set_unit(first, "meV")
+    bar.window_edit.setText("5")
+    first.save_settings()
+    first.close()
+    second = MainWindow(settings=QSettings(ini, QSettings.Format.IniFormat))
+    qtbot.addWidget(second)
+    bar = second.autopick.bar
+    assert (bar.mode.value(), bar.feature.value(), bar.smooth.value()) == ("detect", "rising", "9")
+    assert bar.window_edit.cm1() == pytest.approx(5 * MEV)
+    assert bar.window_edit.text() == "5"
+    assert bar.prominence_edit.text() == ""  # always automatic in a new session
 
 
 # ---------------------------------------------------------------------- helpers
