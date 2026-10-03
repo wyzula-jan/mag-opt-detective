@@ -58,6 +58,7 @@ HEADER = re.compile(
     r"(?P<type>[A-Za-z]+)(?:\((?P<scope>[^()\s][^()]*)\))?(?P<bang>!)?: (?P<text>\S.*)"
 )
 FOOTER = re.compile(r"BREAKING[ -]CHANGE: *(?P<text>.*)")
+TRAILER = re.compile(r"[A-Za-z][\w-]*(: | #)")  # a git trailer: "Reviewed-by: ", "Fixes #12"
 SECTION = re.compile(r"^## (?P<version>\S+) - (?P<date>\d{4}-\d{2}-\d{2})[ \t]*$", re.MULTILINE)
 SECTION_START = re.compile(r"^## ", re.MULTILINE)
 PROJECT_TABLE = re.compile(
@@ -122,8 +123,8 @@ def parse_commit(message: str, sha: str = "") -> Commit:
 
 
 def breaking_note(body: str) -> str | None:
-    """The text of the body's ``BREAKING CHANGE:`` footer up to the next blank line; None
-    without one."""
+    """The text of the body's ``BREAKING CHANGE:`` footer up to the next blank line or git
+    trailer (``Reviewed-by: ...``); None without one."""
     lines = body.splitlines()
     for index, line in enumerate(lines):
         match = FOOTER.fullmatch(line.strip())
@@ -131,7 +132,7 @@ def breaking_note(body: str) -> str | None:
             continue
         text = [match["text"].strip()]
         for more in lines[index + 1 :]:
-            if not more.strip():
+            if not more.strip() or TRAILER.match(more):
                 break
             text.append(more.strip())
         return " ".join(part for part in text if part)

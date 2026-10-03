@@ -150,6 +150,12 @@ def released(repo, capsys):
             "build: drop python 3.11\n\nBREAKING-CHANGE: needs 3.12",
             ("build", None, "drop python 3.11", True, "needs 3.12"),
         ),
+        (
+            # git trailers after the footer are not part of it
+            "fix(io)!: read units\n\nBREAKING CHANGE: tables need a unit\nin the header.\n"
+            "Reviewed-by: Someone <a@b.c>\nFixes #12",
+            ("fix", "io", "read units", True, "tables need a unit in the header."),
+        ),
         ("Merge branch 'p4-09'", (None, None, "Merge branch 'p4-09'", False, "")),
         ("fix:no space", (None, None, "fix:no space", False, "")),
     ],
