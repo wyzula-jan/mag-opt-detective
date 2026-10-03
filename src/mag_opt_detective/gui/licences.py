@@ -1,4 +1,4 @@
-"""Help > About and its Licences… window: the licences of the third-party software.
+"""Help > About (with the app icon) and its Licences… window: third-party licences.
 
 App bundles carry ``THIRD_PARTY_NOTICES.txt`` (written by ``packaging/third_party_notices.py``
 at build time) with every licence text. Run from source, the window lists the installed
@@ -26,6 +26,7 @@ import mag_opt_detective
 
 NOTICES = "THIRD_PARTY_NOTICES.txt"
 LUCIDE = Path(__file__).resolve().parent / "icons" / "LICENSE-lucide.txt"
+APP_ICON = Path(__file__).resolve().parent / "app_icon.png"  # packaging/make_icon.py
 APP = "mag-opt-detective"
 
 

@@ -32,6 +32,7 @@ def restore_look(qapp):
 def test_smoke_test_passes(restore_look):
     assert app.main(["mag-opt-detective", "--smoke-test"]) == 0
     assert theme.current_theme() is not None  # the application look comes from the theme
+    assert not QApplication.windowIcon().isNull()
 
 
 def test_qt_arguments_are_ignored():
