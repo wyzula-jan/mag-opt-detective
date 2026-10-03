@@ -850,3 +850,38 @@ def test_a_waiting_apply_after_the_window_closes(qtbot, lines, errors):
     del w, c, panel
     qtbot.wait(2 * LiveApply.SETTLE)  # its timer went with the window: nothing runs
     assert not errors
+
+
+@pytest.mark.parametrize("grip", ["edge", "band"])
+def test_a_tool_switch_during_a_drag_ends_it(processed, qtbot, grip):
+    w, c = processed, processed.controller
+    panel = w.panels["processing"]
+    region = panel.regions["map"]
+    w.resize(1400, 900)
+    w.show()
+    qtbot.waitExposed(w)
+    panel.baseline_live.setChecked(True)
+    panel.live.slow = True  # changes made while dragging wait for the release
+    plot = w.plots.map
+    viewport = plot.view.viewport()
+    start = 550 if grip == "edge" else 500  # the upper edge, or inside the band
+    pixels = [viewport_pos(plot, 1.2, start + 50 * k) for k in range(4)]
+    QTest.mouseMove(viewport, pixels[0])
+    QTest.mousePress(viewport, LEFT, PLAIN, pixels[0])
+    for pixel in pixels[1:3]:
+        qtbot.wait(move_pause_ms())
+        QTest.mouseMove(viewport, pixel)
+    assert region.is_dragging() and panel.live.is_pending()
+    w.tools.set_active("zoom")  # Z before letting go: the drag ends there
+    assert not region.is_dragging() and not panel.live.is_pending()
+    moved = c.processing.baseline
+    assert moved[1] == pytest.approx(650, abs=5)
+    assert c.result.baseline_region == moved and not c.changed_since_process()
+    qtbot.wait(move_pause_ms())
+    QTest.mouseMove(viewport, pixels[3])
+    QTest.mouseRelease(viewport, LEFT, PLAIN, pixels[3])
+    assert c.processing.baseline == moved  # the rest of that drag is ignored
+    panel.live.slow = True
+    panel.baseline_hi.setText("1000")  # typed changes apply as usual (once typing pauses)
+    qtbot.waitUntil(lambda: c.result.baseline_region == c.processing.baseline, timeout=3000)
+    assert c.processing.baseline[1] == 1000 and not c.changed_since_process()

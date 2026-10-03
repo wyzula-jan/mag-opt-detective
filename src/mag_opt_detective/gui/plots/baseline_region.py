@@ -148,15 +148,23 @@ class BaselineRegion(pg.LinearRegionItem):
 
     def setMovable(self, m: bool = True) -> None:
         """Let the user drag the band and its edges, or only show it (no hover, no cursors:
-        drags go to the plot, e.g. to zoom)."""
+        drags go to the plot, e.g. to zoom). A drag in progress ends there, as if let go:
+        :attr:`editFinished` reports it (the rest of that drag is ignored)."""
+        dragging = hasattr(self, "_horizontal") and self.is_dragging()
         super().setMovable(m)
         if not hasattr(self, "_horizontal"):  # called while pyqtgraph builds the item
             return
         self._set_cursors(m)
-        if not m:
-            self.moving = False
-            for item in (self, *self.lines):
-                item.setMouseHover(False)
+        if m:
+            return
+        self.moving = False
+        self._drag = None
+        for line in self.lines:
+            line.moving = False
+        for item in (self, *self.lines):
+            item.setMouseHover(False)
+        if dragging:
+            self.sigRegionChangeFinished.emit(self)
 
     def _set_cursors(self, movable: bool) -> None:
         shape = Qt.CursorShape
