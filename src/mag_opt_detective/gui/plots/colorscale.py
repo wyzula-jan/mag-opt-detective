@@ -62,12 +62,13 @@ def fit_range(levels: Levels, data: Levels | None, pad: float = 0.08) -> Levels:
 
 
 def widened(view: Levels, levels: Levels, margin: float = 0.05) -> Levels:
-    """*view*, widened just enough to show *levels* (with a *margin* of the new span)."""
+    """*view*, widened just enough to show *levels*: only an end its level lies beyond
+    moves, to *margin* of the new span past that level; the other end stays."""
     (v0, v1), (lo, hi) = view, levels
     if v0 <= lo and hi <= v1:
         return view
     pad = margin * (max(v1, hi) - min(v0, lo))
-    return min(v0, lo - pad), max(v1, hi + pad)
+    return (lo - pad if lo < v0 else v0), (hi + pad if hi > v1 else v1)
 
 
 def same_values(a: np.ndarray | None, b: np.ndarray | None) -> bool:

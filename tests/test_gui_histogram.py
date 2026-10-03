@@ -31,6 +31,8 @@ def test_range_helpers():
     assert widened((0.0, 1.0), (0.2, 0.8)) == (0.0, 1.0)  # shown: unchanged
     assert widened((0.0, 1.0), (0.2, 1.5)) == pytest.approx((0.0, 1.575))  # one side only
     assert widened((0.0, 1.0), (-1.0, 0.5)) == pytest.approx((-1.1, 1.0))
+    assert widened((0.0, 1.0), (0.01, 1.5)) == pytest.approx((0.0, 1.575))  # near, not out
+    assert widened((0.0, 1.0), (-1.0, 2.0)) == pytest.approx((-1.15, 2.15))  # both out
     ramp = np.arange(1000.0)
     expected = np.percentile(ramp, [0.5, 99.5])
     assert tails(np.r_[ramp, np.nan, np.inf]) == pytest.approx(tuple(expected))
