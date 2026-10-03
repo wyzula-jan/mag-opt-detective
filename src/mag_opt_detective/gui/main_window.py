@@ -7,6 +7,7 @@ The window only builds the frame; the area modules (``plot_panel``, ``console``,
 
 from __future__ import annotations
 
+import itertools
 import logging
 import platform
 from pathlib import Path
@@ -68,6 +69,7 @@ from mag_opt_detective.gui.widgets import FlowLayout, Separator, last_dir, set_l
 logger = logging.getLogger("mag_opt_detective")
 
 SIDE_WIDTH, INSPECTOR_WIDTH, LOG_HEIGHT = 292, 300, 180
+DIRECT = Qt.FindChildOption.FindDirectChildrenOnly
 # narrowest side panel and inspector (the mockup's narrow-window inspector): the plot gives way
 # first, so the window stays usable down to about 1100 px with both open
 SIDE_MIN_WIDTH, INSPECTOR_MIN_WIDTH = 240, 280
@@ -318,6 +320,50 @@ def _group(*widgets: QWidget, label: str | None = None, separated: bool = False)
     return box
 
 
+def _layout_children(widget: QWidget) -> list[QWidget]:
+    """Child widgets of *widget*: those in its layout in layout order (nested layouts too),
+    then the others (pages, scroll contents, floating children) in creation order."""
+    ordered: list[QWidget] = []
+
+    def walk(layout) -> None:
+        for i in range(layout.count()):
+            item = layout.itemAt(i)
+            if item.widget() is not None:
+                ordered.append(item.widget())
+            elif item.layout() is not None:
+                walk(item.layout())
+
+    if widget.layout() is not None:
+        walk(widget.layout())
+    if isinstance(widget, QSplitter):
+        ordered += [widget.widget(i) for i in range(widget.count())]
+    if isinstance(widget, QScrollArea) and widget.widget() is not None:
+        ordered.append(widget.widget())
+    seen = set(ordered)
+    others = [w for w in widget.findChildren(QWidget, options=DIRECT) if w not in seen]
+    return [w for w in ordered + others if w.parentWidget() is not None and not w.isWindow()]
+
+
+def focus_order(root: QWidget) -> list[QWidget]:
+    """The widgets under *root* that take Tab focus, in layout order (as they are seen).
+
+    A focusable widget counts as one stop (a spin box, a table, a plot); a scroll area is no
+    stop of its own, only its content.
+    """
+    found: list[QWidget] = []
+
+    def visit(widget: QWidget) -> None:
+        takes_tab = bool(widget.focusPolicy() & Qt.FocusPolicy.TabFocus)
+        if takes_tab and widget is not root and not isinstance(widget, QScrollArea):
+            found.append(widget)
+            return
+        for child in _layout_children(widget):
+            visit(child)
+
+    visit(root)
+    return found
+
+
 def _segmented(options, name: str) -> SegmentedControl:
     control = SegmentedControl(size="sm")
     for value, text, tooltip in options:
@@ -426,6 +472,9 @@ class MainWindow(QMainWindow):
 
     ``themeChanged`` relays ``theme.changed``: area modules connect to it instead of the
     (application-wide) theme, so their connections end with the window.
+
+    Tab moves through the areas as they are laid out (:meth:`update_tab_order`), not in the
+    order their widgets were made.
     """
 
     themeChanged = Signal()
@@ -562,6 +611,7 @@ class MainWindow(QMainWindow):
         inspector_layout.addLayout(self._inspector_layout)
         inspector_layout.addStretch(1)
         scroll = QScrollArea()
+        scroll.setFocusPolicy(Qt.FocusPolicy.NoFocus)  # Tab goes to the controls inside
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QScrollArea.Shape.NoFrame)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
@@ -928,6 +978,29 @@ class MainWindow(QMainWindow):
             event.accept()
             return True
         return super().event(event)
+
+    def focus_areas(self) -> list[QWidget]:
+        """The areas Tab visits, in order."""
+        return [
+            self.toolbar,
+            self.rail,
+            self.side_panel,
+            self.stage_splitter,
+            self.inspector_panel,
+            self.statusBar(),
+        ]
+
+    def update_tab_order(self) -> list[QWidget]:
+        """Chain the focusable widgets of :meth:`focus_areas` in order; returns the chain."""
+        chain = [w for area in self.focus_areas() for w in focus_order(area)]
+        for first, second in itertools.pairwise(chain):
+            QWidget.setTabOrder(first, second)
+        return chain
+
+    def focusNextPrevChild(self, next: bool) -> bool:
+        # widgets made since (file rows, model cards, tools) join the chain where they show
+        self.update_tab_order()
+        return super().focusNextPrevChild(next)
 
     def showEvent(self, event) -> None:
         super().showEvent(event)

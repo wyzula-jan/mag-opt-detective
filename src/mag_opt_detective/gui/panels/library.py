@@ -340,6 +340,7 @@ class LibraryPanel(QWidget):
         layout.addWidget(self.auto_field_row)
         layout.addStretch(1)
         scroll = QScrollArea()
+        scroll.setFocusPolicy(Qt.FocusPolicy.NoFocus)  # Tab goes to the controls inside
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QScrollArea.Shape.NoFrame)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)

@@ -52,6 +52,7 @@ class PanelPage(QWidget):
         self.subtitle.setVisible(bool(subtitle))
 
         scroll = QScrollArea()
+        scroll.setFocusPolicy(Qt.FocusPolicy.NoFocus)  # Tab goes to the controls inside
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QScrollArea.Shape.NoFrame)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)

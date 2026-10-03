@@ -220,7 +220,8 @@ class ToolRegistry(QObject):
 
 # ---------------------------------------------------------------------- widgets
 class _Tabs(QTabBar):
-    """Flat tabs with an accent underline on the current one (as in the mockup)."""
+    """Flat tabs with an accent underline on the current one (as in the mockup); the tab under
+    the mouse turns to the text colour, and keyboard focus rings the current tab."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -228,6 +229,20 @@ class _Tabs(QTabBar):
         self.setExpanding(False)
         self.setDocumentMode(True)
         self.setUsesScrollButtons(False)
+        self.setMouseTracking(True)
+        self.hovered = -1
+
+    def mouseMoveEvent(self, event) -> None:
+        index = self.tabAt(event.position().toPoint())
+        if index != self.hovered:
+            self.hovered = index
+            self.update()
+        super().mouseMoveEvent(event)
+
+    def leaveEvent(self, event) -> None:
+        self.hovered = -1
+        self.update()
+        super().leaveEvent(event)
 
     def tabSizeHint(self, index: int) -> QSize:
         width = self.fontMetrics().horizontalAdvance(self.tabText(index)) + 24
@@ -242,12 +257,18 @@ class _Tabs(QTabBar):
         for i in range(self.count()):
             rect = self.tabRect(i)
             current = i == self.currentIndex()
-            painter.setPen(tokens["fg"] if current else tokens["muted"])
+            painter.setPen(tokens["fg"] if current or i == self.hovered else tokens["muted"])
             painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, self.tabText(i))
             if current:
                 painter.fillRect(
                     QRect(rect.left(), rect.bottom() - 1, rect.width(), 2), tokens["accent"]
                 )
+                if self.hasFocus():
+                    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+                    painter.setPen(tokens["accent"])
+                    painter.setBrush(Qt.BrushStyle.NoBrush)
+                    ring = QRectF(rect).adjusted(2.5, 5.5, -2.5, -4.5)
+                    painter.drawRoundedRect(ring, 5, 5)
         painter.end()
 
 

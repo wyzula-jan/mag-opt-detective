@@ -5,10 +5,10 @@ import logging
 import numpy as np
 import pytest
 import shiboken6
-from PySide6.QtCore import QPoint, Qt
+from PySide6.QtCore import QEvent, QPoint, Qt
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QComboBox
+from PySide6.QtWidgets import QComboBox, QToolButton
 
 import gui_helpers
 from gui_helpers import energy_label, load_sweep, process, shown_image
@@ -16,7 +16,7 @@ from mag_opt_detective import __version__
 from mag_opt_detective.core.pipeline import PlotKind, ReferenceMode
 from mag_opt_detective.core.processing import Axis
 from mag_opt_detective.core.units import Unit
-from mag_opt_detective.gui import display
+from mag_opt_detective.gui import display, theme
 from mag_opt_detective.gui.console import Badge
 from mag_opt_detective.gui.kit import SlidePanel
 from mag_opt_detective.gui.main_window import MainWindow
@@ -32,6 +32,10 @@ def shown(window, qtbot):
     window.show()
     qtbot.waitExposed(window)
     return window
+
+
+def view_page(window):
+    return window.inspector["view"].body_layout().itemAt(0).widget()
 
 
 def test_window_exposes_its_areas(window):
@@ -299,3 +303,64 @@ def test_toolbar_and_status_bar_details(window, sweep):
     assert window.windowTitle() == f"Magneto-Optical Detective {__version__} · Sample_4p2K_Sam1"
     window.controller.set_processing(smooth=True, reference_mode=ReferenceMode.SELF)
     assert f"Settings changed · process again ({display.process_key()})" in window.state_text()
+
+
+def test_tab_follows_the_layout_of_the_areas(shown, sweep):
+    """Toolbar, rail, panel, plot tabs and tools (registry order), plot, inspector, status bar;
+    widgets made later (the zero-field remove buttons) join where they are shown."""
+    w = shown
+    load_sweep(w, sweep)
+    process(w)
+    QGuiApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)  # rows of earlier lists
+    QGuiApplication.processEvents()
+    chain = w.update_tab_order()
+    tools = [w.tools.tool(name).button for name in w.tools.names()]
+    box = w.panels["sample"].measurement
+    remove = sorted(box.zero_list.findChildren(QToolButton), key=chain.index)
+    assert len(remove) == 2  # made when the files were set, after everything else
+    expected = [
+        w.toolbar.open_button,
+        w.toolbar.process_button,
+        w.toolbar.appearance,
+        *w._rail_buttons.values(),
+        *remove,
+        box.add_field_button,
+        w.plot_area.tabs,
+        *tools,
+        w.plot_area.scales_button,
+        w.plots.map.view,
+        view_page(w).field.lo_spin,
+        w.log_button,
+    ]
+    positions = [chain.index(widget) for widget in expected]
+    assert positions == sorted(positions)
+    assert [w.tools.tool(n).button for n in ("navigate", "zoom", "pick", "autopick")] == tools[:4]
+    walked, widget = [], chain[0]  # Qt's focus chain holds them in this order
+    for _ in range(5000):
+        if widget in expected and widget not in walked:
+            walked.append(widget)
+        widget = widget.nextInFocusChain()
+    assert walked == expected
+
+
+def test_keyboard_focus_and_hover_show_on_tabs_and_buttons(shown, qtbot):
+    tabs = shown.plot_area.tabs
+    shown.toolbar.open_button.setFocus()
+    qtbot.waitUntil(lambda: shown.toolbar.open_button.hasFocus())
+    plain = tabs.grab().toImage()
+    tabs.setFocus(Qt.FocusReason.TabFocusReason)
+    qtbot.waitUntil(tabs.hasFocus)
+    assert tabs.grab().toImage() != plain  # a ring around the current tab
+    QTest.mouseMove(tabs, tabs.tabRect(1).center())
+    qtbot.waitUntil(lambda: tabs.hovered == 1)
+    buttons = (
+        shown.toolbar.open_button,
+        shown.toolbar.export_button,
+        shown.panels["points"].import_button,
+        shown.panels["points"].export_button,
+        shown.panels["library"].load_button,
+        shown.plot_area.empty.action_button,
+    )
+    assert all(button.property("kit") == "button" for button in buttons)
+    sheet = theme.build_stylesheet(theme.tokens_for(False))
+    assert 'QPushButton[kit="button"]:focus' in sheet
