@@ -105,6 +105,29 @@ def test_field_range():
         FieldRange(1.0, 0.0, 2.0).values()
 
 
+def test_the_stacked_offset_of_other_maps_survives_a_unit_switch(controller):
+    """A unit switch on a per-unit d/dE rescales the offset for that map only: it is the
+    same per cm^-1 whichever map is shown."""
+    c = controller
+    c.set_view(stacked_offset=0.01)
+    c.set_selection(order=1, physical=True)
+    assert c.view.stacked_offset == 0.01  # in cm-1 the scale is 1
+    c.set_unit("THz")
+    assert c.view.stacked_offset == pytest.approx(0.01 * 33.35641)
+    c.set_selection(order=0)
+    assert c.view.stacked_offset == pytest.approx(0.01)
+    c.set_unit("cm-1")
+    assert c.view.stacked_offset == pytest.approx(0.01)
+    c.set_unit("meV")
+    c.set_selection(order=2)  # per unit, d/dE: per meV^2
+    assert c.view.stacked_offset == pytest.approx(0.01 * MEV**2)
+    c.set_selection(axis=Axis.FIELD)  # per T: the unit does not matter
+    assert c.view.stacked_offset == pytest.approx(0.01)
+    with c.restoring():  # restored values are already in the restored unit
+        c.set_selection(axis=Axis.ENERGY)
+    assert c.view.stacked_offset == pytest.approx(0.01)
+
+
 def test_unit_switch_converts_the_view_except_while_restoring(controller):
     changes = []
     controller.unitChanged.connect(lambda old, new: changes.append((old, new)))

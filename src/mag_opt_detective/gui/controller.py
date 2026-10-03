@@ -315,7 +315,10 @@ class ViewState:
 
     def converted(self, src: Unit, dst: Unit, selection: PlotSelection | None = None) -> ViewState:
         """The same view in unit *dst*: energy range and per-unit E-derivative levels, and with
-        the *selection* shown, the stacked intensity range and offset of such a derivative."""
+        the *selection* shown, the stacked intensity range and offset of such a derivative.
+
+        The offset is shared by all maps; :meth:`AppController.set_selection` scales it back
+        when another map is shown, so it is the same per cm^-1 for every map."""
         levels = {}
         for key, value in self.levels.items():
             k = parse_level_key(key)
@@ -538,8 +541,7 @@ class AppController(QObject):
     def derivative_scale(self) -> float:
         """Factor of the shown map's intensities over the same map per cm^-1 (a per-unit energy
         derivative scales with the unit; anything else is 1)."""
-        s = self._selection
-        return derivative_scale(self._unit, s.order, s.axis == Axis.ENERGY, s.physical)
+        return _selection_scale(self._unit, self._selection)
 
     def set_levels(self, key: str, lo: float, hi: float, mode: str | None = None) -> None:
         """Keep the colour levels of *key* (display unit).
@@ -592,9 +594,19 @@ class AppController(QObject):
         return self._selection
 
     def set_selection(self, **changes) -> None:
+        """Show another map. The stacked offset keeps its size per cm^-1: it is rescaled
+        when a per-unit energy derivative is shown or left in another unit, so a unit switch
+        made on one never changes the offset of the other maps (see :meth:`ViewState.converted`).
+        """
         new = dataclasses.replace(self._selection, **changes)
-        if new != self._selection:
+        old = self._selection
+        if new != old:
             self._selection = new
+            if not self._restoring:
+                factor = _selection_scale(self._unit, new) / _selection_scale(self._unit, old)
+                if factor != 1.0:
+                    offset = self._view.stacked_offset * factor
+                    self._view = dataclasses.replace(self._view, stacked_offset=offset)
             self.selectionChanged.emit()
 
     def current_levels(self) -> tuple[float, float] | None:
@@ -1322,6 +1334,12 @@ def _curve_name_rule(name: str) -> str | None:
     if not CURVE_NAME.fullmatch(name):
         return "use letters, digits, spaces and _ . + - (at most 32)"
     return None
+
+
+def _selection_scale(unit: Unit, selection: PlotSelection) -> float:
+    """:func:`derivative_scale` of the map *selection* shows in *unit*."""
+    s = selection
+    return derivative_scale(unit, s.order, s.axis == Axis.ENERGY, s.physical)
 
 
 def _mirrored(
