@@ -5,10 +5,9 @@ colour range and the default file name.
 :func:`figure_state` adapts :meth:`AppController.figure_state` (the map as shown: display unit,
 plot kind and derivative, ranges, colour map and the levels in effect, model overlays and the
 picked points, labelled with the model and curve names for a legend) and the stacked options
-of the view; the map's colour range is the window's, the
-1st-99th percentile of the whole map, or fixed. :func:`print_size` and :func:`figure_style` turn
-the typed values into the ones drawn with, plus the errors that block saving and the warnings
-shown inline.
+of the view; the map's colour range is the window's, the 1st-99th percentile of the whole map,
+or fixed. :func:`print_size` and :func:`figure_style` turn the typed values into the ones drawn
+with, plus the errors that block saving and the warnings shown inline.
 """
 
 from __future__ import annotations
