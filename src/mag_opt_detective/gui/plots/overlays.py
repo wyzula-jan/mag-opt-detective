@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 
 import numpy as np
 import pyqtgraph as pg
@@ -15,7 +15,8 @@ _BASE_Z = 10.0  # above the image (z = 0), below the crosshair
 class OverlayLayer:
     """Curves (optionally with a wider shadow below them) and scatter markers.
 
-    Items never take part in auto-ranging, and later layers are drawn above earlier ones.
+    Items never take part in auto-ranging, and later layers are drawn above earlier ones. What
+    the layer draws can be described for a plot legend (:meth:`set_legend`).
     """
 
     def __init__(self, name: str, plot: pg.PlotItem, z: float):
@@ -29,6 +30,8 @@ class OverlayLayer:
         self._n_curves = 0
         self._n_shadows = 0
         self._n_scatters = 0
+        self._legend: list = []
+        self._legend_listeners: list[Callable[[], object]] = []
 
     def _add(self, item: pg.GraphicsObject, dz: float) -> None:
         item.setZValue(self._z + dz)
@@ -92,8 +95,11 @@ class OverlayLayer:
         self._sync()
 
     def set_visible(self, visible: bool) -> None:
+        changed = bool(visible) != self._visible
         self._visible = bool(visible)
         self._sync()
+        if changed and self._legend:
+            self._tell_legend()
 
     def is_visible(self) -> bool:
         return self._visible
@@ -109,6 +115,25 @@ class OverlayLayer:
     def items(self) -> list[pg.GraphicsObject]:
         """All graphics items of the layer (shown or not)."""
         return [*self._shadows, *self._curves, *self._scatters]
+
+    # ------------------------------------------------------------------ legend
+    def set_legend(self, entries: Sequence) -> None:
+        """Describe what the layer draws as legend rows (:class:`legend.LegendEntry`), set by
+        whoever draws it; the listeners of :meth:`on_legend` are told."""
+        self._legend = list(entries)
+        self._tell_legend()
+
+    def _tell_legend(self) -> None:
+        for listener in self._legend_listeners:
+            listener()
+
+    def legend(self) -> list:
+        """The legend rows of what the layer draws (none while it is hidden)."""
+        return list(self._legend) if self._visible else []
+
+    def on_legend(self, listener: Callable[[], object]) -> None:
+        """Call *listener* whenever the legend rows are set."""
+        self._legend_listeners.append(listener)
 
 
 class OverlayMixin:
