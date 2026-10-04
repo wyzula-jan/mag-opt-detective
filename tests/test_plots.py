@@ -378,6 +378,23 @@ def test_overlay_layers(make_plot):
     assert plot.model_curve_data() == []
 
 
+def test_the_readout_keeps_the_plot_still(make_plot, qtbot):
+    """The cursor readout is as tall from the start as with its text: the plot under the mouse
+    does not move when the first text appears (a fallback font's taller line on Windows)."""
+    plot = make_plot()
+    fmap = ramp_map()
+    plot.set_map(fmap)
+    qtbot.wait(20)
+    empty = plot.label.minimumHeight()
+    before = plot.plot.vb.sceneBoundingRect()
+    plot.label.setText(plot.label.SAMPLE)
+    assert plot.label.itemRect().height() <= empty
+    plot.label.setText("")
+    hover(qtbot, plot, fmap.field[3], fmap.energy[5])
+    qtbot.wait(20)
+    assert plot.label.text and plot.plot.vb.sceneBoundingRect() == before
+
+
 def test_cursor_moved(make_plot, qtbot):
     plot = make_plot()
     fmap = ramp_map()
