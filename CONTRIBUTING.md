@@ -1,5 +1,14 @@
 # Contributing
 
+## Licence of contributions
+
+Magneto-Optical Detective is released under the GNU GPL v3 (GPL-3.0-only), and the author
+also offers commercial licences for use in products that are not released under the GPL.
+By sending a contribution (a pull request, a patch or code in an issue) you agree that it is
+released under GPL-3.0-only and that Jan Wyzula may also release it under other licence
+terms, including commercial licences. You confirm that you have the right to do so, for
+example that your employer does not own the contribution.
+
 ## Setup
 
 ```bash
