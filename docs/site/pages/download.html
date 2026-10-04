@@ -16,7 +16,7 @@ description: Download Magneto-Optical Detective for macOS, Windows or Linux, ope
 <ul class="platforms">
   <li>
     <h2 id="macos-download">macOS</h2>
-    <p class="req">macOS 13 Ventura or newer on Apple silicon (M1 or later).</p>
+    <p class="req">macOS 15 Sequoia or newer on Apple silicon (M1 or later).</p>
     <p>There is no build for Intel Macs: <a href="#source">run it from source</a> there.</p>
     <a class="btn primary" href="https://github.com/wyzula-jan/mag-opt-detective/releases/latest/download/mag-opt-detective-macos.zip">Download for macOS</a>
     <span class="file">mag-opt-detective-macos.zip</span>
@@ -45,8 +45,8 @@ description: Download Magneto-Optical Detective for macOS, Windows or Linux, ope
 <h3 id="macos">macOS</h3>
 <ol>
   <li>Double-click the zip to unpack it and move <b>Magneto-Optical Detective.app</b> to your Applications folder.</li>
-  <li>Right-click (or Control-click) the app, choose <b>Open</b>, and confirm with <b>Open</b>. Later launches work as usual.</li>
-  <li>On macOS 15 and newer that dialog has no Open button. Double-click the app once, then open <b>System Settings › Privacy &amp; Security</b>, scroll to the message about Magneto-Optical Detective and choose <b>Open Anyway</b>.</li>
+  <li>Double-click the app. macOS says it cannot verify it; choose <b>Done</b>.</li>
+  <li>Open <b>System Settings › Privacy &amp; Security</b>, scroll to the message about Magneto-Optical Detective, choose <b>Open Anyway</b> and confirm. Later launches work as usual.</li>
 </ol>
 <p>If macOS still refuses, or says the app “is damaged”, remove the quarantine flag that the browser put on it, in Terminal:</p>
 <pre><code>xattr -dr com.apple.quarantine "/Applications/Magneto-Optical Detective.app"</code></pre>

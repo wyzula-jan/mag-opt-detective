@@ -138,12 +138,13 @@ Standalone apps are attached to each
 | Archive | Runs on |
 | --- | --- |
 | `mag-opt-detective-windows.zip` | Windows 10 or 11, 64-bit (x86-64) |
-| `mag-opt-detective-macos.zip` | macOS 13 or newer on Apple silicon (no Intel build) |
+| `mag-opt-detective-macos.zip` | macOS 15 or newer on Apple silicon (no Intel build) |
 | `mag-opt-detective-linux.tar.gz` | 64-bit (x86-64) Linux with glibc 2.39 or newer (Ubuntu 24.04, Debian 13, Fedora 40 or newer) |
 
 Unpack it and start `mag-opt-detective` (`.exe` on Windows, *Magneto-Optical Detective.app*
-on macOS). The bundles are not code-signed: on macOS right-click the app and choose *Open*
-the first time, on Windows choose *More info › Run anyway*.
+on macOS). The bundles are not code-signed: on macOS open the app once, then allow it under
+*System Settings › Privacy & Security › Open Anyway*; on Windows choose *More info › Run
+anyway*.
 
 The first **Journal figure…** export after installing takes about 20 s while matplotlib
 builds its font cache. The cache is kept for later sessions in

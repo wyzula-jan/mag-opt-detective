@@ -117,7 +117,9 @@ if sys.platform == "darwin":
         version=BUNDLE_VERSION,
         info_plist={
             "CFBundleVersion": BUNDLE_VERSION,
-            "LSMinimumSystemVersion": "13.0",  # the PySide6 wheels' minimum
+            # the newest minimum of the bundled binaries (PySide6 6.11: macOS 15); the App
+            # bundles workflow fails when one of them needs a newer macOS than this
+            "LSMinimumSystemVersion": "15.0",
             "NSHighResolutionCapable": True,
         },
     )

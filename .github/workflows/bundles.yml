@@ -49,13 +49,18 @@ jobs:
           # pinned: the README states the glibc this bundle needs (2.39, Ubuntu 24.04)
           - os: ubuntu-24.04
             archive: mag-opt-detective-linux.tar.gz
-          # Apple silicon (arm64) only
-          - os: macos-latest
+          # Apple silicon (arm64) only; pinned with the minimum macOS the bundle declares
+          # (LSMinimumSystemVersion in the spec), which a step below checks
+          - os: macos-26
             archive: mag-opt-detective-macos.zip
+            # uv's own Python (built for macOS 11), never the runner's Homebrew Python, which
+            # is built for the runner's macOS and would raise the bundle's minimum to it
+            python-preference: only-managed
           - os: windows-latest
             archive: mag-opt-detective-windows.zip
     env:
       QT_QPA_PLATFORM: offscreen
+      UV_PYTHON_PREFERENCE: ${{ matrix.python-preference || 'managed' }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -79,6 +84,28 @@ jobs:
         run: |
           dist/mag-opt-detective/mag-opt-detective --smoke-test
           tar -czf "${{ matrix.archive }}" -C dist mag-opt-detective
+      - name: Check the minimum macOS (macOS)
+        if: runner.os == 'macOS'
+        # every binary in the app must run on the macOS the app declares: a library built for
+        # a newer one would crash the app there instead of macOS refusing to open it
+        run: |
+          app="dist/Magneto-Optical Detective.app"
+          declared=$(/usr/libexec/PlistBuddy -c "Print :LSMinimumSystemVersion" \
+            "$app/Contents/Info.plist")
+          echo "LSMinimumSystemVersion: $declared"
+          too_new=0
+          while IFS= read -r -d '' f; do
+            file -b "$f" | grep -q Mach-O || continue
+            minos=$(otool -l "$f" |
+              awk '/LC_BUILD_VERSION/ { b = 1 } b && $1 == "minos" { print $2; exit }')
+            [ -n "$minos" ] || continue
+            newest=$(printf '%s\n%s\n' "$declared" "$minos" | sort -V | tail -1)
+            if [ "$newest" != "$declared" ]; then
+              echo "::error::${f#"$app"/} needs macOS $minos"
+              too_new=1
+            fi
+          done < <(find "$app" -type f -print0)
+          exit "$too_new"
       - name: Smoke test and archive (macOS)
         if: runner.os == 'macOS'
         run: |
