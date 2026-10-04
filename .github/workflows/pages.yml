@@ -11,8 +11,6 @@ on:
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
 # one deployment at a time; a running one is allowed to finish
 concurrency:
@@ -35,6 +33,9 @@ jobs:
     name: Deploy
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      pages: write # deploy to GitHub Pages
+      id-token: write # prove that the deployment comes from this workflow
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
