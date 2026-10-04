@@ -10,7 +10,7 @@ from PySide6.QtWidgets import QLabel
 
 import golden
 import gui_helpers
-from gui_helpers import process, set_unit
+from gui_helpers import design_width, process, set_unit, widest_parts
 from mag_opt_detective.core.units import Unit, from_cm1
 from mag_opt_detective.gui.baseline_chip import BaselineChip, BaselineMark, baseline_mark
 from mag_opt_detective.gui.controller import SweepFiles
@@ -322,7 +322,8 @@ def test_the_chip_gets_narrower_and_never_widens_the_window(processed, qtbot):
     w = processed
     w.panels["processing"].baseline_live.setChecked(True)  # the widest chip
     type_region(w, 450, 550)
-    w.resize(1100, 800)
+    width = design_width(qtbot)
+    w.resize(width, 800)
     w.side_panel.set_open(True, animate=False)
     w.inspector_panel.set_open(True, animate=False)
     w.show()
@@ -333,7 +334,7 @@ def test_the_chip_gets_narrower_and_never_widens_the_window(processed, qtbot):
     summary = next(label for label in labels if label.text() == w.summary_text())
     left, right = chip(w).geometry().left(), chip(w).geometry().right()
     assert state.geometry().right() < left and right < summary.geometry().left()
-    assert w.minimumSizeHint().width() <= 1100
+    assert w.minimumSizeHint().width() <= width, widest_parts(w)
     shown = w.minimumSizeHint().width()
     chip(w).hide()
     assert w.minimumSizeHint().width() == shown  # it adds nothing to the minimum

@@ -204,7 +204,11 @@ def test_import_export_round_trip_and_unitless_files(processed, tmp_path, monkey
     path = tmp_path / "points.csv"
     save_to(monkeypatch, path)
     panel.export_button.click()
-    assert path.read_text().splitlines()[:3] == ["Energy (meV)\tLL 1", "0.5\t", "1.0\t37.2"]
+    assert path.read_text(encoding="utf-8").splitlines()[:3] == [
+        "Energy (meV)\tLL 1",
+        "0.5\t",
+        "1.0\t37.2",
+    ]
     c.drop_curve()
     assert len(c.points.points("LL 1")[0]) == 0
     open_from(monkeypatch, path)
@@ -213,7 +217,7 @@ def test_import_export_round_trip_and_unitless_files(processed, tmp_path, monkey
     assert w.points_undo.undoText() == "Import points.csv"
 
     unitless = tmp_path / "unitless.csv"  # no unit in the header: read in the display unit
-    unitless.write_text("\tLL 2\tCR\n0.5\t40\t\n1.0\t\t\n1.5\t\t44\n2.0\t41\t\n")
+    unitless.write_text("\tLL 2\tCR\n0.5\t40\t\n1.0\t\t\n1.5\t\t44\n2.0\t41\t\n", encoding="utf-8")
     open_from(monkeypatch, unitless)
     panel.import_button.click()
     assert chips(w) == [("LL 2", "2", True), ("CR", "1", False)]
@@ -229,7 +233,7 @@ def test_import_export_round_trip_and_unitless_files(processed, tmp_path, monkey
 def test_points_imported_before_process_stay_on_the_map(window, sweep, tmp_path, monkeypatch):
     w, c = window, window.controller
     path = tmp_path / "points.csv"
-    path.write_text("Energy (meV)\tLL 1\n0.5\t37.2\n1.0\t\n1.5\t38.5\n2.0\t\n")
+    path.write_text("Energy (meV)\tLL 1\n0.5\t37.2\n1.0\t\n1.5\t38.5\n2.0\t\n", encoding="utf-8")
     open_from(monkeypatch, path)
     w.panels["points"].import_button.click()
     shown = from_cm1(c.points.points("LL 1")[1], c.unit)
@@ -612,7 +616,7 @@ def test_every_point_edit_is_undone_and_redone(ctl, tmp_path):
     c.rename_curve("CR")
     c.drop_curve("LL 1")
     path = tmp_path / "points.csv"
-    path.write_text("Energy (cm-1)\tA\n0.5\t\n1.0\t333\n1.5\t\n2.0\t\n")
+    path.write_text("Energy (cm-1)\tA\n0.5\t\n1.0\t333\n1.5\t\n2.0\t\n", encoding="utf-8")
     c.load_points(path)
     c.set_new_table(True)
     c.process()
@@ -779,10 +783,10 @@ def test_picks_without_a_map_stay_on_the_table_rows(qapp):
 
 def test_imported_curve_names_follow_the_rules(ctl, tmp_path):
     path = tmp_path / "points.csv"
-    path.write_text("Energy (cm-1)\tLL/1?*\n0.5\t300\n")
+    path.write_text("Energy (cm-1)\tLL/1?*\n0.5\t300\n", encoding="utf-8")
     with pytest.raises(ValueError, match=r"points.csv: curve 'LL/1\?\*': use letters"):
         ctl.load_points(path)
-    path.write_text("Energy (cm-1)\tLL 1\tLL 1\n0.5\t300\t310\n")
+    path.write_text("Energy (cm-1)\tLL 1\tLL 1\n0.5\t300\t310\n", encoding="utf-8")
     with pytest.raises(ValueError, match="more than one curve is named 'LL 1'"):
         ctl.load_points(path)
     assert ctl.points_undo.count() == 0

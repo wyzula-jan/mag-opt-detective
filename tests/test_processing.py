@@ -366,8 +366,8 @@ def test_golden_points(golden_maps, tmp_path):
 
     out = tmp_path / "points.tsv"
     table.save_tsv(out, unit=Unit.MEV)
-    assert out.read_text().splitlines()[0] == "Energy (meV)\tpeak\tsingle"
-    assert path.read_text().splitlines()[0] == "\tpeak\tsingle"
+    assert out.read_text(encoding="utf-8").splitlines()[0] == "Energy (meV)\tpeak\tsingle"
+    assert path.read_text(encoding="utf-8").splitlines()[0] == "\tpeak\tsingle"
 
     def cells(p):
         return np.genfromtxt(p, delimiter="\t", skip_header=1)

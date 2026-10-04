@@ -11,7 +11,15 @@ from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QToolButton
 
 import gui_helpers
-from gui_helpers import inspector_page, load_sweep, process, select, set_unit
+from gui_helpers import (
+    design_width,
+    inspector_page,
+    load_sweep,
+    process,
+    select,
+    set_unit,
+    widest_parts,
+)
 from mag_opt_detective.core.spectra import FieldMap
 from mag_opt_detective.gui.main_window import MainWindow
 from mag_opt_detective.gui.plots import ColorMapPlot
@@ -395,11 +403,13 @@ def test_the_auto_scale_choice_is_remembered(qtbot, tmp_path, errors):
 
 
 def test_the_plot_toolbar_with_the_auto_scale_button_fits_1100_px(window, qtbot):
-    window.resize(1100, 800)
+    width = design_width(qtbot)
+    window.resize(width, 800)
     window.show()
     qtbot.waitExposed(window)
     assert window.side_panel.is_open() and window.inspector_panel.is_open()
-    assert window.minimumSizeHint().width() <= 1100 and window.width() == 1100
+    assert window.minimumSizeHint().width() <= width, widest_parts(window)
+    assert window.width() == width
     area = window.plot_area
     head = area.tabs.parentWidget()
     tabs_end = area.tabs.geometry().right()

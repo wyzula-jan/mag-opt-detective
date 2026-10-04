@@ -25,7 +25,7 @@ def test_descending_axis_is_flipped_and_scaled(tmp_path):
 
 def test_not_opus(tmp_path):
     path = tmp_path / "x.txt"
-    path.write_text("1 2\n3 4\n")
+    path.write_text("1 2\n3 4\n", encoding="utf-8")
     assert not is_opus_file(path)
     with pytest.raises(OpusError):
         read_opus(path)

@@ -148,7 +148,9 @@ def test_a_newer_version_shows_a_notice(qtbot, stored, opened):
         button(stored, "Release notes").click()
     assert opened == [PAGE] and bar.isHidden()
     assert stored.updates.notice() is None  # used: done with it
-    stored.updates.show_notice(feed.parse_releases(json.loads(SAMPLE.read_text()))[0])
+    stored.updates.show_notice(
+        feed.parse_releases(json.loads(SAMPLE.read_text(encoding="utf-8")))[0]
+    )
     button(stored, "Download").click()  # run from source: the release page
     assert opened == [PAGE, PAGE] and stored.updates.notice() is None
 
@@ -229,7 +231,7 @@ def test_a_skipped_version_shows_again_only_when_a_newer_one_is_out(qtbot, store
     assert stored.infobar.title_label.text().startswith("Version 0.3.0 is available")
     stored.infobar.dismiss()
 
-    payload = [release("v0.3.1", prerelease=True), *json.loads(SAMPLE.read_text())]
+    payload = [release("v0.3.1", prerelease=True), *json.loads(SAMPLE.read_text(encoding="utf-8"))]
     answer(c, payload)
     c.clock = lambda: NOW + timedelta(days=2)
     check(qtbot, stored, manual=False)

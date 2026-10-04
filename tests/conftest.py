@@ -18,6 +18,15 @@ def pytest_configure(config):
     config.addinivalue_line("markers", "network: the test may reach the network (none does)")
 
 
+def pytest_make_parametrize_id(config, val, argname):
+    """Short ids for long text parameters: pytest puts the test id into the environment
+    (PYTEST_CURRENT_TEST), and Windows refuses a variable of more than 32767 characters."""
+    if isinstance(val, str | bytes) and len(val) > 60:
+        text = val if isinstance(val, str) else val.decode("latin-1")
+        return f"{text[:40]}...({len(val)} chars)"
+    return None
+
+
 class NetworkGuard:
     """Refuses every request and records it, also one made on a worker thread (the update
     check), where the refusal would only end as a message in the app."""
