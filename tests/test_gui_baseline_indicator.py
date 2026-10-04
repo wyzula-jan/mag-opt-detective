@@ -497,6 +497,7 @@ def test_a_zoomed_drag_reserves_room_for_decimals(dragging, qtbot):
         return plot.plot.vb.mapSceneToView(plot.view.mapToScene(pixel)).y()
 
     press = viewport_pos(plot, 1.2, 550.0)  # the upper edge
+    geometry = plot.plot.vb.sceneBoundingRect()
     # the first step lands on a whole number, so the drag starts without decimals
     first = next(
         press - QPoint(0, dy)
@@ -517,8 +518,11 @@ def test_a_zoomed_drag_reserves_room_for_decimals(dragging, qtbot):
     for step in steps:
         qtbot.wait(move_pause_ms())
         QTest.mouseMove(viewport, step)
-        if len(seen) == 1:
-            assert "." not in seen[0][0].range_text()  # the first change: no decimals
+        if len(seen) == 1:  # the first change: no decimals
+            note = (
+                f"view {geometry} -> {plot.plot.vb.sceneBoundingRect()}, press at {energy(press)}"
+            )
+            assert "." not in seen[0][0].range_text(), note
     qtbot.wait(2 * LiveApply.INTERVAL)  # what is waiting applies while still dragged
     during = list(seen)
     QTest.mouseRelease(viewport, LEFT, PLAIN, steps[-1])
