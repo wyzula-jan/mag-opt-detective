@@ -228,32 +228,40 @@ notes* page of the docs site is built from `CHANGELOG.md`.
 
 - `--version X.Y.Z` releases a version of your choice instead of the computed one. **1.0.0**,
   the first public release, is made this way (`--version 1.0.0`); after it a breaking change
-  bumps the major version. At 1.0.0 also update the docs site's lines that say no release is
-  published yet: the home page's "In development" eyebrow and the notes on the home and
-  download pages.
+  bumps the major version. At 1.0.0 also update the home page's "In development" eyebrow.
 - `--notes FILE` replaces the generated section with your own Markdown (`###` headings at
   most). The first release had no tag to count from: it was made with
   `--first 0.1.0 --notes tools/release-notes-0.1.0.md`, a summary of the app instead of every
   commit since the start.
 
-**Publishing.** Push with the tags: `git push --follow-tags origin main`. Without
-`--follow-tags`, GitHub creates a lightweight tag on the release commit, and a later
-`git fetch --tags` reports that it "would clobber existing tag" (your annotated one). The
-*Release* workflow runs on every push to `main` (and by hand). When the version in
-`pyproject.toml` has a section in `CHANGELOG.md` and no GitHub release yet, it builds the app
-bundles with the *App bundles* workflow and creates the GitHub release `vX.Y.Z` on the release
-commit, from the pushed tag (or creating the tag when it was not pushed), with the section as
-its notes and the bundles attached; versions before 1.0.0 are marked as pre-releases. Any other
-push publishes nothing, and no version is published twice. If several versions were released
-between two pushes, only the newest gets a GitHub release; the others keep their tags and
-their `CHANGELOG.md` sections.
+**Publishing.** Push with the tags, in one push: `git push --atomic --follow-tags origin main`.
+Without `--follow-tags`, GitHub creates a lightweight tag on the release commit, which then
+blocks pushing your annotated one ("would clobber existing tag"). The *Release* workflow runs
+on every push to `main` (and by hand). When the version in `pyproject.toml` has a section in
+`CHANGELOG.md` and no GitHub release yet, it builds the app bundles with the *App bundles*
+workflow and the Python package (`uv build`, checked with `twine check`), uploads the package
+to PyPI, and then creates the GitHub release `vX.Y.Z` on the release commit, from the pushed
+tag (or creating the tag when it was not pushed), with the section as its notes and the
+bundles attached. Nothing is published unless every bundle and the package build; a failed
+PyPI upload leaves no GitHub release, so re-running the workflow tries again. Every version,
+0.x included, is a regular release marked as the latest: the site's download links use
+`releases/latest`, which skips pre-releases. Any other push publishes nothing, and no version
+is published twice. If several versions were released between two pushes, only the newest gets
+a GitHub release; the others keep their tags and their `CHANGELOG.md` sections.
+
+PyPI accepts the upload through trusted publishing, so no token is stored anywhere. Set up
+once: on PyPI a (pending) trusted publisher for the project `mag-opt-detective` with owner
+`wyzula-jan`, repository `mag-opt-detective`, workflow `release.yml` and environment `pypi`;
+on GitHub an environment `pypi` (Settings › Environments), limited to `main`. The docs site
+is deployed by hand: Settings › Pages › Source set to "GitHub Actions", then run the *Docs
+site* workflow after a release.
 
 **Update check.** The app tells people about a new release and never installs one.
 `updates.py` (no Qt) asks GitHub's API for the newest releases with one anonymous GET
 (`/repos/wyzula-jan/mag-opt-detective/releases?per_page=10`, a 5 s timeout, no account, no
 cookies, redirects only within the API), leaves out drafts and links outside this repository's
 releases, and compares the `vX.Y.Z` tags with `__version__` as SemVer does (PEP 440 forms such
-as `X.Y.Z.devN` as PEP 440 orders them); while the app is 0.x GitHub pre-releases count, from
+as `X.Y.Z.devN` as PEP 440 orders them); while the app is 0.x pre-releases count too, from
 1.0.0 only regular releases (the `updates/channel` setting overrides that). `gui/updates.py`
 runs the request on a worker thread once a day, a few seconds after `app.main` has shown the
 window (15 s at most), and shows a newer version in the info bar until the user closes it or

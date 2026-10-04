@@ -521,7 +521,10 @@ def test_only_the_release_workflow_publishes_releases():
     jobs = workflow["jobs"]
     assert jobs["bundles"]["uses"] == "./.github/workflows/bundles.yml"
     assert jobs["publish"]["permissions"] == {"contents": "write"}
-    assert set(jobs["publish"]["needs"]) == {"check", "bundles"}
+    assert set(jobs["publish"]["needs"]) == {"check", "bundles", "pypi"}  # PyPI first
+    assert set(jobs["pypi"]["needs"]) == {"check", "bundles", "dist"}  # only when all build
+    assert jobs["pypi"]["permissions"] == {"id-token": "write"}  # trusted publishing
+    assert jobs["pypi"]["environment"]["name"] == "pypi"
     steps = "\n".join(step.get("run", "") for step in jobs["check"]["steps"])
     assert "tools/release.py --print-version" in steps
     assert "tools/release.py --print-notes" in steps

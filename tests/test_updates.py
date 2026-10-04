@@ -155,7 +155,7 @@ def test_the_sample_answer_is_read_without_drafts():
     first = releases[0]
     assert first.tag == "v0.3.0"
     assert first.page == "https://github.com/wyzula-jan/mag-opt-detective/releases/tag/v0.3.0"
-    assert first.prerelease  # every 0.x release is a pre-release on GitHub
+    assert first.prerelease  # marked as one in the sample
     assert sorted(first.assets) == [
         "mag-opt-detective-linux.tar.gz",
         "mag-opt-detective-macos.zip",
@@ -267,7 +267,7 @@ def test_the_stable_channel_leaves_pre_releases_out():
     assert newest(releases, PRERELEASE).tag == "v1.2.0b1"  # a pre-release version, also untagged
     assert update_for(releases, Version.parse("1.0.0"), STABLE).tag == "v1.0.1"
     assert update_for(releases, Version.parse("1.0.1"), STABLE) is None
-    # 0.x releases are all pre-releases on GitHub: the stable channel finds none
+    # the sample's releases are all pre-releases: the stable channel finds none
     assert newest(parse_releases(sample()), STABLE) is None
 
 

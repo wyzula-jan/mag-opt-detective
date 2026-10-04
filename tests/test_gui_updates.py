@@ -209,7 +209,7 @@ def test_pre_releases_count_before_1_0_0_only(qtbot, stored):
     answer(stored.updates, payload, version="1.0.1")
     check(qtbot, stored)
     assert stored.infobar.title_label.text() == "You have the newest version (1.0.1)"
-    # every 0.x release is a pre-release on GitHub: they count while the app is 0.x
+    # pre-releases count while the app is 0.x
     answer(stored.updates, version="0.2.0")
     assert stored.updates.channel() == feed.PRERELEASE
 

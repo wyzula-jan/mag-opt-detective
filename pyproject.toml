@@ -1,5 +1,5 @@
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling>=1.27"]  # License-Expression (PEP 639)
 build-backend = "hatchling.build"
 
 [project]
@@ -39,7 +39,7 @@ classifiers = [
 
 [project.urls]
 Homepage = "https://github.com/wyzula-jan/mag-opt-detective"
-Documentation = "https://github.com/wyzula-jan/mag-opt-detective#readme"
+Documentation = "https://wyzula-jan.github.io/mag-opt-detective/"
 Source = "https://github.com/wyzula-jan/mag-opt-detective"
 Issues = "https://github.com/wyzula-jan/mag-opt-detective/issues"
 Changelog = "https://github.com/wyzula-jan/mag-opt-detective/blob/main/CHANGELOG.md"
