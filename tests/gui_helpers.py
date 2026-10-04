@@ -9,7 +9,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 from PySide6.QtCore import QPointF, Qt
-from PySide6.QtWidgets import QFileDialog, QMessageBox, QWidget
+from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox, QWidget
 
 from mag_opt_detective.gui.main_window import MainWindow
 
@@ -131,10 +131,18 @@ def click_stacked(window, b: float, energy: float, modifiers=Qt.KeyboardModifier
 
 
 def hover(qtbot, plot, x: float, y: float) -> tuple:
-    """Move the mouse to (*x*, *y*) on *plot* (a map or stacked view); the cursorMoved args."""
-    pos = plot.plot.vb.mapViewToScene(QPointF(x, y))
-    with qtbot.waitSignal(plot.cursorMoved) as blocker:
-        plot.plot.scene().sigMouseMoved.emit(pos)
+    """Move the mouse to (*x*, *y*) on *plot* (a map or stacked view); the cursorMoved args.
+
+    The plot reads moves through a rate-limited proxy, so a view still being laid out (slower
+    on Windows) could change under the move: then it is made again."""
+    vb = plot.plot.vb
+    for _attempt in range(5):
+        QApplication.processEvents()  # pending layouts and ranges first
+        pos = vb.mapViewToScene(QPointF(x, y))
+        with qtbot.waitSignal(plot.cursorMoved) as blocker:
+            plot.plot.scene().sigMouseMoved.emit(pos)
+        if vb.mapViewToScene(QPointF(x, y)) == pos:  # the view stayed as it was
+            break
     return tuple(blocker.args)
 
 

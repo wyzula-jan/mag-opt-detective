@@ -1255,7 +1255,9 @@ def test_expression_names_are_read_in_their_own_column(window, sweep, qtbot, err
     zeeman = add(window, "zeeman")
     custom = add(window, "custom")
     editor = card_of(window, custom).editor
-    editor.code.edit.setPlainText("E0 + amplitude*sqrt(B) + gap*B\nE1 + offset + mass*B**2")
+    # a name too long for the narrowest inspector with any UI font, short enough for 480 px
+    long = "amplitude_of_branch"
+    editor.code.edit.setPlainText(f"E0 + {long}*sqrt(B) + gap*B\nE1 + offset + mass*B**2")
     section = window.inspector["models"]
     splitter = window.body_splitter
     least = columns(editor.rows["E0"].value).slider
@@ -1274,8 +1276,8 @@ def test_expression_names_are_read_in_their_own_column(window, sweep, qtbot, err
             if width == 480 or len(name) <= 6:
                 assert whole and limit, (width, name)
         if width == INSPECTOR_MIN_WIDTH:  # too long for 280 px: elided, the tooltip has it
-            caption = editor.rows["amplitude"].value.caption
-            assert caption.width() < caption.fontMetrics().horizontalAdvance("amplitude")
+            caption = editor.rows[long].value.caption
+            assert caption.width() < caption.fontMetrics().horizontalAdvance(long)
         zrow = card_of(window, zeeman).editor.rows[0].g
         assert zrow.caption.width() == columns(zrow).label  # symbols keep theirs
         fields = [r.value.field for r in editor.rows.values()] + [zrow.field]
