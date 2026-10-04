@@ -9,6 +9,7 @@ from PySide6.QtWidgets import QFileDialog
 import gui_helpers
 from gui_helpers import (
     click_map,
+    design_width,
     energy_label,
     infobar_text,
     load_sweep,
@@ -16,6 +17,7 @@ from gui_helpers import (
     save_to,
     set_unit,
     shown_image,
+    widest_parts,
 )
 from mag_opt_detective.core.pipeline import PlotKind
 from mag_opt_detective.core.spectra import FieldMap, load_tsv, save_tsv
@@ -73,7 +75,9 @@ def test_export_load_save_and_merge(window, sweep, tmp_path, monkeypatch, errors
     save_to(monkeypatch, tmp_path / "S1.csv")
     window.commands["export_table"].trigger()
     exported = tmp_path / "S1_Ratio.csv"
-    assert exported.read_text().startswith("Energy (meV)\t0.50T")  # unit, then the fields
+    assert exported.read_text(encoding="utf-8").startswith(
+        "Energy (meV)\t0.50T"
+    )  # unit, then the fields
     fmap = load_tsv(exported)
     assert fmap.unit is Unit.MEV
     np.testing.assert_allclose(fmap.energy, sweep["x"] / 8.0656)
@@ -325,22 +329,23 @@ def test_a_click_on_a_row_brings_its_map_on_top(two_ranges, qtbot, errors):
     assert not errors
 
 
-def test_the_window_still_fits_1100_px(two_ranges):
+def test_the_window_still_fits_1100_px(two_ranges, qtbot):
     w, c = two_ranges, two_ranges.controller
+    width = design_width(qtbot)
     long = "A_very_long_library_map_name_from_a_long_sweep_" * 3
     c.add_map(synthetic(50, 300, 1.0, fields=FIELDS[:2]), long)
     for entry in c.library[1:]:
         c.update_entry(entry, used=True)
     assert long in library.refresh_preview(w).problem  # named in the preview
-    assert w.minimumSizeHint().width() <= 1100
+    assert w.minimumSizeHint().width() <= width, widest_parts(w)
     c.update_entry(c.library[-1], used=False)
     library.make_product(w, "field")
     c.product.name = long
     c.save_product()
-    w.resize(1100, 800)
+    w.resize(width, 800)
     w.show()
     w.show_panel("library")
-    assert w.minimumSizeHint().width() <= 1100
+    assert w.minimumSizeHint().width() <= width, widest_parts(w)
     panel = w.panels["library"]
     assert not panel.show_ticked_link.isHidden()  # the product shows: the ticked maps wait
     QTest.qWait(50)  # laid out
@@ -466,7 +471,7 @@ def test_the_product_box(two_ranges, tmp_path, monkeypatch, errors):
     box.table_button.click()
     table = load_tsv(tmp_path / "product.csv")
     np.testing.assert_allclose(table.values, product.fmap.values)
-    note = (tmp_path / "product_provenance.txt").read_text().splitlines()
+    note = (tmp_path / "product_provenance.txt").read_text(encoding="utf-8").splitlines()
     assert note[0] == "FIR+MIR sample 1" and note[1].startswith("Merge by energy of 2 maps, ")
     assert note[2:4] == ["- FIR (R(B)/R(0), E ≤ 240 cm⁻¹)", "- MIR (R(B)/R(0))"]
     assert note[-2:] == [
@@ -726,7 +731,7 @@ def test_the_product_table_is_what_the_plot_shows(two_ranges, tmp_path, monkeypa
     table = load_tsv(tmp_path / "out.csv")
     np.testing.assert_allclose(table.values, c.result.ratio.values)  # with the baseline
     assert not np.allclose(table.values, c.product.fmap.values)
-    note = (tmp_path / "out_provenance.txt").read_text().splitlines()
+    note = (tmp_path / "out_provenance.txt").read_text(encoding="utf-8").splitlines()
     assert "Baseline region 100 – 200 cm⁻¹, as plotted" in note
     assert not errors
 

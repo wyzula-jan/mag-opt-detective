@@ -11,7 +11,7 @@ from pathlib import Path
 import numpy as np
 import pyqtgraph as pg
 from pyqtgraph import exporters
-from PySide6.QtCore import QRectF, Signal
+from PySide6.QtCore import QRectF, Qt, Signal
 from PySide6.QtGui import QImage, QPainter, QPicture
 from PySide6.QtSvg import QSvgGenerator
 from PySide6.QtWidgets import QHBoxLayout, QWidget
@@ -149,6 +149,31 @@ def paint_item(
         exporter.setExportMode(False)
 
 
+class _Readout(pg.LabelItem):
+    """The cursor readout above a plot, as tall from the start as with any text it shows: a
+    glyph from a fallback font (the superscripts of cm⁻¹ on Windows) makes a line taller, and
+    a readout that grew with its first text would move the plot under the mouse."""
+
+    SAMPLE = "B = 0.000 T    E = 0.000 cm⁻¹    value = -1.2345e-05"
+
+    def __init__(self, *args, **kwargs):
+        self._height = 0.0
+        super().__init__(*args, **kwargs)
+        text = self.text
+        self.setText(self.SAMPLE)
+        self._height = self.itemRect().height()
+        self.setText(text)
+
+    def updateMin(self) -> None:
+        super().updateMin()
+        height = max(self.minimumHeight(), self._height)
+        self.setMinimumHeight(height)
+        for hint in (Qt.SizeHint.MinimumSize, Qt.SizeHint.PreferredSize):
+            width, _ = self._sizeHint[hint]
+            self._sizeHint[hint] = (width, height)
+        self.updateGeometry()
+
+
 class PlotView(OverlayMixin, QWidget):
     """A pyqtgraph plot with a cursor read-out label, crosshair, overlay layers and theme.
 
@@ -165,7 +190,8 @@ class PlotView(OverlayMixin, QWidget):
         self._row.setContentsMargins(0, 0, 0, 0)
         self._row.setSpacing(0)
         self._row.addWidget(self.view, stretch=1)
-        self.label = self.view.addLabel("", row=0, col=0, justify="left")
+        self.label = _Readout("", justify="left")
+        self.view.addItem(self.label, row=0, col=0)
         self.plot = self.view.addPlot(row=1, col=0)
         self._init_overlays()
         self._vline = pg.InfiniteLine(angle=90, movable=False)

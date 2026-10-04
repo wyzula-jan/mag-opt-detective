@@ -407,6 +407,8 @@ def test_the_region_moves_and_reshapes_by_drags_and_searches_while_it_changes(
     tool.detect_in((1.0, 4.0), (300.0, 1100.0))
     assert len(tool.candidates) == 2
     before, shown_range = tool.target, vb.viewRange()
+    geometry = vb.sceneBoundingRect()
+    pixel = vb.viewPixelSize()  # a press lands on a whole pixel: a drag may be one off
     calls = counting(monkeypatch)
     start, end = _viewport_pos(w, 2.5, 600.0), _viewport_pos(w, 4.5, 600.0)
     QTest.mousePress(viewport, LEFT, PLAIN, start)
@@ -420,7 +422,8 @@ def test_the_region_moves_and_reshapes_by_drags_and_searches_while_it_changes(
     assert not tool.region.editing and vb.viewRange() == shown_range  # moved, not panned
     (b0, b1), energies = tool.target.box
     assert b0 == pytest.approx(3.0, abs=0.1) and b1 == pytest.approx(6.0, abs=0.1)
-    assert energies == pytest.approx(before.box[1], abs=1e-6)
+    note = f"view {geometry} -> {vb.sceneBoundingRect()}, pixel {pixel}"
+    assert energies == pytest.approx(before.box[1], abs=1.01 * pixel[1]), note
     fields = tool.shown_map().field
     np.testing.assert_allclose(tool.candidates[0].field, fields[(fields >= b0) & (fields <= b1)])
 
@@ -428,8 +431,9 @@ def test_the_region_moves_and_reshapes_by_drags_and_searches_while_it_changes(
     grab = view.mapFromScene(corner.scenePos())  # the top right corner
     drag(qtbot, viewport, [grab, grab + QPoint(0, 15), grab + QPoint(0, 40)])
     (b0_new, b1_new), (e0_new, e1_new) = tool.target.box
-    assert (b0_new, b1_new) == pytest.approx((b0, b1), abs=1e-6)
-    assert e0_new == pytest.approx(energies[0], abs=1e-6) and e1_new < energies[1] - 50.0
+    assert (b0_new, b1_new) == pytest.approx((b0, b1), abs=1.01 * pixel[0])
+    assert e0_new == pytest.approx(energies[0], abs=1.01 * pixel[1])
+    assert e1_new < energies[1] - 50.0
 
     click = _viewport_pos(w, 5.0, line2(5.0))  # a click inside the region chooses a line
     assert tool.chosen == 0

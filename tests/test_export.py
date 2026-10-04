@@ -527,6 +527,27 @@ def _pdf_text(data: bytes) -> list[str]:
     return texts
 
 
+LIGATURE = re.compile(r"ff[il]|f[fil]")
+
+
+def _set_as(label: str, texts: list[str]) -> bool:
+    """Whether *label* is one of the PDF *texts*, also when the font set "fi", "fl" or "ff"
+    as one ligature glyph (DejaVu Sans, the fallback font on Linux, does; the text stays
+    editable, but this simple reader cannot map the glyph back to its letters)."""
+    parts = LIGATURE.split(label)
+    pattern = re.escape(parts[0]) + "".join(
+        f"(?:{pair}|.)" + re.escape(rest)
+        for pair, rest in zip(LIGATURE.findall(label), parts[1:], strict=True)
+    )
+    return any(re.fullmatch(pattern, text, re.S) for text in texts)
+
+
+def test_the_pdf_reader_accepts_ligatures():
+    assert _set_as("Magnetic field (T)", ["Magnetic field (T)"])
+    assert _set_as("Magnetic field (T)", ["Magnetic \x00eld (T)"])
+    assert not _set_as("Magnetic field (T)", ["Magnetic yield (T)", "Magnetic field"])
+
+
 def test_pdf_page_size_and_editable_text(map_state, tmp_path):
     fig = nature_single(map_state, panel_label="a")
     data = save(fig, tmp_path / "figure.pdf", dpi=300).read_bytes()
@@ -537,7 +558,7 @@ def test_pdf_page_size_and_editable_text(map_state, tmp_path):
     assert b"/Type3" not in data
     text = _pdf_text(data)
     for label in (FIELD_LABEL, "Energy (meV)", "Relative transmission", "a"):
-        assert label in text
+        assert _set_as(label, text), (label, text)
 
 
 def test_svg_keeps_text(map_state, tmp_path):

@@ -10,7 +10,7 @@ from PySide6.QtWidgets import QLabel
 
 import golden
 import gui_helpers
-from gui_helpers import process, set_unit
+from gui_helpers import design_width, process, set_unit, widest_parts
 from mag_opt_detective.core.units import Unit, from_cm1
 from mag_opt_detective.gui.baseline_chip import BaselineChip, BaselineMark, baseline_mark
 from mag_opt_detective.gui.controller import SweepFiles
@@ -322,7 +322,8 @@ def test_the_chip_gets_narrower_and_never_widens_the_window(processed, qtbot):
     w = processed
     w.panels["processing"].baseline_live.setChecked(True)  # the widest chip
     type_region(w, 450, 550)
-    w.resize(1100, 800)
+    width = design_width(qtbot)
+    w.resize(width, 800)
     w.side_panel.set_open(True, animate=False)
     w.inspector_panel.set_open(True, animate=False)
     w.show()
@@ -333,7 +334,7 @@ def test_the_chip_gets_narrower_and_never_widens_the_window(processed, qtbot):
     summary = next(label for label in labels if label.text() == w.summary_text())
     left, right = chip(w).geometry().left(), chip(w).geometry().right()
     assert state.geometry().right() < left and right < summary.geometry().left()
-    assert w.minimumSizeHint().width() <= 1100
+    assert w.minimumSizeHint().width() <= width, widest_parts(w)
     shown = w.minimumSizeHint().width()
     chip(w).hide()
     assert w.minimumSizeHint().width() == shown  # it adds nothing to the minimum
@@ -496,6 +497,7 @@ def test_a_zoomed_drag_reserves_room_for_decimals(dragging, qtbot):
         return plot.plot.vb.mapSceneToView(plot.view.mapToScene(pixel)).y()
 
     press = viewport_pos(plot, 1.2, 550.0)  # the upper edge
+    geometry = plot.plot.vb.sceneBoundingRect()
     # the first step lands on a whole number, so the drag starts without decimals
     first = next(
         press - QPoint(0, dy)
@@ -516,8 +518,11 @@ def test_a_zoomed_drag_reserves_room_for_decimals(dragging, qtbot):
     for step in steps:
         qtbot.wait(move_pause_ms())
         QTest.mouseMove(viewport, step)
-        if len(seen) == 1:
-            assert "." not in seen[0][0].range_text()  # the first change: no decimals
+        if len(seen) == 1:  # the first change: no decimals
+            note = (
+                f"view {geometry} -> {plot.plot.vb.sceneBoundingRect()}, press at {energy(press)}"
+            )
+            assert "." not in seen[0][0].range_text(), note
     qtbot.wait(2 * LiveApply.INTERVAL)  # what is waiting applies while still dragged
     during = list(seen)
     QTest.mouseRelease(viewport, LEFT, PLAIN, steps[-1])

@@ -12,6 +12,7 @@ from PySide6.QtCore import QSettings
 from PySide6.QtWidgets import QFileDialog, QLabel
 
 import gui_helpers
+from gui_helpers import design_width, widest_parts
 from helpers import sweep_name, write_opus, write_text
 from mag_opt_detective.core.pipeline import ReferenceMode
 from mag_opt_detective.gui import watch
@@ -171,7 +172,7 @@ def test_a_file_still_written_waits_until_it_stopped_changing(window, clock, tmp
     c = window.controller
     path = tmp_path / sweep_name(1.0)
     lines = [f"{a:.8f}\t{b:.8f}\r\n" for a, b in zip(X, 1.1 * BASE, strict=True)]
-    path.write_text("".join(lines[:40]))
+    path.write_text("".join(lines[:40]), encoding="utf-8")
     watcher.check_now()
     clock.now += 1.0
     with path.open("a") as fh:
@@ -193,7 +194,9 @@ def test_files_that_are_no_spectra_are_reported_once_and_left_out(window, clock,
     watcher = window.folder_watch
     watcher.start(tmp_path)
     skipped = count(watcher.skipped)
-    (tmp_path / "Sample_4p2K_Sam1_a01p000T.txt").write_text("energy\tintensity\n1\tx\n")
+    (tmp_path / "Sample_4p2K_Sam1_a01p000T.txt").write_text(
+        "energy\tintensity\n1\tx\n", encoding="utf-8"
+    )
     write_text(tmp_path / "notes.txt", X, BASE)  # a spectrum, but no field in its name
     arrive(window, clock)
     for _ in range(watch.MAX_FAILURES + 2):
@@ -482,7 +485,8 @@ def test_a_file_with_another_energy_axis_is_held_back(window, clock, tmp_path, e
     skipped = count(watcher.skipped)
     path = tmp_path / sweep_name(1.0)
     lines = [f"{a:.8f}\t{b:.8f}\n" for a, b in zip(X, 1.1 * BASE, strict=True)]
-    path.write_text("".join(lines[:40]))  # a slow writer paused half-way: it parses
+    # a slow writer paused half-way: it parses
+    path.write_text("".join(lines[:40]), encoding="utf-8")
     arrive(window, clock)
     clock.now += 1.0
     watcher.check_now()
@@ -505,7 +509,7 @@ def test_held_files_are_tried_again_when_the_sweep_is_complete(window, clock, tm
 
     first = [tmp_path / BEFORE, tmp_path / sweep_name(0.5)]
     for path, y in zip(first, (BASE, 1.05 * BASE), strict=True):
-        path.write_text(text(y, 40))  # listed while still half-written
+        path.write_text(text(y, 40), encoding="utf-8")  # listed while still half-written
         _aged(path, True)
     watcher = window.folder_watch
     watcher.start(tmp_path)
@@ -518,7 +522,7 @@ def test_held_files_are_tried_again_when_the_sweep_is_complete(window, clock, tm
             watcher.check_now()
     assert c_files(window) == [sweep_name(0.5)]  # held back, though there are more of them
     for path, y in zip(first, (BASE, 1.05 * BASE), strict=True):
-        path.write_text(text(y))  # the first files are finished
+        path.write_text(text(y), encoding="utf-8")  # the first files are finished
     arrive(window, clock)
     for _ in range(2):
         clock.now += watch.MIN_GAP_S
@@ -742,7 +746,7 @@ def test_files_left_out_are_reported_after_a_waiting_update(window, clock, tmp_p
     spectrum(tmp_path, 0.5, old=True)
     watcher = window.folder_watch
     watcher.start(tmp_path)  # an update now
-    (tmp_path / sweep_name(9.0)).write_text("garbage\n")
+    (tmp_path / sweep_name(9.0)).write_text("garbage\n", encoding="utf-8")
     spectrum(tmp_path, 1.0)
     watcher.check_now()
     clock.now += 0.5  # both complete: the junk fails, the update for 1 T waits for the gap
@@ -775,7 +779,8 @@ def test_the_chip_sits_beside_the_baseline_chip_and_shrinks(window, qtbot, tmp_p
     for b in (0.5, 1.0):
         spectrum(tmp_path, b, old=True)
     window.controller.set_processing(baseline=(300.0, 400.0))
-    window.resize(1100, 800)
+    width = design_width(qtbot)
+    window.resize(width, 800)
     window.show()
     qtbot.waitExposed(window)
     narrowest = window.minimumSizeHint().width()
@@ -791,7 +796,7 @@ def test_the_chip_sits_beside_the_baseline_chip_and_shrinks(window, qtbot, tmp_p
     assert watching.geometry().right() < baseline.geometry().left()
     assert baseline.geometry().right() < summary.geometry().left()
     assert watching.minimumSizeHint().width() == 0
-    assert window.minimumSizeHint().width() == narrowest <= 1100  # it adds nothing
+    assert window.minimumSizeHint().width() == narrowest <= width, widest_parts(window)
 
 
 def test_a_crowded_status_bar_shortens_the_folder_name_first(window, clock, qtbot, tmp_path):
@@ -812,7 +817,28 @@ def test_a_crowded_status_bar_shortens_the_folder_name_first(window, clock, qtbo
     window.set_cursor_text("B 7.25 T · E 1234.5 cm⁻¹ · 1.0234")
     watching, baseline = chip(window), window.baseline_chip
     tail = " · 3 files · 1 held back (energy axis)"  # the count stays
-    # once the bar is laid out, the baseline chip keeps its value and the count stays
+    # 1100 px leaves the chip room for "Watching FePS3…" and the count with the design font;
+    # a wider UI font (Linux, Windows) gets the window widened by what it lacks
+    metrics = watching.text_label.fontMetrics()
+    qtbot.waitUntil(lambda: watching.text().endswith(tail))
+    full = watching.sizeHint().width()
+    needed = full - metrics.horizontalAdvance(watching.text())
+    needed += metrics.horizontalAdvance("Watching FePS3…" + tail) + 2
+
+    def room_at(width: int) -> int:
+        window.resize(width, 800)
+        qtbot.waitUntil(lambda: window.width() == width)
+        qtbot.wait(50)  # the chip's room is set once the bar is laid out
+        return watching.maximumWidth()
+
+    width = 1100
+    room = room_at(width)
+    while room < needed:
+        width += max(needed - room, 10)
+        assert width < 2000, "the status bar leaves the chip no room"
+        room = room_at(width)
+    assert room < full  # still crowded: the whole text does not fit
+    # the baseline chip keeps its value and the count stays
     qtbot.waitUntil(lambda: baseline.form() == 0 and watching.shown_text().endswith(tail))
     shown = watching.shown_text()
     assert shown.startswith("Watching FePS3") and "…" in shown  # the folder name gave way
