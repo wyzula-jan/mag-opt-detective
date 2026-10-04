@@ -4,6 +4,20 @@ All notable changes to Magneto-Optical Detective, newest first. The format is ba
 Changelog, and the versions follow Semantic Versioning. `tools/release.py` writes each section
 from the commit messages when a version is released (see Releases in CONTRIBUTING.md).
 
+## 0.8.0 - 2026-10-04
+
+### Added
+
+- **gui:** the Library works around the plot. Ticking a map plots it; several ticked maps are drawn together on the map with an Overlap opacity slider, the one ticked or clicked last on top (the one you pick on and export). The plotted maps are marked in the list, and the top map's name is shown above the plot and in the status bar.
+- **gui:** Combine ticked maps by energy, by field or as an average, with a live preview of the result or the reason it cannot be made. The result is a product with its name, the maps and limits used and how they were joined, to plot, save to the library (with its provenance) or export as a data table (with a provenance note) or a journal figure.
+- **gui:** "Add to library" puts the processed sweep into the library in one step (also File › Add processed map to library).
+
+### Fixed
+
+- **core:** merging by energy no longer interleaves the samples of overlapping maps: an overlap is split at its middle, each map keeps its own measured energies, and a gap between the ranges stays empty instead of being filled with values never measured. Per-point derivatives stay comparable across the parts of a merged map.
+- **core:** limits are applied to both energy and field in every combination method, and merges that are not possible name the maps and say why.
+- **gui:** library limits can be typed freely; the map is redrawn once the typing pauses.
+
 ## 0.7.0 - 2026-10-04
 
 ### Added
