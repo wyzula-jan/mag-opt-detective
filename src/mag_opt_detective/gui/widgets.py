@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
 from pathlib import Path
 
+import shiboken6
 from PySide6.QtCore import (
     QAbstractTableModel,
     QLocale,
     QModelIndex,
+    QObject,
     QPersistentModelIndex,
     QPoint,
     QRect,
@@ -302,6 +305,25 @@ class Separator(QWidget):
         painter = QPainter(self)
         painter.fillRect(self.rect(), current_tokens()["line"])
         painter.end()
+
+
+def read_layout_items[T](layout: QLayout, read: Callable[[QLayoutItem], T]) -> list[T]:
+    """``read(item)`` for each item of *layout*, in order.
+
+    In a Qt layout class only Qt holds the items, and it deletes the ones that are no QObject
+    (widget items, spacers) without telling PySide6, which keeps their Python wrappers and may
+    later hand one back for a new object at the same address (on Linux a status bar's own
+    layout came back as a spacer). So their wrappers are dropped once read; *read* must not
+    keep the item. Items of a Python layout (e.g. :class:`FlowLayout`) are its own to keep.
+    """
+    qt_layout = type(layout).__module__.startswith("PySide6.")
+    values = []
+    for i in range(layout.count()):
+        item = layout.itemAt(i)
+        values.append(read(item))
+        if qt_layout and not isinstance(item, QObject) and not shiboken6.createdByPython(item):
+            shiboken6.invalidate(item)
+    return values
 
 
 class FlowLayout(QLayout):
