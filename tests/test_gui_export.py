@@ -1022,7 +1022,10 @@ def test_user_presets_export_and_import(processed, qtbot, tmp_path, monkeypatch,
     dialog.my_presets.fill_menu()
     dialog.my_presets.menu_actions["export"].trigger()
     path = tmp_path / "presets.json"
-    assert [p.name for p in presets_from_json(path.read_text())] == ["APS plain", "Inward"]
+    assert [p.name for p in presets_from_json(path.read_text(encoding="utf-8"))] == [
+        "APS plain",
+        "Inward",
+    ]
     assert dialog.messages.texts("ok") == ["Exported 2 presets to presets.json."]
 
     for name in ("APS plain", "Inward"):
@@ -1036,9 +1039,11 @@ def test_user_presets_export_and_import(processed, qtbot, tmp_path, monkeypatch,
     assert dialog.messages.texts("ok") == ["Imported 2 presets from presets.json (1 replaced)."]
 
     newer = tmp_path / "newer.json"
-    newer.write_text(json.dumps({"version": 7, "presets": []}))
+    newer.write_text(json.dumps({"version": 7, "presets": []}), encoding="utf-8")
     bad = tmp_path / "bad.json"
-    bad.write_text(json.dumps({"version": 1, "presets": [{"name": "X", "journal": "cell"}]}))
+    bad.write_text(
+        json.dumps({"version": 1, "presets": [{"name": "X", "journal": "cell"}]}), encoding="utf-8"
+    )
     for file, reason in ((newer, "newer version of the app"), (bad, "unknown journal 'cell'")):
         assert dialog.my_presets.import_file(file) == []
         (message,) = dialog.messages.texts("err")
@@ -1157,7 +1162,9 @@ def test_presets_of_a_newer_version_are_left_alone(
     presets.name_save.click()
     assert presets.name_note.level() == "err" and "newer version" in presets.name_note.text()
     path = tmp_path / "presets.json"
-    path.write_text(json.dumps({"version": 1, "presets": [{"name": "A", "journal": "aps"}]}))
+    path.write_text(
+        json.dumps({"version": 1, "presets": [{"name": "A", "journal": "aps"}]}), encoding="utf-8"
+    )
     assert presets.import_file(path) == []
     assert "newer version" in dialog.messages.texts("err")[0]
     w.close()

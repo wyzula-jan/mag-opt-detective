@@ -90,7 +90,8 @@ def test_a_script_that_fails_with_a_window_open_exits_quietly(tmp_path):
             window.destroyed.connect(lambda *_: print("window deleted", file=sys.stderr))
             raise SystemExit("the script failed")
             """
-        )
+        ),
+        encoding="utf-8",
     )
     run = subprocess.run(
         [sys.executable, str(script)],

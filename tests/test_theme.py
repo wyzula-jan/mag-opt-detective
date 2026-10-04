@@ -175,7 +175,7 @@ def test_every_needed_icon_exists_and_renders(qapp):
         assert not icon.pixmap(16, 16).isNull(), name
         assert b'stroke="currentColor"' in icons.svg_data(name)
     licence = Path(icons.__file__).with_name("LICENSE-lucide.txt")
-    assert "ISC License" in licence.read_text()
+    assert "ISC License" in licence.read_text(encoding="utf-8")
     with pytest.raises(KeyError):
         icons.icon("no-such-icon")
 

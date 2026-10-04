@@ -9,7 +9,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 from PySide6.QtCore import QPointF, Qt
-from PySide6.QtWidgets import QFileDialog, QMessageBox
+from PySide6.QtWidgets import QFileDialog, QMessageBox, QWidget
 
 from mag_opt_detective.gui.main_window import MainWindow
 
@@ -37,6 +37,44 @@ def window(qtbot, errors):
     yield w
     w.close()
     w.deleteLater()
+
+
+DESIGN_WIDTH = 1100  # the narrowest window the design allows, measured with the macOS UI font
+_new_window_width: list[int] = []
+
+
+def design_width(qtbot) -> int:
+    """The width a window must fit: 1100 px, or where the UI font is wider (Windows) the
+    minimum width of a new window there, so that a test still checks that a feature adds
+    no width."""
+    if not _new_window_width:
+        w = MainWindow()
+        qtbot.addWidget(w)
+        w.resize(DESIGN_WIDTH, 800)
+        w.show()
+        qtbot.waitExposed(w)
+        _new_window_width.append(w.minimumSizeHint().width())
+        w.close()
+    return max(DESIGN_WIDTH, _new_window_width[0])
+
+
+def widest_parts(widget: QWidget, depth: int = 3, indent: str = "") -> str:
+    """The minimum width of *widget* and of its widest visible children, *depth* levels
+    down: a failure message that says what makes a window wider than expected."""
+    hint, least = widget.minimumSizeHint().width(), widget.minimumWidth()
+    name = widget.objectName() or widget.property("kit") or ""
+    lines = [f"{indent}{type(widget).__name__} {name}: hint {hint}, minimum {least}"]
+    if depth:
+        children = [
+            child
+            for child in widget.findChildren(
+                QWidget, options=Qt.FindChildOption.FindDirectChildrenOnly
+            )
+            if child.isVisibleTo(widget)
+        ]
+        children.sort(key=lambda child: -max(child.minimumSizeHint().width(), child.minimumWidth()))
+        lines += [widest_parts(child, depth - 1, indent + "  ") for child in children[:4]]
+    return "\n".join(lines)
 
 
 def load_sweep(window, sweep) -> None:

@@ -49,7 +49,7 @@ def test_round_trip(tmp_path):
     path = tmp_path / "points.csv"
     table.save_tsv(path)
     lines = ["Energy (cm-1)\tLL 1\tLL 2", "0.25\t\t", "0.5\t\t3.25"]
-    assert path.read_text().splitlines() == lines
+    assert path.read_text(encoding="utf-8").splitlines() == lines
     back = PointTable.load_tsv(path, default_unit=Unit.MEV)  # the header wins
     assert back.names == ["LL 1", "LL 2"]
     np.testing.assert_allclose(back.field, table.field)
@@ -63,7 +63,7 @@ def test_round_trip_in_unit(tmp_path, unit):
     table.set_nearest("LL 1", 0.75, 333.5641)
     path = tmp_path / "points.csv"
     table.save_tsv(path, unit=unit)
-    header, first, *_ = path.read_text().splitlines()
+    header, first, *_ = path.read_text(encoding="utf-8").splitlines()
     assert header == f"Energy ({unit})\tLL 1"
     assert first == ("0.25\t100" if unit is Unit.MEV else "0.25\t24.18006014")
     back = PointTable.load_tsv(path)
@@ -72,7 +72,7 @@ def test_round_trip_in_unit(tmp_path, unit):
 
 def test_load_points_with_empty_column_name(tmp_path):
     path = tmp_path / "unitless.csv"
-    path.write_text("\t\tLL 1\n0.25\t\t40.1\n0.5\t\t\n")
+    path.write_text("\t\tLL 1\n0.25\t\t40.1\n0.5\t\t\n", encoding="utf-8")
     table = PointTable.load_tsv(path)
     assert table.names == ["unnamed_1", "LL 1"]
     np.testing.assert_allclose(table.column("LL 1"), [40.1, np.nan])

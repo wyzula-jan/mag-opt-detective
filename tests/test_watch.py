@@ -53,7 +53,7 @@ def test_a_file_that_keeps_failing_is_left_out_until_it_changes():
 
 def test_folder_listing_and_the_folder_of_a_sweep(tmp_path):
     (tmp_path / "sub").mkdir()
-    (tmp_path / ".hidden").write_text("x")
+    (tmp_path / ".hidden").write_text("x", encoding="utf-8")
     a = str(write_text(tmp_path / "s_a00p000T_a00p000T.txt", X, X))
     b = str(write_text(tmp_path / sweep_name(1.0), X, X))
     assert set(folder_listing(tmp_path)) == {a, b}

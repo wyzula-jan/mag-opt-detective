@@ -12,7 +12,7 @@ from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QComboBox, QLabel, QToolButton
 
 import gui_helpers
-from gui_helpers import energy_label, load_sweep, process, shown_image
+from gui_helpers import design_width, energy_label, load_sweep, process, shown_image, widest_parts
 from mag_opt_detective import __version__
 from mag_opt_detective.core.pipeline import PlotKind, ReferenceMode
 from mag_opt_detective.core.processing import Axis
@@ -338,6 +338,19 @@ def test_empty_states_replace_plots_with_nothing_to_show(shown, sweep, monkeypat
     assert empty.isHidden() and area.ref_kind.isHidden()
 
 
+def toolbar_rows(toolbar) -> int:
+    """The rows the toolbar's groups take: groups whose heights overlap share a row (with
+    some UI fonts the groups differ in height and sit at different y in one row)."""
+    rows, bottom = 0, None
+    for group in sorted(toolbar.groups, key=lambda group: group.y()):
+        if bottom is None or group.y() >= bottom:
+            rows += 1
+            bottom = group.y() + group.height()
+        else:
+            bottom = max(bottom, group.y() + group.height())
+    return rows
+
+
 def test_toolbar_keeps_one_row_at_the_design_size(shown, qtbot):
     """With the app's stylesheet the toolbar is one row at 1400 x 900 (as in the mockup):
     Process leaves out its key hint where that keeps the row, and shows it once the toolbar
@@ -355,7 +368,7 @@ def test_toolbar_keeps_one_row_at_the_design_size(shown, qtbot):
         qtbot.waitUntil(lambda: tb.width() == width)
         qtbot.waitUntil(
             lambda: (
-                len({group.y() for group in tb.groups}) == rows
+                toolbar_rows(tb) == rows
                 and tb.process_button.key_shown() is key
                 and (height is None or tb.height() == height)
             )
@@ -517,7 +530,8 @@ def test_the_status_bar_summary_is_elided(window, sweep, qtbot):
     load_sweep(w, sweep)
     process(w)
     w.controller.set_processing(energy_cut=(200.0, None))  # Settings changed · process again
-    w.resize(1100, 800)
+    width = design_width(qtbot)
+    w.resize(width, 800)
     w.show()
     qtbot.waitExposed(w)
     w.set_cursor_text("B = 15.75 T    E = 1199.12 cm⁻¹    R(B)/R(0) = 0.998765    " * 3)
@@ -526,4 +540,4 @@ def test_the_status_bar_summary_is_elided(window, sweep, qtbot):
     summary = next(label for label in labels if label.text() == w.summary_text())
     assert isinstance(summary, ElidedLabel)  # ends in "…" where it is cut
     assert summary.width() < summary.fontMetrics().horizontalAdvance(summary.text())
-    assert w.minimumSizeHint().width() <= 1100
+    assert w.minimumSizeHint().width() <= width, widest_parts(w)

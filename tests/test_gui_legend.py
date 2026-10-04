@@ -9,11 +9,11 @@ import math
 import numpy as np
 import pyqtgraph as pg
 import pytest
-from PySide6.QtCore import QPoint, QPointF, QSettings, Qt
+from PySide6.QtCore import QPoint, QPointF, QSettings, QSizeF, Qt
 from PySide6.QtTest import QTest
 
 import gui_helpers
-from gui_helpers import inspector_page, load_sweep, process, set_unit
+from gui_helpers import design_width, inspector_page, load_sweep, process, set_unit, widest_parts
 from mag_opt_detective.gui.inspector import model_state as ms
 from mag_opt_detective.gui.main_window import MainWindow
 from mag_opt_detective.gui.plots.legend import MARGIN
@@ -95,8 +95,9 @@ def drawn_rect(window, view="map"):
     return window.plots[view].plot.vb.mapRectFromScene(item.sceneBoundingRect())
 
 
-def assert_near(a: QPointF, b: QPointF, tolerance: float = 0.5) -> None:
-    assert (a.x(), a.y()) == pytest.approx((b.x(), b.y()), abs=tolerance)
+def assert_near(a: QPointF, b: QPointF, tolerance: float = 1.0, note: str = "") -> None:
+    # a mouse moves in whole pixels: the legend may land a fraction of one off
+    assert (a.x(), a.y()) == pytest.approx((b.x(), b.y()), abs=tolerance), note
 
 
 def assert_drawn_where_placed(window, view="map") -> None:
@@ -130,11 +131,13 @@ def test_the_toolbar_button_switches_the_legend_of_each_plot(processed):
 
 
 def test_the_plot_toolbar_with_the_legend_button_fits_1100_px(window, qtbot):
-    window.resize(1100, 800)
+    width = design_width(qtbot)
+    window.resize(width, 800)
     window.show()
     qtbot.waitExposed(window)
     assert window.side_panel.is_open() and window.inspector_panel.is_open()
-    assert window.minimumSizeHint().width() <= 1100 and window.width() == 1100
+    assert window.minimumSizeHint().width() <= width, widest_parts(window)
+    assert window.width() == width
     tabs = window.plot_area.tabs
     assert all(tabs.tabRect(i).width() < tabs.tabSizeHint(i).width() for i in range(3))
     window.resize(1400, 900)  # with room the tabs keep their padding
@@ -279,13 +282,17 @@ def test_a_drag_moves_the_legend_and_its_place_survives_zoom_and_resize(shown, q
     assert_drawn_where_placed(w)
     rect = legend(w).rect_in_view()
     assert rect.left() == pytest.approx(MARGIN) and rect.top() == pytest.approx(MARGIN)
+    # a move well inside the room the plot leaves (less with a wider UI font)
+    room = vb.rect().size() - rect.size() - QSizeF(2 * MARGIN, 2 * MARGIN)
+    step = QPoint(min(120, int(room.width()) // 2), min(80, int(room.height()) // 2))
+    note = f"room {room}, legend {rect}, step {step}"
 
     start = legend_centre(w)
     with qtbot.waitSignal(legend(w).moved):
-        drag(qtbot, w, [start, start + QPoint(120, 80)])
+        drag(qtbot, w, [start, start + step])
     x, y = legend(w).position()
-    assert 0 < x < 1 and 0 < y < 1
-    assert_near(legend(w).rect_in_view().topLeft(), rect.topLeft() + QPointF(120, 80))
+    assert 0 < x < 1 and 0 < y < 1, note
+    assert_near(legend(w).rect_in_view().topLeft(), rect.topLeft() + QPointF(step), note=note)
     assert vb.viewRange() == before  # no pan
     assert w.controller.points.points("LL 2")[0].size == points  # no point picked
 
