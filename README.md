@@ -7,14 +7,14 @@ recorded with Bruker OPUS, either as OPUS binary files (`*.0`, `*.1`, …) or as
 text files written by the OPUS export macro.
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/images/main-window-dark.webp">
-  <img alt="The main window: the Sample panel, an R(B)/R(0) map with picked points, a Dirac model and a legend, and the inspector" src="docs/images/main-window-light.webp">
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/wyzula-jan/mag-opt-detective/main/docs/images/main-window-dark.webp">
+  <img alt="The main window: the Sample panel, an R(B)/R(0) map with picked points, a Dirac model and a legend, and the inspector" src="https://raw.githubusercontent.com/wyzula-jan/mag-opt-detective/main/docs/images/main-window-light.webp">
 </picture>
 
 *All screenshots show a synthetic Landau fan, drawn by
-[`docs/make_screenshots.py`](docs/make_screenshots.py).*
+[`docs/make_screenshots.py`](https://github.com/wyzula-jan/mag-opt-detective/blob/main/docs/make_screenshots.py).*
 
-The documentation and download site ([`docs/site`](docs/site)) will be published at
+The documentation and download site ([`docs/site`](https://github.com/wyzula-jan/mag-opt-detective/tree/main/docs/site)) is published at
 <https://wyzula-jan.github.io/mag-opt-detective/>.
 
 ## Features
@@ -100,24 +100,35 @@ Choices (units, ranges, levels, colours, layout) are remembered between sessions
 *View › Reset settings* restores the defaults (and keeps your figure presets).
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/images/points-dark.webp">
-  <img alt="Picked points in meV, with the slim colour bar" src="docs/images/points-light.webp">
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/wyzula-jan/mag-opt-detective/main/docs/images/points-dark.webp">
+  <img alt="Picked points in meV, with the slim colour bar" src="https://raw.githubusercontent.com/wyzula-jan/mag-opt-detective/main/docs/images/points-light.webp">
 </picture>
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/images/export-window-dark.webp">
-  <img alt="The journal figure window with a Nature single-column preview" src="docs/images/export-window-light.webp">
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/wyzula-jan/mag-opt-detective/main/docs/images/export-window-dark.webp">
+  <img alt="The journal figure window with a Nature single-column preview" src="https://raw.githubusercontent.com/wyzula-jan/mag-opt-detective/main/docs/images/export-window-light.webp">
 </picture>
 
 ## Installation
 
-Requires Python ≥ 3.12 and [uv](https://docs.astral.sh/uv/).
+The standalone apps need no Python (see *Without Python* below). With
+Python ≥ 3.12, install it from PyPI as an app of its own, with [uv](https://docs.astral.sh/uv/)
+or [pipx](https://pipx.pypa.io); this also works on Intel Macs:
+
+```bash
+uv tool install mag-opt-detective   # or: pipx install mag-opt-detective
+mag-opt-detective
+```
+
+`uv tool upgrade mag-opt-detective` updates it. To run it from a source checkout instead:
 
 ```bash
 uv sync
 ```
 
 ## Running
+
+From a source checkout:
 
 ```bash
 uv run mag-opt-detective
@@ -259,7 +270,7 @@ Never attach measurement data you cannot share.
 
 ## Development
 
-See [CONTRIBUTING.md](CONTRIBUTING.md). In short:
+See [CONTRIBUTING.md](https://github.com/wyzula-jan/mag-opt-detective/blob/main/CONTRIBUTING.md). In short:
 
 ```bash
 uv sync
@@ -275,7 +286,7 @@ committed.
 
 If you use Magneto-Optical Detective for an analysis in a publication, please cite it with
 the version you used, which the About box shows (*Help › About*, on macOS in the app menu).
-[`CITATION.cff`](CITATION.cff) has the details (GitHub shows them under *Cite this
+[`CITATION.cff`](https://github.com/wyzula-jan/mag-opt-detective/blob/main/CITATION.cff) has the details (GitHub shows them under *Cite this
 repository*), for example:
 
 > J. Wyzula, *Magneto-Optical Detective*, version *x.y.z*,
@@ -286,7 +297,7 @@ repository*), for example:
 Copyright © 2026 Jan Wyzula.
 
 Magneto-Optical Detective is free software under the [GNU General Public License,
-version 3](LICENSE) (GPL-3.0-only): you may use, study, change and share it. What you
+version 3](https://github.com/wyzula-jan/mag-opt-detective/blob/main/LICENSE) (GPL-3.0-only): you may use, study, change and share it. What you
 share, changed or not, must stay under the same licence and come with its source code.
 It comes without any warranty.
 
@@ -300,6 +311,6 @@ v3), [numpy](https://numpy.org), [scipy](https://scipy.org),
 [matplotlib](https://matplotlib.org), [pyqtgraph](https://www.pyqtgraph.org) and
 [Pillow](https://python-pillow.org). The icons are [Lucide](https://lucide.dev) icons (ISC
 licence, parts MIT), see
-[`LICENSE-lucide.txt`](src/mag_opt_detective/gui/icons/LICENSE-lucide.txt). The app bundles
+[`LICENSE-lucide.txt`](https://github.com/wyzula-jan/mag-opt-detective/blob/main/src/mag_opt_detective/gui/icons/LICENSE-lucide.txt). The app bundles
 contain every licence text in `THIRD_PARTY_NOTICES.txt`, which *Help › About › Licences…*
 also shows.

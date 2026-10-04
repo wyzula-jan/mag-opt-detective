@@ -10,6 +10,8 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 SITE = ROOT / "docs" / "site"
 README_IMAGES = ROOT / "docs" / "images"
+REPOSITORY = "https://github.com/wyzula-jan/mag-opt-detective/"
+RAW = "https://raw.githubusercontent.com/wyzula-jan/mag-opt-detective/main/"
 RELEASES = "https://github.com/wyzula-jan/mag-opt-detective/releases/latest/download/"
 MAX_IMAGE_BYTES = 200_000  # lossless WebP of a 1400 x 900 window: about 140 kB
 MAX_IMAGES = 24  # 10 scenes, each light and dark, and room for two more
@@ -231,12 +233,24 @@ def test_the_screenshot_check_needs_a_dark_twin_of_the_same_size(tmp_path):
 
 def test_the_readme_screenshots_follow_the_appearance():
     text = (ROOT / "README.md").read_text(encoding="utf-8")
-    assert not re.search(r"!\[[^\]]*\]\(docs/", text), "a screenshot without its dark twin"
-    shown = themed_images(text, ROOT, "README.md")
+    assert not re.search(r"!\[[^\]]*\]\([^)]*docs/", text), "a screenshot without its dark twin"
+    shown = themed_images(text.replace(RAW, ""), ROOT, "README.md")
     assert shown == images_in(README_IMAGES)
     for name in shown:  # copies of the site's, so git keeps each picture once
         site = (SITE / "images" / name).read_bytes()
         assert (README_IMAGES / name).read_bytes() == site, name
+
+
+def test_the_readme_links_also_work_on_pypi():
+    # PyPI shows the readme without the repository: every link and image is absolute, and the
+    # ones into the repository name a file on main
+    text = (ROOT / "README.md").read_text(encoding="utf-8")
+    found = re.findall(r'\]\(([^)\s]+)\)|(?:src|srcset|href)="([^"]+)"', text)
+    for url in (link or attribute for link, attribute in found):
+        assert url.startswith(("https://", "mailto:")), f"README.md: {url} is relative"
+        for prefix in (RAW, REPOSITORY + "blob/main/", REPOSITORY + "tree/main/"):
+            if url.startswith(prefix):
+                assert (ROOT / url.removeprefix(prefix).partition("#")[0]).exists(), url
 
 
 def test_the_screenshot_script_draws_every_image():
@@ -308,7 +322,7 @@ def test_the_release_notes_are_built_from_the_changelog(build, tmp_path):
     assert text.index('id="v0.2.0"') < text.index('id="v0.1.0"')  # newest first
     assert '<h2 id="v0.2.0">Version 0.2.0</h2>' in text
     assert '<time datetime="2026-10-05">5 October 2026</time>' in text
-    assert text.count('<span class="badge">Pre-release</span>') == 2
+    assert "Pre-release" not in text  # 0.x versions are regular releases
     assert "<h3>Added</h3>" in text and "<h3>Known limitations</h3>" in text
     assert (
         "<li><strong>core:</strong> read <code>.dpt</code> files &lt;b&gt;now&lt;/b&gt; "
@@ -324,7 +338,6 @@ def test_the_release_notes_before_the_first_release(build, tmp_path):
     assert build.changelog_html(header) == build.NO_RELEASE
     assert build.read_changelog(tmp_path / "missing.md") == build.NO_RELEASE
     assert "No release yet" in build.NO_RELEASE
-    assert "Pre-release" not in build.changelog_html("## 1.0.0 - 2027-01-04\n\n- Public.\n")
     with pytest.raises(ValueError, match="not a release heading"):
         build.changelog_html(header + "\n## Unreleased\n\n- a\n")
 

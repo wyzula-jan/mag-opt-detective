@@ -79,7 +79,7 @@ CHANGELOG_MARK = "<!-- changelog -->"
 # CHANGELOG.md: "## 1.2.3 - 2026-10-03" starts a release; its body has "### " headings,
 # "- " lists (indented lines continue an item) and paragraphs, with **bold** and `code`
 RELEASE_START = re.compile(r"^## ", re.MULTILINE)
-RELEASE = re.compile(r"## (?P<version>(?P<major>\d+)\.\d+\.\d+) - (?P<date>\d{4}-\d{2}-\d{2})")
+RELEASE = re.compile(r"## (?P<version>\d+\.\d+\.\d+) - (?P<date>\d{4}-\d{2}-\d{2})")
 INLINE = re.compile(r"\*\*(?P<bold>.+?)\*\*|`(?P<code>[^`]+)`")
 MONTHS = (
     "January",
@@ -298,10 +298,9 @@ def changelog_html(text: str) -> str:
             raise ValueError(f"CHANGELOG.md: not a release heading: {head.strip()!r}")
         version = match["version"]
         date = dt.date.fromisoformat(match["date"])
-        badge = '\n  <span class="badge">Pre-release</span>' if match["major"] == "0" else ""
         releases.append(
             '<div class="release-head">\n'
-            f'  <h2 id="v{version}">Version {version}</h2>{badge}\n'
+            f'  <h2 id="v{version}">Version {version}</h2>\n'
             f'  <span class="muted small"><time datetime="{date.isoformat()}">'
             f"{date.day} {MONTHS[date.month - 1]} {date.year}</time></span>\n"
             "</div>\n" + markdown_html(body)
