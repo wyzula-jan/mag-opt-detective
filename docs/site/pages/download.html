@@ -70,13 +70,13 @@ description: Download Magneto-Optical Detective for macOS, Windows or Linux, ope
 <p>The check is one anonymous request to GitHub's releases API: no account, no cookies and nothing about you or your data, only the app's version; GitHub sees your IP address, as for any web page. Without a connection the app says nothing. <b>Help › Check for updates…</b> checks at once and says what came out, and <b>Help › Check for updates at startup</b> switches the daily check off. Until version 1.0.0 the app also offers pre-releases (test versions, marked as such on GitHub); from 1.0.0 on it offers regular releases only.</p>
 
 <h2 id="pypi">Install with Python</h2>
-<p>With Python 3.12 or newer, install the app from <a href="https://pypi.org/project/mag-opt-detective/">PyPI</a> as an app of its own, with <a href="https://docs.astral.sh/uv/">uv</a> or <a href="https://pipx.pypa.io">pipx</a>. This works on every computer that runs Qt 6, including Intel Macs:</p>
+<p>With Python 3.12 or newer, install the app from <a href="https://pypi.org/project/mag-opt-detective/">PyPI</a> as an app of its own, with <a href="https://docs.astral.sh/uv/">uv</a> or <a href="https://pipx.pypa.io">pipx</a>. This works on Windows, on Linux and on macOS 15 or newer, also on Intel Macs:</p>
 <pre><code>uv tool install mag-opt-detective
 mag-opt-detective</code></pre>
 <p>With pipx: <code>pipx install mag-opt-detective</code>. <code>uv tool upgrade mag-opt-detective</code> (or <code>pipx upgrade mag-opt-detective</code>) updates it.</p>
 
 <h2 id="source">Run from source with uv</h2>
-<p>This works on every computer that runs Qt 6, including Intel Macs, and gives you the newest development state. You need <a href="https://git-scm.com">git</a> and <a href="https://docs.astral.sh/uv/">uv</a>; uv downloads a matching Python (3.12 or newer) if you do not have one.</p>
+<p>This works wherever the install with Python does (on a Mac, macOS 15 or newer) and gives you the newest development state. You need <a href="https://git-scm.com">git</a> and <a href="https://docs.astral.sh/uv/">uv</a>; uv downloads a matching Python (3.12 or newer) if you do not have one.</p>
 <pre><code>git clone https://github.com/wyzula-jan/mag-opt-detective.git
 cd mag-opt-detective
 uv sync

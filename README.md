@@ -113,7 +113,7 @@ Choices (units, ranges, levels, colours, layout) are remembered between sessions
 
 The standalone apps need no Python (see *Without Python* below). With
 Python ≥ 3.12, install it from PyPI as an app of its own, with [uv](https://docs.astral.sh/uv/)
-or [pipx](https://pipx.pypa.io); this also works on Intel Macs:
+or [pipx](https://pipx.pypa.io). On a Mac this needs macOS 15 or newer, also on Intel Macs:
 
 ```bash
 uv tool install mag-opt-detective   # or: pipx install mag-opt-detective

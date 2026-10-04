@@ -1,6 +1,7 @@
 """Project metadata and the bundle's build-time helpers in packaging/."""
 
 import importlib.util
+import re
 import tomllib
 from pathlib import Path
 
@@ -22,6 +23,22 @@ def load(name: str):
 def test_the_version_is_the_same_in_pyproject_and_the_package():
     project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]
     assert project["version"] == mag_opt_detective.__version__
+
+
+def test_the_texts_give_the_minimum_macos_the_bundle_declares():
+    spec = (ROOT / "packaging" / "mag-opt-detective.spec").read_text(encoding="utf-8")
+    declared = re.search(r'"LSMinimumSystemVersion": "(\d+)\.0"', spec)[1]
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    assert f"| macOS {declared} or newer on Apple silicon" in readme
+    assert f"On a Mac this needs macOS {declared} or newer" in readme
+    pages = ROOT / "docs" / "site" / "pages"
+    download = (pages / "download.html").read_text(encoding="utf-8")
+    assert f'<p class="req">macOS {declared} ' in download
+    assert f"on macOS {declared} or newer, also on Intel Macs" in download
+    index = (pages / "index.html").read_text(encoding="utf-8")
+    assert f'<p class="req">macOS {declared} or newer on Apple silicon</p>' in index
+    for text in (readme, download, index):  # no other minimum
+        assert set(re.findall(r"macOS (\d+)(?: [A-Z][a-z]+)? or newer", text)) == {declared}
 
 
 def test_the_licence_and_the_citation_agree_with_the_project():

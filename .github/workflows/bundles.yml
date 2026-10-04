@@ -49,8 +49,9 @@ jobs:
           # pinned: the README states the glibc this bundle needs (2.39, Ubuntu 24.04)
           - os: ubuntu-24.04
             archive: mag-opt-detective-linux.tar.gz
-          # Apple silicon (arm64) only; pinned with the minimum macOS the bundle declares
-          # (LSMinimumSystemVersion in the spec), which a step below checks
+          # Apple silicon (arm64) only; a pinned runner, so that an image update cannot change
+          # the build unnoticed. The bundle declares macOS 15 (LSMinimumSystemVersion in the
+          # spec), and a step below checks that every bundled binary runs there.
           - os: macos-26
             archive: mag-opt-detective-macos.zip
             # uv's own Python (built for macOS 11), never the runner's Homebrew Python, which
