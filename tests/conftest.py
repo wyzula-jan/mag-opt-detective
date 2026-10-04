@@ -10,6 +10,11 @@ import pytest
 from helpers import sweep_name, write_text
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+if sys.platform == "win32":
+    # the offscreen platform looks for fonts only in Qt's own (missing) font folder on Windows
+    # and lays text out without any font, about twice as wide: give it the system's fonts
+    windows = os.environ.get("WINDIR", r"C:\Windows")
+    os.environ.setdefault("QT_QPA_FONTDIR", os.path.join(windows, "Fonts"))
 
 DATA_DIR = Path(__file__).resolve().parents[1] / "Data_to_test"
 
