@@ -340,7 +340,9 @@ def main(argv: list[str] | None = None) -> int:
     theme = Theme("light")
     theme.apply(app)
     with tempfile.TemporaryDirectory(prefix="mag-opt-docs-") as tmp:
-        sweep = write_sweep(Path(tmp))
+        folder = Path(tmp) / "Demo sweep"  # a fixed name: the Sample panel shows it
+        folder.mkdir()
+        sweep = write_sweep(folder)
         for name in scenes:
             for scheme in SCHEMES:
                 path = out / f"{name}-{scheme}{SUFFIX}"
