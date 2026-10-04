@@ -66,7 +66,13 @@ from mag_opt_detective.gui.panels.common import ElidedLabel
 from mag_opt_detective.gui.settings import Persistence
 from mag_opt_detective.gui.theme import SCHEMES, Theme, current_theme, current_tokens
 from mag_opt_detective.gui.tools import autopick
-from mag_opt_detective.gui.widgets import FlowLayout, Separator, last_dir, set_last_dir
+from mag_opt_detective.gui.widgets import (
+    FlowLayout,
+    Separator,
+    last_dir,
+    read_layout_items,
+    set_last_dir,
+)
 
 logger = logging.getLogger("mag_opt_detective")
 
@@ -396,12 +402,11 @@ def _layout_children(widget: QWidget) -> list[QWidget]:
     ordered: list[QWidget] = []
 
     def walk(layout) -> None:
-        for i in range(layout.count()):
-            item = layout.itemAt(i)
-            if item.widget() is not None:
-                ordered.append(item.widget())
-            elif item.layout() is not None:
-                walk(item.layout())
+        for child, nested in read_layout_items(layout, lambda item: (item.widget(), item.layout())):
+            if child is not None:
+                ordered.append(child)
+            elif nested is not None:
+                walk(nested)
 
     if widget.layout() is not None:
         walk(widget.layout())

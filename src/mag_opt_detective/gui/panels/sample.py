@@ -16,7 +16,15 @@ from pathlib import Path
 
 from PySide6.QtCore import QEvent, QObject, QSize, Qt, QTimer
 from PySide6.QtGui import QAction, QKeySequence, QPainter
-from PySide6.QtWidgets import QFileDialog, QHBoxLayout, QLabel, QToolButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (
+    QFileDialog,
+    QHBoxLayout,
+    QLabel,
+    QLayout,
+    QToolButton,
+    QVBoxLayout,
+    QWidget,
+)
 
 from mag_opt_detective.core.opus import is_opus_file
 from mag_opt_detective.core.readers import parse_field
@@ -53,7 +61,7 @@ from mag_opt_detective.gui.panels.files import (
 )
 from mag_opt_detective.gui.theme import current_tokens
 from mag_opt_detective.gui.watch import OK, PROBLEM, FolderWatcher, WatchStatus, sweep_folder
-from mag_opt_detective.gui.widgets import last_dir, set_last_dir
+from mag_opt_detective.gui.widgets import last_dir, read_layout_items, set_last_dir
 
 QWIDGETSIZE_MAX = (1 << 24) - 1  # Qt's largest widget size
 
@@ -201,15 +209,12 @@ class _YieldRoom(QObject):
             QTimer.singleShot(0, self, self.fit)
         return False
 
-    def _row(self):
-        layouts = [self._bar.layout()]
-        while layouts:
-            layout = layouts.pop()
+    def _row(self) -> QLayout | None:
+        # the bar's layouts are its QObject children (QStatusBar makes them anew whenever a
+        # widget comes or goes); asking them, not their items, wraps no layout item
+        for layout in self._bar.findChildren(QLayout):
             if layout.indexOf(self._chip) >= 0:
                 return layout
-            layouts.extend(
-                item.layout() for i in range(layout.count()) if (item := layout.itemAt(i)).layout()
-            )
         return None
 
     def fit(self) -> None:
@@ -217,11 +222,13 @@ class _YieldRoom(QObject):
         row = self._row()
         if row is None:
             return
-        items = [row.itemAt(i) for i in range(row.count())]
-        others = sum(item.sizeHint().width() for item in items if item.widget() is not self._chip)
-        shown = [item for item in items if not item.isEmpty()]  # (spacing between these)
+        items = read_layout_items(
+            row, lambda item: (item.widget() is self._chip, item.sizeHint().width(), item.isEmpty())
+        )
+        others = sum(width for chip, width, _empty in items if not chip)
+        shown = sum(not empty for _chip, _width, empty in items)  # (spacing between these)
         width = row.geometry().width()
-        room = width - others - row.spacing() * (len(shown) - 1) if width > 0 else QWIDGETSIZE_MAX
+        room = width - others - row.spacing() * (shown - 1) if width > 0 else QWIDGETSIZE_MAX
         room = max(0, min(room, QWIDGETSIZE_MAX))  # (no limit before the first layout)
         if room != self._chip.maximumWidth():
             self._chip.setMaximumWidth(room)
