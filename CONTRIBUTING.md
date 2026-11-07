@@ -226,9 +226,9 @@ section as its message. It pushes nothing. It refuses to run with uncommitted ch
 commit that is already tagged, and says so when the new commits need no release. The *Release
 notes* page of the docs site is built from `CHANGELOG.md`.
 
-- `--version X.Y.Z` releases a version of your choice instead of the computed one. **1.0.0**,
-  the first public release, is made this way (`--version 1.0.0`); after it a breaking change
-  bumps the major version. At 1.0.0 also update the home page's "In development" eyebrow.
+- `--version X.Y.Z` releases a version of your choice instead of the computed one. **1.0.0** is
+  made this way (`--version 1.0.0`); after it a breaking change bumps the major version. At 1.0.0
+  also update the home page's "In development" eyebrow.
 - `--notes FILE` replaces the generated section with your own Markdown (`###` headings at
   most). The first release had no tag to count from: it was made with
   `--first 0.1.0 --notes tools/release-notes-0.1.0.md`, a summary of the app instead of every
