@@ -6,7 +6,7 @@ from the commit messages when a version is released (see Releases in CONTRIBUTIN
 
 ## 0.8.1 - 2026-10-04
 
-Not published on its own: 0.8.2 is the first public release.
+Not published on its own: 1.0.0 is the first public release.
 
 ### Fixed
 
