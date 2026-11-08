@@ -4,7 +4,7 @@ The app only says that a new version exists; it never installs one (the app bund
 code-signed, so people download the new one and replace the app). :func:`fetch_releases` is one
 anonymous GET of GitHub's releases API: no account, no cookies, no data, a short timeout,
 redirects only within the API, and Python's own proxy and certificate handling. Releases are
-tagged ``vX.Y.Z`` by ``tools/release.py`` and published as regular releases, 0.x included;
+tagged ``vX.Y.Z`` by the Release workflow and published as regular releases, 0.x included;
 while the app is 0.x, pre-releases (test versions) count too (:func:`default_channel`).
 The app opens only links into this repository's releases on github.com.
 """

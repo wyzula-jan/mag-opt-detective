@@ -77,3 +77,54 @@ addopts = "-ra"
 qt_api = "pyside6"
 # a deprecated call in our code fails the tests (e.g. on the newest Python in CI)
 filterwarnings = ["error::DeprecationWarning:mag_opt_detective"]
+
+[tool.semantic_release]
+# runs after the version is written and before the commit: the date in CITATION.cff, the
+# project's entry in uv.lock, then the Python package
+build_command = '''
+perl -pi -e "s/^date-released: .*/date-released: \"$(date -u +%F)\"/" CITATION.cff
+uv lock
+uv build --no-sources
+'''
+version_toml = ["pyproject.toml:project.version"]
+version_variables = ["src/mag_opt_detective/__init__.py:__version__", "CITATION.cff:version"]
+assets = ["uv.lock", "CITATION.cff"]
+commit_message = "chore(release): v{version}"
+
+[tool.semantic_release.commit_author]
+env = "GIT_COMMIT_AUTHOR"
+default = "wyzula-jan <wyzula.jan@gmail.com>"
+
+[tool.semantic_release.commit_parser_options]
+allowed_tags = [
+  "build",
+  "chore",
+  "ci",
+  "docs",
+  "feat",
+  "fix",
+  "perf",
+  "style",
+  "refactor",
+  "test",
+]
+minor_tags = ["feat"]
+patch_tags = ["fix", "perf"]
+default_bump_level = 0
+
+[tool.semantic_release.changelog]
+# add each new section and keep the written ones (the default rewrites the file from the tags)
+mode = "update"
+insertion_flag = "<!-- version list -->"
+
+[tool.semantic_release.remote]
+name = "origin"
+type = "github"
+ignore_token_for_push = true
+
+[tool.semantic_release.remote.token]
+env = "GH_TOKEN"
+
+[tool.semantic_release.publish]
+dist_glob_patterns = ["dist/*"]
+upload_to_vcs_release = true
