@@ -199,61 +199,39 @@ BREAKING CHANGE: point tables now start with an "Energy (unit)" header.
 
 ## Releases
 
-Versions follow [Semantic Versioning](https://semver.org) and come from the commit messages:
-`tools/release.py` (standard library only) reads the commits since the last `vX.Y.Z` tag,
-merges skipped, and picks the next version.
+Versions follow [Semantic Versioning](https://semver.org) and are made by
+[python-semantic-release](https://python-semantic-release.readthedocs.io) when a pull request is
+merged: nothing is released by hand. It reads the commits since the last `vX.Y.Z` tag
+(`[tool.semantic_release]` in `pyproject.toml`) and picks the next version:
 
-| Commits since the last release | Before 1.0.0 | From 1.0.0 |
-| --- | --- | --- |
-| a breaking change (`!` or a `BREAKING CHANGE:` footer), any type | minor | major |
-| `feat` | minor | minor |
-| `fix`, `perf` or `revert` | patch | patch |
-| only `docs`, `test`, `build`, `ci`, `chore`, `style` or `refactor` | no release | no release |
+| Commits since the last release | New version |
+| --- | --- |
+| a breaking change (`!` or a `BREAKING CHANGE:` footer), any type | major |
+| `feat` | minor |
+| `fix` or `perf` | patch |
+| only `docs`, `test`, `build`, `ci`, `chore`, `style`, `refactor` or `revert` | no release |
 
-After every merge to `main`, on `main` with a clean tree:
+So the subject of every commit matters: it decides the version and is the line people read in
+the release notes. The *Release notes* page of the docs site is built from `CHANGELOG.md`.
 
-```bash
-uv run python tools/release.py --dry-run   # the next version and its changelog section
-uv run python tools/release.py             # release it
-```
+**What a merge does.** `main` is protected: a direct push is refused, and a change reaches it
+through a pull request merged with **Rebase and merge**. One pull request can hold several
+commits that should ship together. On the push to `main` the *Release* workflow
+(`.github/workflows/release.yml`) runs semantic-release, which writes the version into
+`pyproject.toml`, `src/mag_opt_detective/__init__.py`, `CITATION.cff` (with `date-released`) and
+`uv.lock`, adds a section at the top of `CHANGELOG.md`, commits these as
+`chore(release): vX.Y.Z` and pushes the commit and the annotated tag with the deploy key. The
+workflow then builds the app bundles with the *App bundles* workflow, uploads the Python package
+to PyPI and creates the GitHub release with the section as its notes and the bundles attached.
+A failed bundle or PyPI upload leaves no GitHub release: fix the cause and re-run the failed jobs
+of that run. Every version is a regular release marked as the latest, because the site's download
+links use `releases/latest`. A pull request that changes the app gets the bundles as artifacts of
+its *App bundles* run, to try them before merging. After a merge, `git pull`: the release commit
+is on `main` and your local `main` is behind it.
 
-A release writes the version into `pyproject.toml`, `uv.lock`,
-`src/mag_opt_detective/__init__.py` and `CITATION.cff` (with `date-released`), adds a section
-at the top of `CHANGELOG.md` (`feat` under Added, breaking changes and reverts under Changed,
-`fix` under Fixed, `perf` under Performance, each with its scope), commits these files as
-`chore(release): vX.Y.Z` (the hooks run) and creates the annotated tag `vX.Y.Z` with the
-section as its message. It pushes nothing. It refuses to run with uncommitted changes or on a
-commit that is already tagged, and says so when the new commits need no release. The *Release
-notes* page of the docs site is built from `CHANGELOG.md`.
-
-- `--version X.Y.Z` releases a version of your choice instead of the computed one. **1.0.0**,
-  the first public release, is made this way (`--version 1.0.0`); after it a breaking change
-  bumps the major version. At 1.0.0 also update the home page's "In development" eyebrow.
-- `--notes FILE` replaces the generated section with your own Markdown (`###` headings at
-  most). The first release had no tag to count from: it was made with
-  `--first 0.1.0 --notes tools/release-notes-0.1.0.md`, a summary of the app instead of every
-  commit since the start.
-
-**Publishing.** `main` is protected: a direct push is refused, and a change reaches it through a
-pull request merged with **Rebase and merge** (never squash: the workflow looks for the
-`chore(release)` commit on `main`). Push the release commit to a branch **without its tag**
-(`git push origin main:refs/heads/release`; nothing is published yet), open the pull request and
-test the bundles from its *App bundles* run. Merging publishes. The rebase gives every commit a
-new hash, so the local tag would point at a commit that is not on `main`; the workflow creates
-the tag itself. Afterwards bring the local checkout in line, or the next release counts from the
-wrong history: `git fetch origin`, `git reset --hard origin/main`, `git tag -d vX.Y.Z` and
-`git fetch --tags`. The *Release* workflow runs
-on every push to `main` (and by hand). When the version in `pyproject.toml` has a section in
-`CHANGELOG.md` and no GitHub release yet, it builds the app bundles with the *App bundles*
-workflow and the Python package (`uv build`, checked with `twine check`), uploads the package
-to PyPI, and then creates the GitHub release `vX.Y.Z` on the release commit, creating the
-tag there, with the section as its notes and the
-bundles attached. Nothing is published unless every bundle and the package build; a failed
-PyPI upload leaves no GitHub release, so re-running the workflow tries again. Every version,
-0.x included, is a regular release marked as the latest: the site's download links use
-`releases/latest`, which skips pre-releases. Any other push publishes nothing, and no version
-is published twice. If several versions were released between two pushes, only the newest gets
-a GitHub release; the others keep their tags and their `CHANGELOG.md` sections.
+**Set up once.** A deploy key with write access whose private key is the repository secret
+`CI_DEPLOY_SSH_KEY`, with *Deploy keys* on the bypass list of the ruleset on `main` (the release
+commit is the only thing pushed there directly).
 
 PyPI accepts the upload through trusted publishing, so no token is stored anywhere. Set up
 once: on PyPI a (pending) trusted publisher for the project `mag-opt-detective` with owner
