@@ -226,22 +226,28 @@ section as its message. It pushes nothing. It refuses to run with uncommitted ch
 commit that is already tagged, and says so when the new commits need no release. The *Release
 notes* page of the docs site is built from `CHANGELOG.md`.
 
-- `--version X.Y.Z` releases a version of your choice instead of the computed one. **1.0.0** is
-  made this way (`--version 1.0.0`); after it a breaking change bumps the major version. At 1.0.0
-  also update the home page's "In development" eyebrow.
+- `--version X.Y.Z` releases a version of your choice instead of the computed one. **1.0.0**,
+  the first public release, is made this way (`--version 1.0.0`); after it a breaking change
+  bumps the major version. At 1.0.0 also update the home page's "In development" eyebrow.
 - `--notes FILE` replaces the generated section with your own Markdown (`###` headings at
   most). The first release had no tag to count from: it was made with
   `--first 0.1.0 --notes tools/release-notes-0.1.0.md`, a summary of the app instead of every
   commit since the start.
 
-**Publishing.** Push with the tags, in one push: `git push --atomic --follow-tags origin main`.
-Without `--follow-tags`, GitHub creates a lightweight tag on the release commit, which then
-blocks pushing your annotated one ("would clobber existing tag"). The *Release* workflow runs
+**Publishing.** `main` is protected: a direct push is refused, and a change reaches it through a
+pull request merged with **Rebase and merge** (never squash: the workflow looks for the
+`chore(release)` commit on `main`). Push the release commit to a branch **without its tag**
+(`git push origin main:refs/heads/release`; nothing is published yet), open the pull request and
+test the bundles from its *App bundles* run. Merging publishes. The rebase gives every commit a
+new hash, so the local tag would point at a commit that is not on `main`; the workflow creates
+the tag itself. Afterwards bring the local checkout in line, or the next release counts from the
+wrong history: `git fetch origin`, `git reset --hard origin/main`, `git tag -d vX.Y.Z` and
+`git fetch --tags`. The *Release* workflow runs
 on every push to `main` (and by hand). When the version in `pyproject.toml` has a section in
 `CHANGELOG.md` and no GitHub release yet, it builds the app bundles with the *App bundles*
 workflow and the Python package (`uv build`, checked with `twine check`), uploads the package
-to PyPI, and then creates the GitHub release `vX.Y.Z` on the release commit, from the pushed
-tag (or creating the tag when it was not pushed), with the section as its notes and the
+to PyPI, and then creates the GitHub release `vX.Y.Z` on the release commit, creating the
+tag there, with the section as its notes and the
 bundles attached. Nothing is published unless every bundle and the package build; a failed
 PyPI upload leaves no GitHub release, so re-running the workflow tries again. Every version,
 0.x included, is a regular release marked as the latest: the site's download links use
