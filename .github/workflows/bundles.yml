@@ -1,7 +1,7 @@
 name: App bundles
 
-# Standalone apps for computers without Python. Built on demand and whenever a change touches
-# the packaging, so that spec changes are tested before a release. The Release workflow calls
+# Standalone apps for computers without Python. Built on demand, for every pull request that
+# changes the app (to try them before merging) and when a change on main touches the packaging. The Release workflow calls
 # this one for every new version and publishes the bundles with the GitHub release it creates;
 # this workflow never publishes anything itself.
 on:
@@ -15,10 +15,10 @@ on:
       - ".github/workflows/bundles.yml"
   pull_request:
     paths:
+      - "src/**" # every change to the app can be tried from its pull request's artifacts
       - "packaging/**"
       - "pyproject.toml"
       - "uv.lock"
-      - "src/mag_opt_detective/smoke.py"
       - ".github/workflows/bundles.yml"
   workflow_dispatch:
   workflow_call:
