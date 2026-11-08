@@ -342,10 +342,44 @@ def test_the_release_notes_before_the_first_release(build, tmp_path):
         build.changelog_html(header + "\n## Unreleased\n\n- a\n")
 
 
+def test_the_release_notes_read_the_sections_of_semantic_release(build):
+    changelog = """\
+# Changelog
+
+<!-- version list -->
+
+## v1.0.1 (2026-11-09)
+
+### Bug Fixes
+
+- **gui**: Keep the plot <b>still</b>
+  ([`2760647`](https://github.com/wyzula-jan/mag-opt-detective/commit/2760647b))
+
+
+## 1.0.0 - 2026-11-08
+
+The first public release.
+"""
+    text = build.changelog_html(changelog)
+    assert '<h2 id="v1.0.1">Version 1.0.1</h2>' in text
+    assert '<time datetime="2026-11-09">9 November 2026</time>' in text
+    assert '<h2 id="v1.0.0">Version 1.0.0</h2>' in text  # the older sections keep working
+    assert "<strong>gui</strong>: Keep the plot &lt;b&gt;still&lt;/b&gt;" in text
+    assert (
+        '(<a href="https://github.com/wyzula-jan/mag-opt-detective/commit/2760647b">'
+        "<code>2760647</code></a>)"
+    ) in text
+    assert "version list" not in text
+
+
+def test_a_link_in_the_changelog_only_opens_web_addresses(build):
+    assert "<a " not in build.inline_html("[run](javascript:alert)")
+
+
 def test_the_release_notes_page_shows_the_repository_changelog(build, site):
     text = (site / "release-notes.html").read_text(encoding="utf-8")
     changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
-    versions = re.findall(r"^## (\S+) - ", changelog, re.MULTILINE)
+    versions = re.findall(r"^## v?(\d+\.\d+\.\d+)", changelog, re.MULTILINE)
     if versions:
         assert f'id="v{versions[0]}"' in text
     else:
