@@ -1,113 +1,139 @@
 name: Release
 
-# Publishes the version in pyproject.toml as a GitHub release, once. tools/release.py makes the
-# release commit "chore(release): vX.Y.Z" and the annotated tag locally; this workflow runs on
-# every push to main (pushed tags start nothing) and publishes when that version has a section
-# in CHANGELOG.md and no GitHub release yet. It builds the app bundles with the App bundles
-# workflow and the Python package (sdist and wheel), uploads the package to PyPI, then creates
-# the release on the release commit, from the pushed tag or with a new tag when the tag was not
-# pushed, with the CHANGELOG.md section as its notes and the bundles attached. Nothing is
-# published unless all of them build, and PyPI comes first: a failed upload leaves no GitHub
-# release, so re-running the workflow tries again (PyPI skips files it has already). Every
-# version, 0.x included, is a regular release marked as the latest: the site's download links
-# use /releases/latest, which skips pre-releases. Any other push publishes nothing.
+# Releases on merge, as the other projects do with python-semantic-release: on every push to main
+# it reads the Conventional Commits since the last vX.Y.Z tag and, when a feat, fix, perf or
+# breaking change is among them, writes the new version and changelog section, commits them as
+# "chore(release): vX.Y.Z" and pushes the commit and its tag with the deploy key (main is
+# protected and the key is on its bypass list). Any other push releases nothing, and neither does
+# that release commit when it comes back here.
+#
+# After a new version it builds the app bundles with the App bundles workflow, uploads the Python
+# package to PyPI (trusted publishing: the publisher on PyPI names this file and the environment
+# pypi, so renaming either means registering it again) and only then creates the GitHub release
+# with the bundles attached: the site's download links use /releases/latest, so a release without
+# its files must never be the latest. If a later job fails, re-run the failed jobs of that run;
+# the version is already committed and is never made twice.
 on:
   push:
     branches: [main]
-  workflow_dispatch:
-
-# one run at a time and a running one is never cancelled; a waiting run may be replaced by a
-# newer one (harmless: each run publishes the version on main then), and it sees the release
-# the run before it created
-concurrency:
-  group: release
-  cancel-in-progress: false
 
 permissions:
   contents: read
 
 jobs:
-  check:
-    name: Check version
+  release:
+    name: Version
     runs-on: ubuntu-latest
+    concurrency:
+      group: ${{ github.workflow }}-release-${{ github.ref_name }}
+      cancel-in-progress: false
     outputs:
-      publish: ${{ steps.check.outputs.publish }}
-      version: ${{ steps.check.outputs.version }}
-      sha: ${{ steps.check.outputs.sha }}
+      released: ${{ steps.release.outputs.released }}
+      tag: ${{ steps.release.outputs.tag }}
+      sha: ${{ steps.release.outputs.sha }}
     steps:
-      - uses: actions/checkout@v7
+      # the branch that triggered the workflow with its entire history, for python-semantic-
+      # release's branch detection and history evaluation; the deploy key makes the push possible
+      - name: Setup | Checkout Repository on Release Branch
+        uses: actions/checkout@v7
         with:
-          fetch-depth: 0 # the history and the tags: find the release commit
-      - id: check
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-        # tools/release.py needs the standard library only: the runner's Python is enough
+          ref: ${{ github.ref_name }}
+          fetch-depth: 0
+          ssh-key: ${{ secrets.CI_DEPLOY_SSH_KEY }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+
+      - uses: astral-sh/setup-uv@v10.2.0
+
+      # main may have moved while this workflow waited: never release commits it did not evaluate
+      - name: Setup | Force release branch to be at workflow sha
         run: |
-          version=$(python3 tools/release.py --print-version)
-          tag="v$version"
-          publish=true
-          if [ "$GITHUB_REF" != refs/heads/main ]; then
-            echo "Releases are published from main only."
-            publish=false
-          elif ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "$version is a development version: nothing to publish."
-            publish=false
-          elif ! python3 tools/release.py --print-notes "$version" > /dev/null; then
-            echo "$version has no section in CHANGELOG.md: nothing to publish."
-            publish=false
-          elif gh release view "$tag" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
-            echo "The release $tag exists already."
-            publish=false
+          git reset --hard ${{ github.sha }}
+
+      - name: Evaluate | Verify upstream has NOT changed
+        shell: bash
+        run: |
+          set +o pipefail
+
+          UPSTREAM_BRANCH_NAME="$(git status -sb | head -n 1 | cut -d' ' -f2 | grep -E '\.{3}' | cut -d'.' -f4)"
+          printf '%s\n' "Upstream branch name: $UPSTREAM_BRANCH_NAME"
+
+          set -o pipefail
+
+          if [ -z "$UPSTREAM_BRANCH_NAME" ]; then
+              printf >&2 '%s\n' "::error::Unable to determine upstream branch name!"
+              exit 1
           fi
-          # the commit to release: the pushed tag's, else the release commit, else the pushed one
-          sha=$(git rev-parse -q --verify "refs/tags/$tag^{commit}" || true)
-          if [ -z "$sha" ]; then
-            sha=$(git log --format='%H%x09%s' HEAD |
-              awk -F '\t' -v s="chore(release): $tag" '$2 == s && !n { print $1; n = 1 }')
+
+          git fetch "${UPSTREAM_BRANCH_NAME%%/*}"
+
+          if ! UPSTREAM_SHA="$(git rev-parse "$UPSTREAM_BRANCH_NAME")"; then
+              printf >&2 '%s\n' "::error::Unable to determine upstream branch sha!"
+              exit 1
           fi
-          sha=${sha:-$GITHUB_SHA}
-          echo "$tag at $sha, publish: $publish"
+
+          HEAD_SHA="$(git rev-parse HEAD)"
+
+          if [ "$HEAD_SHA" != "$UPSTREAM_SHA" ]; then
+              printf >&2 '%s\n' "[HEAD SHA] $HEAD_SHA != $UPSTREAM_SHA [UPSTREAM SHA]"
+              printf >&2 '%s\n' "::error::Upstream has changed, aborting release..."
+              exit 1
+          fi
+
+          printf '%s\n' "Verified upstream branch has not changed, continuing with release..."
+
+      - name: Semantic Version Release
+        id: release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GIT_COMMIT_AUTHOR: "wyzula-jan <wyzula.jan@gmail.com>"
+        shell: bash
+        run: |
+          pip install python-semantic-release==9.*
+          # the GitHub release comes last, in the publish job, with the bundles attached
+          semantic-release -vv version --no-vcs-release
+          if [ ! -d dist ]; then
+            echo "No release will be made"
+            echo "released=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          version=$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')
           {
-            echo "publish=$publish"
-            echo "version=$version"
-            echo "sha=$sha"
+            echo "released=true"
+            echo "tag=v$version"
+            echo "sha=$(git rev-parse HEAD)"
           } >> "$GITHUB_OUTPUT"
 
-  bundles:
-    name: Bundles
-    needs: check
-    if: needs.check.outputs.publish == 'true'
-    uses: ./.github/workflows/bundles.yml
-    with:
-      ref: ${{ needs.check.outputs.sha }}
+      - name: Check the Python package
+        if: steps.release.outputs.released == 'true'
+        run: uvx twine check --strict dist/*
 
-  dist:
-    name: Python package
-    needs: check
-    if: needs.check.outputs.publish == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ needs.check.outputs.sha }}
-      - uses: astral-sh/setup-uv@v10.2.0
-      - run: uv build --no-sources
-      - run: uvx twine check --strict dist/*
       - uses: actions/upload-artifact@v7
+        if: steps.release.outputs.released == 'true'
         with:
           name: python-package
           path: dist/
           if-no-files-found: error
 
+  bundles:
+    name: Bundles
+    needs: release
+    if: needs.release.outputs.released == 'true'
+    uses: ./.github/workflows/bundles.yml
+    with:
+      ref: ${{ needs.release.outputs.sha }}
+
   pypi:
     name: Publish to PyPI
-    needs: [check, bundles, dist]
+    needs: [release, bundles]
     runs-on: ubuntu-latest
     # trusted publishing: PyPI accepts this workflow in this environment, no token is stored
     environment:
       name: pypi
-      url: https://pypi.org/project/mag-opt-detective/${{ needs.check.outputs.version }}/
+      url: https://pypi.org/project/mag-opt-detective/
     permissions:
       id-token: write
     steps:
@@ -121,14 +147,14 @@ jobs:
 
   publish:
     name: Publish release
-    needs: [check, bundles, pypi]
+    needs: [release, bundles, pypi]
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ needs.check.outputs.sha }}
+          ref: ${{ needs.release.outputs.sha }}
       - uses: actions/download-artifact@v8
         with:
           path: bundles
@@ -138,17 +164,11 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          VERSION: ${{ needs.check.outputs.version }}
-          SHA: ${{ needs.check.outputs.sha }}
+          TAG: ${{ needs.release.outputs.tag }}
         run: |
-          tag="v$VERSION"
-          python3 tools/release.py --print-notes "$VERSION" > notes.md
-          flags=(--latest) # also 0.x: /releases/latest (the download links) skips pre-releases
-          if git ls-remote --exit-code --tags origin "refs/tags/$tag" > /dev/null; then
-            flags+=(--verify-tag) # the pushed tag
-          else
-            flags+=(--target "$SHA") # GitHub creates the tag on the release commit
-          fi
+          # this version's section of CHANGELOG.md: from its heading to the next one
+          awk -v head="## $TAG " 'index($0, head) == 1 { found = 1; next } /^## / && found { exit } found' CHANGELOG.md > notes.md
+          [ -s notes.md ] || { echo "::error::CHANGELOG.md has no section for $TAG"; exit 1; }
           # GitHub allows one release per tag: a second create fails instead of duplicating
-          gh release create "$tag" bundles/* --repo "$GITHUB_REPOSITORY" \
-            --title "$tag" --notes-file notes.md "${flags[@]}"
+          gh release create "$TAG" bundles/* --repo "$GITHUB_REPOSITORY" \
+            --title "$TAG" --notes-file notes.md --verify-tag --latest
