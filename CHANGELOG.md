@@ -4,6 +4,21 @@ All notable changes to Magneto-Optical Detective, newest first. The format is ba
 Changelog, and the versions follow Semantic Versioning. `tools/release.py` writes each section
 from the commit messages when a version is released (see Releases in CONTRIBUTING.md).
 
+## 1.0.0 - 2026-11-08
+
+The first public release. Magneto-Optical Detective plots, picks, fits and exports magneto-optical FTIR field sweeps recorded with Bruker OPUS. Standalone apps for macOS (Apple silicon), Windows and Linux are attached, and the app is on PyPI: `uv tool install mag-opt-detective` or `pipx install mag-opt-detective` (on a Mac, macOS 15 or newer, also Intel). It is free software under the GNU GPL v3; commercial licences are available from the author. Versions 0.1.0 to 0.8.1 were not published on their own; what each added is in CHANGELOG.md and on the site's release notes page.
+
+### Fixed
+
+- **gui:** the plot no longer moves down a few pixels when the cursor readout above it shows its first text, which on Windows shifted the start of every drag on the plot (the superscripts of cm⁻¹ come from a font with taller lines there).
+- **gui:** on Linux the watch chip in the status bar keeps fitting its room; fitting it could fail with an error when the status bar laid itself out anew.
+
+### Known limitations
+
+- The macOS app needs macOS 15 or newer on Apple silicon.
+- The apps are not code-signed: macOS and Windows ask once before the first launch.
+- The Linux app needs glibc 2.39 or newer (Ubuntu 24.04, Debian 13, Fedora 40 or newer); elsewhere install it with Python.
+
 ## 0.8.1 - 2026-10-04
 
 Not published on its own: 1.0.0 is the first public release.
