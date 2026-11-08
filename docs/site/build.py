@@ -42,7 +42,7 @@ IMAGES = HERE / "images"
 LAYOUT = HERE / "layout.html"
 STATIC = ("site.css", "favicon.svg")
 OUT = HERE / "_build"
-CHANGELOG = HERE.parents[1] / "CHANGELOG.md"  # written by tools/release.py
+CHANGELOG = HERE.parents[1] / "CHANGELOG.md"  # written by python-semantic-release
 
 SITE_NAME = "Magneto-Optical Detective"
 SEPARATOR = " \N{MIDDLE DOT} "
@@ -76,11 +76,14 @@ H2 = re.compile(r'<h2 id="(?P<id>[^"]+)"[^>]*>(?P<text>.*?)</h2>', re.DOTALL)
 TAG = re.compile(r"<[^>]+>")
 TOC_MARK = "<!-- toc -->"
 CHANGELOG_MARK = "<!-- changelog -->"
-# CHANGELOG.md: "## 1.2.3 - 2026-10-03" starts a release; its body has "### " headings,
-# "- " lists (indented lines continue an item) and paragraphs, with **bold** and `code`
+# CHANGELOG.md: "## v1.2.3 (2026-10-03)" or the older "## 1.2.3 - 2026-10-03" starts a release;
+# its body has "### " headings, "- " lists (indented lines continue an item) and paragraphs, with
+# **bold**, `code` and [links](https://...)
 RELEASE_START = re.compile(r"^## ", re.MULTILINE)
-RELEASE = re.compile(r"## (?P<version>\d+\.\d+\.\d+) - (?P<date>\d{4}-\d{2}-\d{2})")
-INLINE = re.compile(r"\*\*(?P<bold>.+?)\*\*|`(?P<code>[^`]+)`")
+RELEASE = re.compile(r"## v?(?P<version>\d+\.\d+\.\d+)(?: - | \()(?P<date>\d{4}-\d{2}-\d{2})\)?")
+INLINE = re.compile(
+    r"\*\*(?P<bold>.+?)\*\*|`(?P<code>[^`]+)`|\[(?P<label>[^\]]+)\]\((?P<url>https?://[^)\s]+)\)"
+)
 MONTHS = (
     "January",
     "February",
@@ -233,12 +236,14 @@ def render(page: Page, layout: str) -> str:
 
 # ---------------------------------------------------------------------- release notes
 def inline_html(text: str) -> str:
-    """*text* escaped, with **bold** and `code`."""
+    """*text* escaped, with **bold**, `code` and [links](https://...)."""
     parts, pos = [], 0
     for match in INLINE.finditer(text):
         parts.append(html.escape(text[pos : match.start()], quote=False))
         if match["code"] is not None:
             parts.append(f"<code>{html.escape(match['code'], quote=False)}</code>")
+        elif match["url"] is not None:
+            parts.append(f'<a href="{html.escape(match["url"])}">{inline_html(match["label"])}</a>')
         else:
             parts.append(f"<strong>{inline_html(match['bold'])}</strong>")
         pos = match.end()
