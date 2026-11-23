@@ -390,7 +390,7 @@ def test_tool_registry_routes_clicks_with_modifiers(processed):
     events = []
     tools.register(
         "probe",
-        "wand-sparkles",
+        "spline-pointer",
         "Probe",
         on_activate=lambda: events.append("on"),
         on_deactivate=lambda: events.append("off"),

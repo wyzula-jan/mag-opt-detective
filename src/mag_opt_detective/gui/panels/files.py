@@ -246,7 +246,7 @@ class _FlatHeader(QHeaderView):
         return QSize(hint.width(), self.fontMetrics().height() + 8)
 
     def sectionSizeFromContents(self, index: int) -> QSize:
-        text = str(self.model().headerData(index, self.orientation())).upper()
+        text = str(self.model().headerData(index, self.orientation()))
         return QSize(self.fontMetrics().horizontalAdvance(text) + 16, self.sizeHint().height())
 
     def paintSection(self, painter: QPainter, rect: QRect, index: int) -> None:
@@ -256,7 +256,7 @@ class _FlatHeader(QHeaderView):
         painter.fillRect(rect.left(), rect.bottom(), rect.width(), 1, tokens["line"])
         painter.setPen(tokens["muted"])
         painter.setFont(self.font())
-        text = str(self.model().headerData(index, self.orientation())).upper()
+        text = str(self.model().headerData(index, self.orientation()))
         align = Qt.AlignmentFlag.AlignRight if index == 0 else Qt.AlignmentFlag.AlignLeft
         painter.drawText(rect.adjusted(8, 0, -8, 0), align | Qt.AlignmentFlag.AlignVCenter, text)
         painter.restore()

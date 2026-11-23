@@ -227,7 +227,7 @@ def test_plots_follow_the_theme(window):
     window.set_appearance("dark")
     try:
         bg = window.plots.map.colors().background
-        assert bg == window.theme.plot_colors()["background"] == "#121015"
+        assert bg == window.theme.plot_colors()["background"] == "#101113"
         window.set_appearance("light")
         assert window.plots.stacked.colors().background == "#ffffff"
         window.cycle_appearance()
@@ -290,7 +290,7 @@ def test_theme_connections_end_with_the_window(qtbot):
         second = MainWindow(theme=theme)
         qtbot.addWidget(second)
         theme.set_scheme("dark")  # must not reach the deleted window
-        assert second.plots.map.colors().background == "#121015"
+        assert second.plots.map.colors().background == "#101113"
     finally:
         theme.set_scheme("system")
         QGuiApplication.styleHints().setColorScheme(Qt.ColorScheme.Unknown)
@@ -352,44 +352,36 @@ def toolbar_rows(toolbar) -> int:
 
 
 def test_toolbar_keeps_one_row_at_the_design_size(shown, qtbot):
-    """With the app's stylesheet the toolbar is one row at 1400 x 900 (as in the mockup):
-    Process leaves out its key hint where that keeps the row, and shows it once the toolbar
-    wraps anyway."""
+    """With the app's stylesheet the toolbar is one row at 1400 x 900 (as in the mockup) and
+    wraps onto a second row once it is narrower than its groups."""
     w, tb = shown, shown.toolbar
     w.setStyleSheet(theme.build_stylesheet(theme.tokens_for(False)))  # the app's paddings
     full = tb.one_row_width()
-    short = full - tb.process_button.key_width()
     if sys.platform == "darwin":  # the design platform (other UI fonts can be wider)
-        assert short <= 1400 - 10 and tb.process_button.key_width() > 0
+        assert full <= 1400 - 10
 
-    def layout_at(width: int, rows: int, key: bool, height: int | None = None) -> None:
-        """Resize the toolbar to *width*; it settles on *rows* rows, the key hint as *key*."""
+    def layout_at(width: int, rows: int, height: int | None = None) -> None:
+        """Resize the toolbar to *width*; it settles on *rows* rows."""
         w.resize(w.width() + width - tb.width(), 900)
         qtbot.waitUntil(lambda: tb.width() == width)
         qtbot.waitUntil(
-            lambda: (
-                toolbar_rows(tb) == rows
-                and tb.process_button.key_shown() is key
-                and (height is None or tb.height() == height)
-            )
+            lambda: toolbar_rows(tb) == rows and (height is None or tb.height() == height)
         )
 
-    layout_at(full + 50, rows=1, key=True)
+    layout_at(full + 50, rows=1)
     one_row = tb.height()
-    layout_at(full, rows=1, key=True, height=one_row)
-    layout_at(full - 1, rows=1, key=False, height=one_row)
-    layout_at(short, rows=1, key=False, height=one_row)
-    layout_at(short - 1, rows=2, key=True)
+    layout_at(full, rows=1, height=one_row)
+    layout_at(full - 1, rows=2)
     assert tb.height() > one_row
     if sys.platform == "darwin":
-        layout_at(1400, rows=1, key=full <= 1400, height=one_row)
+        layout_at(1400, rows=1, height=one_row)
 
 
 def test_toolbar_and_status_bar_details(window, sweep):
     tb, status = window.toolbar, window.statusBar()
     assert tb.per_unit.property("kit") == "chip"  # drawn as a toggle, not as plain text
     assert not tb.per_unit.isEnabled()  # no derivative: dimmed
-    assert tb.process_button.key_text() == display.process_key()
+    assert display.process_key() in tb.process_button.toolTip()  # the shortcut, not a key cap
     assert tb.export_button.menu() is tb.export_menu and tb.export_button.toolTip()
     for button in (tb.open_button, tb.export_button):  # icon, gap, text (and chevron) fit
         assert button.sizeHint().width() > button.fontMetrics().horizontalAdvance(button.text())

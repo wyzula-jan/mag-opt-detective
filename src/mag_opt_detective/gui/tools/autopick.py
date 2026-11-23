@@ -833,7 +833,7 @@ def install(window) -> None:
     window.autopick = tool
     window.tools.register(
         NAME,
-        "wand-sparkles",
+        "spline-pointer",
         "Auto-pick",
         "W",
         on_activate=tool.on_activate,

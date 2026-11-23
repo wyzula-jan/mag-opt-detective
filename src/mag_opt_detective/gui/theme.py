@@ -1,8 +1,10 @@
 """Light and dark design tokens, the application palette and a short stylesheet.
 
-The tokens are the CSS variables of the approved redesign mockup. :class:`Theme` turns them into
-a Fusion ``QPalette`` plus a few stylesheet rules for what a palette cannot express. Kit widgets
-opt into those rules with a ``kit`` dynamic property (``kit="segmented"``, ``"tool"``, ...).
+The tokens are the CSS variables of the approved redesign mockup, with neutral greys in place
+of its violet-tinted ones: the chrome stays out of the way of the colour maps, and the accent
+is the only colour that is not data. :class:`Theme` turns them into a Fusion ``QPalette`` plus
+a few stylesheet rules for what a palette cannot express. Kit widgets opt into those rules with
+a ``kit`` dynamic property (``kit="segmented"``, ``"tool"``, ...).
 """
 
 from __future__ import annotations
@@ -18,16 +20,16 @@ from mag_opt_detective.gui import icons
 SCHEMES = ("system", "light", "dark")
 
 LIGHT: dict[str, str] = {
-    "bg": "#f3f1f5",
-    "fg": "#1d1824",
-    "muted": "#605869",
-    "faint": "#8a8294",
-    "line": "#ddd7e4",
-    "line-strong": "#c4bccd",
-    "win": "#fbfafc",
+    "bg": "#f0f2f5",
+    "fg": "#191b1d",
+    "muted": "#5a5c5e",
+    "faint": "#848688",
+    "line": "#d8dadd",
+    "line-strong": "#bec0c2",
+    "win": "#f9fbfd",
     "surface": "#ffffff",
-    "sunken": "#efecf3",
-    "hover": "#e7e2ed",
+    "sunken": "#eceef0",
+    "hover": "#e3e5e7",
     "accent": "#7a2a8c",
     "accent-fg": "#ffffff",
     "accent-soft": "#f2e8f5",
@@ -37,24 +39,24 @@ LIGHT: dict[str, str] = {
     "warn-soft": "#fbf1df",
     "err-soft": "#fbe9e6",
     "plot-bg": "#ffffff",
-    "plot-well": "#e9e6ed",
-    "plot-fg": "#3b3443",
-    "plot-grid": "rgba(59, 52, 67, 0.09)",
-    "toast-bg": "#2a2331",
-    "toast-fg": "#f6f2f9",
+    "plot-well": "#e6e8ea",
+    "plot-fg": "#36383a",
+    "plot-grid": "rgba(54, 56, 58, 0.09)",
+    "toast-bg": "#252728",
+    "toast-fg": "#f2f4f6",
 }
 
 DARK: dict[str, str] = {
-    "bg": "#0e0c11",
-    "fg": "#ece7f1",
-    "muted": "#a59dad",
-    "faint": "#7d7587",
-    "line": "#2c2633",
-    "line-strong": "#40384a",
-    "win": "#17141b",
-    "surface": "#1e1a23",
-    "sunken": "#121015",
-    "hover": "#27222d",
+    "bg": "#0c0d0f",
+    "fg": "#e8e9ec",
+    "muted": "#9fa1a3",
+    "faint": "#77797b",
+    "line": "#28292b",
+    "line-strong": "#3b3c3e",
+    "win": "#141617",
+    "surface": "#1b1c1e",
+    "sunken": "#101113",
+    "hover": "#232526",
     "accent": "#fe9f6d",
     "accent-fg": "#21141c",
     "accent-soft": "#3a2621",
@@ -63,12 +65,12 @@ DARK: dict[str, str] = {
     "err": "#f2725f",
     "warn-soft": "#33270f",
     "err-soft": "#3a1d1a",
-    "plot-bg": "#121015",
-    "plot-well": "#1c1921",
-    "plot-fg": "#cbc4d3",
-    "plot-grid": "rgba(220, 210, 235, 0.08)",
-    "toast-bg": "#ece7f1",
-    "toast-fg": "#1d1824",
+    "plot-bg": "#101113",
+    "plot-well": "#191b1d",
+    "plot-fg": "#c6c8ca",
+    "plot-grid": "rgba(213, 215, 218, 0.08)",
+    "toast-bg": "#e8e9ec",
+    "toast-fg": "#191b1d",
 }
 
 _RGBA = re.compile(r"rgba\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*([\d.]+)\s*\)")

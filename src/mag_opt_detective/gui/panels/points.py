@@ -60,6 +60,7 @@ from mag_opt_detective.gui import icons
 from mag_opt_detective.gui.controller import CURVE_NAME, user_action
 from mag_opt_detective.gui.kit import SegmentedControl, SmallButton, Switch
 from mag_opt_detective.gui.kit._common import set_style_property
+from mag_opt_detective.gui.panels.common import section_label
 from mag_opt_detective.gui.plot_panel import PlotClick
 from mag_opt_detective.gui.points_model import CurvePointsModel
 from mag_opt_detective.gui.points_view import (
@@ -101,16 +102,8 @@ def _hint(text: str) -> QLabel:
 
 
 def _title(text: str) -> QLabel:
-    """A small upper-case block title."""
-    label = QLabel(text.upper())
-    label.setProperty("kit", "muted")
-    font = QFont(label.font())
-    font.setBold(True)
-    if font.pointSizeF() > 0:
-        font.setPointSizeF(font.pointSizeF() * 0.85)
-    font.setLetterSpacing(QFont.SpacingType.PercentageSpacing, 106)
-    label.setFont(font)
-    return label
+    """A block title, as the other panels' headings."""
+    return section_label(text)
 
 
 def _keys(first: str, standard: QKeySequence.StandardKey) -> list[QKeySequence]:
@@ -122,13 +115,13 @@ def _keys(first: str, standard: QKeySequence.StandardKey) -> list[QKeySequence]:
 
 # ---------------------------------------------------------------------- widgets
 class PickButton(QPushButton):
-    """A full-width toggle showing its shortcut key; filled with the accent colour while on."""
+    """A full-width toggle with an icon; filled with the accent colour while on. Its shortcut
+    is in the tooltip, as everywhere else in the app."""
 
     ICON, GAP = 16, 6
 
-    def __init__(self, text: str, key: str, parent=None, icon: str = "crosshair"):
+    def __init__(self, text: str, parent=None, icon: str = "crosshair"):
         super().__init__(text, parent)
-        self._key = key
         self.setCheckable(True)
         self.setMinimumHeight(30)
         icons.set_icon(self, icon, None, on_color="accent-fg")
@@ -137,14 +130,9 @@ class PickButton(QPushButton):
             lambda on: set_style_property(self, "kit", "primary" if on else "button")
         )
 
-    def _key_size(self) -> QSize:
-        metrics = self.fontMetrics()
-        return QSize(metrics.horizontalAdvance(self._key) + 10, metrics.height() + 2)
-
     def _content_width(self) -> int:
-        """Icon, text and key cap side by side."""
-        text = self.fontMetrics().horizontalAdvance(self.text())
-        return self.ICON + self.GAP + text + 2 * self.GAP + self._key_size().width()
+        """Icon and text side by side."""
+        return self.ICON + self.GAP + self.fontMetrics().horizontalAdvance(self.text())
 
     def sizeHint(self) -> QSize:
         hint = super().sizeHint()
@@ -171,17 +159,6 @@ class PickButton(QPushButton):
         painter.setPen(color)
         flags = Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft
         painter.drawText(QRect(x, 0, text_width + 2, self.height()), flags, self.text())
-        key = self._key_size()
-        left = x + text_width + 2 * self.GAP
-        cap = QRectF(left, middle - key.height() / 2, key.width(), key.height())
-        border = QColor(color)
-        border.setAlphaF(0.45)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.setPen(QPen(border, 1))
-        painter.setBrush(Qt.BrushStyle.NoBrush)
-        painter.drawRoundedRect(cap.adjusted(0.5, 0.5, -0.5, -0.5), 4, 4)
-        painter.setPen(color)
-        painter.drawText(cap, Qt.AlignmentFlag.AlignCenter, self._key)
 
 
 class CurveChip(QAbstractButton):
@@ -414,10 +391,10 @@ class PointsPanel(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.pick_button = PickButton(PICK_LABELS["map"], "P")
+        self.pick_button = PickButton(PICK_LABELS["map"])
         self.pick_button.setToolTip("Pick points: a click records, Alt-click removes (P)")
         self.pick_button.setAccessibleName(PICK_LABELS["map"])
-        self.autopick_button = PickButton("Auto-pick", "W", icon="wand-sparkles")
+        self.autopick_button = PickButton("Auto-pick", icon="spline-pointer")
         self.autopick_button.setToolTip(AUTOPICK_TIP)
         self.autopick_button.setAccessibleName("Auto-pick")
         self.autopick_hint = _hint(AUTOPICK_HINT)

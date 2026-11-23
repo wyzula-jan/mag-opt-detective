@@ -211,7 +211,7 @@ def test_appearance_is_remembered(qtbot, ini):
         w.close()
         w2 = make_window(qtbot, ini)
         assert w2.theme.scheme() == "dark"
-        assert w2.plots.map.colors().background == "#121015"
+        assert w2.plots.map.colors().background == "#101113"
     finally:
         for window in (w, locals().get("w2")):
             if window is not None:

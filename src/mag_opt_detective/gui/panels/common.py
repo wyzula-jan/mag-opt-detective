@@ -49,11 +49,11 @@ def mono_font(factor: float = 0.92) -> QFont:
 
 
 def section_label(text: str) -> QLabel:
-    """A small uppercase heading (FIELD VALUES, ZERO FIELD, ...)."""
-    label = QLabel(text.upper())
-    label.setProperty("kit", "muted")
-    font = scaled_font(label, 0.82, bold=True)
-    font.setLetterSpacing(QFont.SpacingType.PercentageSpacing, 107)
+    """A heading inside a panel (Field values, Zero field, ...): sentence case, semibold, in
+    the text colour, as the inspector's section headers."""
+    label = QLabel(text)
+    font = scaled_font(label, 0.94)
+    font.setWeight(QFont.Weight.DemiBold)
     label.setFont(font)
     return label
 

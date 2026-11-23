@@ -21,7 +21,7 @@ ICONS = (
     *("crosshair", "scan", "image", "terminal", "chevron-down", "chevron-right", "x"),
     *("triangle-alert", "info", "check", "plus", "trash-2", "save", "git-merge", "file-text"),
     *("panel-left", "panel-right", "palette", "eye", "eye-off", "undo-2", "redo-2"),
-    *("wand-sparkles", "sigma", "pin"),
+    *("spline-pointer", "sigma", "pin"),
 )
 
 
@@ -47,12 +47,41 @@ def test_tokens_match_the_mockup():
     assert set(LIGHT) == set(DARK)
     assert set(LIGHT) >= TOKENS
     assert (LIGHT["accent"], DARK["accent"]) == ("#7a2a8c", "#fe9f6d")
-    assert (LIGHT["err-soft"], DARK["plot-bg"]) == ("#fbe9e6", "#121015")
+    assert (LIGHT["err-soft"], DARK["plot-bg"]) == ("#fbe9e6", "#101113")
+
+
+GREYS = (
+    *("bg", "fg", "muted", "faint", "line", "line-strong", "win", "surface", "sunken", "hover"),
+    *("plot-bg", "plot-well", "plot-fg", "plot-grid", "toast-bg", "toast-fg"),
+)
+
+
+@pytest.mark.parametrize("tokens", [LIGHT, DARK], ids=["light", "dark"])
+def test_greys_are_neutral(tokens):
+    """The chrome's greys carry no hue of their own: only the accent and the data are
+    coloured."""
+    for name in GREYS:
+        color = parse_color(tokens[name])
+        spread = max(color.red(), color.green(), color.blue()) - min(
+            color.red(), color.green(), color.blue()
+        )
+        assert spread <= 6, name
+
+
+def test_panel_headings_are_sentence_case(qapp):
+    from PySide6.QtGui import QFont
+
+    from mag_opt_detective.gui.panels.common import section_label
+
+    label = section_label("Field values")
+    assert label.text() == "Field values"  # as written, not in capitals
+    assert label.font().weight() == QFont.Weight.DemiBold
+    assert not label.property("kit")  # in the text colour, not muted
 
 
 def test_parse_color_reads_css_rgba():
     grid = parse_color(LIGHT["plot-grid"])
-    assert (grid.red(), grid.green(), grid.blue(), grid.alpha()) == (59, 52, 67, 23)
+    assert (grid.red(), grid.green(), grid.blue(), grid.alpha()) == (54, 56, 58, 23)
     assert parse_color("#7a2a8c") == QColor("#7a2a8c")
     with pytest.raises(ValueError):
         parse_color("not a colour")

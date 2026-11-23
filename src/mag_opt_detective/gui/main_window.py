@@ -15,9 +15,6 @@ from PySide6.QtCore import QEvent, QPointF, QRect, QRectF, QSettings, QSize, Qt,
 from PySide6.QtGui import (
     QAction,
     QActionGroup,
-    QColor,
-    QFont,
-    QFontMetrics,
     QIcon,
     QKeySequence,
     QPainter,
@@ -139,53 +136,20 @@ def _paint_dot(widget: QWidget) -> None:
 
 
 class _Button(QPushButton):
-    """A toolbar button as in the mockup: icon, a 6 px gap and the text, then an optional
-    key hint (``kbd``) or a chevron (a button with a menu)."""
+    """A toolbar button as in the mockup: icon, a 6 px gap and the text, then a chevron if the
+    button has a menu. Shortcuts are in the tooltips and the menus, not on the buttons."""
 
     GAP = 6
     ICON = 16
     PADDING = 11  # the stylesheet's 10 px padding and 1 px border, on each side
 
-    def __init__(self, text: str, icon: str, color: str | None = None, key: str = "", parent=None):
+    def __init__(self, text: str, icon: str, color: str | None = None, parent=None):
         super().__init__(text, parent)
         self.setProperty("kit", "button")
         icons.set_icon(self, icon, color)
         self.setIconSize(QSize(self.ICON, self.ICON))
-        self._key = key
-        self._key_shown = bool(key)
-
-    def key_text(self) -> str:
-        return self._key
-
-    def key_shown(self) -> bool:
-        return self._key_shown
-
-    def show_key(self, shown: bool) -> None:
-        """Show or leave out the key hint (a narrow toolbar leaves it out)."""
-        shown = shown and bool(self._key)
-        if shown != self._key_shown:
-            self._key_shown = shown
-            self.updateGeometry()
-            self.update()
-
-    def key_width(self) -> int:
-        """The width the key hint adds to the button."""
-        return self.GAP + self._key_size().width() if self._key else 0
-
-    def _key_font(self) -> QFont:
-        font = QFont(self.font())
-        font.setBold(False)
-        if font.pointSizeF() > 0:
-            font.setPointSizeF(font.pointSizeF() * 0.8)
-        return font
-
-    def _key_size(self) -> QSize:
-        metrics = QFontMetrics(self._key_font())
-        return QSize(metrics.horizontalAdvance(self._key) + 10, metrics.height() + 2)
 
     def _trailing_width(self) -> int:
-        if self._key_shown:
-            return self.key_width()
         return self.GAP + 12 if self.menu() is not None else 0
 
     def sizeHint(self) -> QSize:
@@ -222,29 +186,17 @@ class _Button(QPushButton):
             QRect(x, 0, text_width + 1, self.height()), Qt.AlignmentFlag.AlignVCenter, self.text()
         )
         x += text_width + self.GAP
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        if self._key_shown:
-            size = self._key_size()
-            box = QRectF(x, middle - size.height() / 2, size.width(), size.height())
-            faded = QColor(color)
-            faded.setAlphaF(0.7)
-            painter.setPen(QPen(faded, 1))
-            painter.setBrush(Qt.BrushStyle.NoBrush)
-            painter.drawRoundedRect(box.adjusted(0.5, 0.5, -0.5, -0.5), 4, 4)
-            painter.setFont(self._key_font())
-            painter.drawText(box, Qt.AlignmentFlag.AlignCenter, self._key)
-        elif self.menu() is not None:
+        if self.menu() is not None:
             chevron = icons.icon("chevron-down", color)
             chevron.paint(painter, QRect(x, middle - 6, 12, 12), mode=mode)
         painter.end()
 
 
 class _ProcessButton(_Button):
-    """The primary Process button with its shortcut; a dot marks settings changed since the
-    last run."""
+    """The primary Process button; a dot marks settings changed since the last run."""
 
     def __init__(self, parent=None):
-        super().__init__("Process", "play", "accent-fg", key=process_key(), parent=parent)
+        super().__init__("Process", "play", "accent-fg", parent=parent)
         self.setProperty("kit", "primary")
         self.dot = False
 
@@ -507,21 +459,12 @@ class MainToolbar(QWidget):
         row.addWidget(self._end, 0, Qt.AlignmentFlag.AlignTop)
 
     def one_row_width(self) -> int:
-        """The toolbar width that holds every group on one row, with Process's key hint."""
+        """The toolbar width that holds every group on one row."""
         widths = [group.sizeHint().width() for group in self.groups]
-        if not self.process_button.key_shown():
-            widths[0] += self.process_button.key_width()
         row, margins = self.layout(), self.layout().contentsMargins()
         flow = sum(widths) + _Group.SEPARATION * (len(widths) - 1)  # the flow's spacing
         end = row.spacing() + self._end.sizeHint().width()
         return margins.left() + flow + end + margins.right()
-
-    def resizeEvent(self, event) -> None:
-        """Process leaves out its key hint where that keeps the toolbar on one row."""
-        full = self.one_row_width()
-        short = full - self.process_button.key_width()
-        self.process_button.show_key(not short <= self.width() < full)
-        super().resizeEvent(event)
 
 
 class AppearanceSetting:
@@ -979,9 +922,9 @@ class MainWindow(QMainWindow):
             f"{text}</span>"
         )
         self.toolbar.process_button.setToolTip(
-            "Settings changed since the last run. Process again (Ctrl+Return)"
+            f"Settings changed since the last run. Process again ({process_key()})"
             if changed
-            else "Process the loaded files (Ctrl+Return)"
+            else f"Process the loaded files ({process_key()})"
         )
         self._summary_label.setText(self._summary())
         self.setWindowTitle(self.window_title())
