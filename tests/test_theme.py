@@ -46,7 +46,7 @@ def window_color(app) -> str:
 def test_tokens_match_the_mockup():
     assert set(LIGHT) == set(DARK)
     assert set(LIGHT) >= TOKENS
-    assert (LIGHT["accent"], DARK["accent"]) == ("#7a2a8c", "#fe9f6d")
+    assert (LIGHT["accent"], DARK["accent"]) == ("#2059a6", "#7ab0f0")
     assert (LIGHT["err-soft"], DARK["plot-bg"]) == ("#fbe9e6", "#101113")
 
 

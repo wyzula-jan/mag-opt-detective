@@ -1,10 +1,14 @@
 """Light and dark design tokens, the application palette and a short stylesheet.
 
 The tokens are the CSS variables of the approved redesign mockup, with neutral greys in place
-of its violet-tinted ones: the chrome stays out of the way of the colour maps, and the accent
-is the only colour that is not data. :class:`Theme` turns them into a Fusion ``QPalette`` plus
-a few stylesheet rules for what a palette cannot express. Kit widgets opt into those rules with
-a ``kit`` dynamic property (``kit="segmented"``, ``"tool"``, ...).
+of its violet-tinted ones and one blue accent in both schemes (the mockup had violet in light
+and peach in dark): the chrome stays out of the way of the colour maps, and the accent is the
+only colour that is not data. Selected controls are marked by a neutral fill and the accent in
+their text or icon, not by a tinted fill and a ring.
+
+:class:`Theme` turns the tokens into a Fusion ``QPalette`` plus a few stylesheet rules for what
+a palette cannot express. Kit widgets opt into those rules with a ``kit`` dynamic property
+(``kit="segmented"``, ``"tool"``, ...).
 """
 
 from __future__ import annotations
@@ -30,9 +34,9 @@ LIGHT: dict[str, str] = {
     "surface": "#ffffff",
     "sunken": "#eceef0",
     "hover": "#e3e5e7",
-    "accent": "#7a2a8c",
+    "accent": "#2059a6",
     "accent-fg": "#ffffff",
-    "accent-soft": "#f2e8f5",
+    "accent-soft": "#e8eef7",
     "ok": "#24764a",
     "warn": "#9a5b08",
     "err": "#b3362a",
@@ -57,9 +61,9 @@ DARK: dict[str, str] = {
     "surface": "#1b1c1e",
     "sunken": "#101113",
     "hover": "#232526",
-    "accent": "#fe9f6d",
-    "accent-fg": "#21141c",
-    "accent-soft": "#3a2621",
+    "accent": "#7ab0f0",
+    "accent-fg": "#0c0d0f",
+    "accent-soft": "#17222f",
     "ok": "#5cc68b",
     "warn": "#e3a640",
     "err": "#f2725f",
@@ -160,17 +164,15 @@ def build_palette(t: dict[str, QColor]) -> QPalette:
 def build_stylesheet(t: dict[str, QColor]) -> str:
     """The few rules the palette cannot express; they only match ``kit`` properties."""
     c = {name: color.name() for name, color in t.items()}
-    accent_ring = _rgba(t["accent"], 0.35)
     err_border = mix(t["err"], t["line"], 0.45).name()
     warn_border = mix(t["warn"], t["line"], 0.45).name()
     info_border = mix(t["accent"], t["line"], 0.45).name()
-    chip_border = mix(t["accent"], t["surface"], 0.4).name()
     return f"""
 *[kit="segmented"] {{
-    background: {c["sunken"]}; border: 1px solid {c["line"]}; border-radius: 7px;
+    background: {c["sunken"]}; border: 1px solid {c["line"]}; border-radius: 5px;
 }}
 QToolButton[kit="segment"] {{
-    background: transparent; border: 1px solid transparent; border-radius: 5px;
+    background: transparent; border: 1px solid transparent; border-radius: 3px;
     color: {c["muted"]}; padding: 3px 9px; font-weight: 500;
 }}
 *[kit="segmented"][kitSize="sm"] QToolButton[kit="segment"] {{ padding: 2px 8px; }}
@@ -182,28 +184,28 @@ QToolButton[kit="segment"]:checked {{
 QToolButton[kit="segment"]:focus {{ border-color: {c["accent"]}; }}
 QToolButton[kit="segment"]:disabled {{ color: {c["faint"]}; }}
 QToolButton[kit="tool"] {{
-    background: transparent; border: 1px solid transparent; border-radius: 6px; padding: 5px;
+    background: transparent; border: 1px solid transparent; border-radius: 4px; padding: 5px;
     color: {c["muted"]};
 }}
 QToolButton[kit="tool"]:hover {{ background: {c["hover"]}; color: {c["fg"]}; }}
 QToolButton[kit="tool"]:checked {{
-    background: {c["accent-soft"]}; color: {c["accent"]}; border-color: {accent_ring};
+    background: {c["hover"]}; color: {c["accent"]}; border-color: {c["line-strong"]};
 }}
 QToolButton[kit="tool"]:focus {{ border-color: {c["accent"]}; }}
 QToolButton[kit="chip"] {{
-    background: {c["surface"]}; border: 1px solid {c["line-strong"]}; border-radius: 6px;
+    background: {c["surface"]}; border: 1px solid {c["line-strong"]}; border-radius: 4px;
     padding: 0px 9px; min-height: 24px; color: {c["muted"]}; font-weight: 500;
 }}
 QToolButton[kit="chip"]:hover {{ color: {c["fg"]}; }}
 QToolButton[kit="chip"]:checked {{
-    background: {c["accent-soft"]}; color: {c["accent"]}; border-color: {chip_border};
+    background: {c["surface"]}; color: {c["accent"]}; border-color: {c["accent"]};
 }}
 QToolButton[kit="chip"]:focus {{ border-color: {c["accent"]}; }}
 QToolButton[kit="chip"]:disabled {{
     background: {c["win"]}; color: {c["line-strong"]}; border-color: {c["line"]};
 }}
 QPushButton[kit="button"], QToolButton[kit="button"] {{
-    background: {c["surface"]}; border: 1px solid {c["line-strong"]}; border-radius: 6px;
+    background: {c["surface"]}; border: 1px solid {c["line-strong"]}; border-radius: 4px;
     padding: 4px 10px; color: {c["fg"]};
 }}
 QToolButton[kit="button"] {{ padding: 3px 8px; }}
@@ -214,7 +216,7 @@ QPushButton[kit="button"]:pressed, QToolButton[kit="button"]:pressed {{
     background: {c["sunken"]};
 }}
 QToolButton[kit="button"]:checked {{
-    background: {c["accent-soft"]}; color: {c["accent"]}; border-color: {chip_border};
+    background: {c["surface"]}; color: {c["accent"]}; border-color: {c["accent"]};
 }}
 QPushButton[kit="button"]:focus, QToolButton[kit="button"]:focus {{
     border-color: {c["accent"]};
@@ -223,14 +225,14 @@ QPushButton[kit="button"]:disabled, QToolButton[kit="button"]:disabled {{
     background: {c["win"]}; color: {c["faint"]}; border-color: {c["line"]};
 }}
 QToolButton[kit="rail"] {{
-    background: transparent; border: none; border-radius: 7px; padding: 7px 2px 6px;
+    background: transparent; border: none; border-radius: 4px; padding: 7px 2px 6px;
     color: {c["muted"]}; font-weight: 500;
 }}
 QToolButton[kit="rail"]:hover {{ background: {c["hover"]}; color: {c["fg"]}; }}
-QToolButton[kit="rail"]:checked {{ background: {c["accent-soft"]}; color: {c["accent"]}; }}
+QToolButton[kit="rail"]:checked {{ background: {c["hover"]}; color: {c["fg"]}; }}
 QToolButton[kit="rail"]:focus {{ border: 1px solid {c["accent"]}; }}
 QPushButton[kit="primary"] {{
-    background: {c["accent"]}; border: 1px solid {c["accent"]}; border-radius: 6px;
+    background: {c["accent"]}; border: 1px solid {c["accent"]}; border-radius: 4px;
     color: {c["accent-fg"]}; font-weight: 600; padding: 4px 10px;
 }}
 QPushButton[kit="primary"]:focus {{ border-color: {c["fg"]}; }}
@@ -240,7 +242,7 @@ QToolButton[kit="section-header"] {{
 }}
 QToolButton[kit="section-header"]:focus {{ color: {c["accent"]}; }}
 QFrame[kit="infobar"] {{
-    background: {c["err-soft"]}; border: 1px solid {err_border}; border-radius: 8px;
+    background: {c["err-soft"]}; border: 1px solid {err_border}; border-radius: 5px;
 }}
 QFrame[kit="infobar"][level="warning"] {{
     background: {c["warn-soft"]}; border-color: {warn_border};
@@ -251,7 +253,7 @@ QFrame[kit="infobar"][level="info"] {{
 QLabel[kit="muted"], QLabel[kit="note"] {{ color: {c["muted"]}; }}
 QLabel[kit="note"][error="true"] {{ color: {c["err"]}; }}
 QSpinBox[kit="field"] {{
-    background: {c["surface"]}; border: 1px solid {c["line-strong"]}; border-radius: 5px;
+    background: {c["surface"]}; border: 1px solid {c["line-strong"]}; border-radius: 3px;
     padding: 3px 6px; color: {c["fg"]};
 }}
 QSpinBox[kit="field"]:focus {{ border-color: {c["accent"]}; }}
@@ -259,12 +261,12 @@ QSpinBox[kit="field"]:disabled {{
     background: {c["sunken"]}; border-color: {c["line"]}; color: {c["faint"]};
 }}
 *[kit="range"] QAbstractSpinBox {{
-    background: {c["surface"]}; border: 1px solid {c["line-strong"]}; border-radius: 5px;
+    background: {c["surface"]}; border: 1px solid {c["line-strong"]}; border-radius: 3px;
     padding: 2px 4px; color: {c["fg"]};
 }}
 *[kit="range"] QAbstractSpinBox:focus {{ border-color: {c["accent"]}; }}
 QAbstractSpinBox[invalid="true"], *[kit="range"] QAbstractSpinBox[invalid="true"] {{
-    background: {c["err-soft"]}; border: 1px solid {c["err"]}; border-radius: 5px;
+    background: {c["err-soft"]}; border: 1px solid {c["err"]}; border-radius: 3px;
     padding: 2px 4px; color: {c["fg"]};
 }}
 """

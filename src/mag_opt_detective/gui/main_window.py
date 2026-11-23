@@ -78,7 +78,7 @@ DIRECT = Qt.FindChildOption.FindDirectChildrenOnly
 # narrowest side panel and inspector (the mockup's narrow-window inspector): the plot gives way
 # first, so the window stays usable down to about 1100 px with both open
 SIDE_MIN_WIDTH, INSPECTOR_MIN_WIDTH = 240, 280
-INSPECTOR_SUBTITLE = "Settings for the plot on screen"
+INSPECTOR_SUBTITLE = ""  # nothing under the title while it has settings to show
 
 SHORTCUTS = [
     ("Ctrl+Return (or Ctrl+F)", "Process"),
@@ -271,7 +271,7 @@ class _RailButton(QToolButton):
         centre = QPointF(self.width() / 2 + self.iconSize().width() / 2, self.ICON_TOP + 2)
         side = size + ring  # the ring's pen is centred on the outline
         rect = QRectF(centre.x() - side / 2, centre.y() - side / 2, side, side)
-        background = "accent-soft" if self.isChecked() else "hover" if self.underMouse() else ""
+        background = "hover" if self.isChecked() or self.underMouse() else ""
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.setPen(QPen(tokens[background or "sunken"], ring))
@@ -646,6 +646,7 @@ class MainWindow(QMainWindow):
         self._inspector_subtitle.setProperty("kit", "muted")
         self._inspector_subtitle.setWordWrap(True)
         head_layout.addWidget(self._inspector_title)
+        self._inspector_subtitle.setHidden(not INSPECTOR_SUBTITLE)
         head_layout.addWidget(self._inspector_subtitle)
         inspector_layout.addWidget(head)
         inspector_layout.addWidget(Separator())
@@ -875,7 +876,9 @@ class MainWindow(QMainWindow):
         self._inspector_title.setText(text)
 
     def set_inspector_subtitle(self, text: str = INSPECTOR_SUBTITLE) -> None:
+        """A line under the inspector's title, left out when empty."""
         self._inspector_subtitle.setText(text)
+        self._inspector_subtitle.setHidden(not text)
 
     def inspector_subtitle(self) -> str:
         return self._inspector_subtitle.text()

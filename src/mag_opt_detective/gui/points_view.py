@@ -262,7 +262,7 @@ class PickHint(QWidget):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.setPen(QPen(tokens["accent"], 1))
         painter.setBrush(tokens["win"])
-        painter.drawRoundedRect(QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5), 7, 7)
+        painter.drawRoundedRect(QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5), 4, 4)
         painter.setPen(tokens["fg"])
         rect = self.rect().adjusted(12, 0, -12, 0)
         text = self.fontMetrics().elidedText(self._text, Qt.TextElideMode.ElideRight, rect.width())

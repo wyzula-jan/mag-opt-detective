@@ -229,7 +229,7 @@ class CurveChip(QAbstractButton):
         painter.setPen(QPen(tokens["accent" if accent else "line-strong"], width))
         hover = self.underMouse() and self.isEnabled()
         painter.setBrush(tokens["hover" if hover else "surface"])
-        painter.drawRoundedRect(rect, rect.height() / 2, rect.height() / 2)
+        painter.drawRoundedRect(rect, 4, 4)
         x, middle = 10, self.height() / 2
         if self.color is not None:
             painter.setPen(QPen(QColor(0, 0, 0, 115), 1))

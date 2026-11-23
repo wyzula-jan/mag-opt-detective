@@ -271,7 +271,7 @@ class _Tabs(QTabBar):
                     painter.setPen(tokens["accent"])
                     painter.setBrush(Qt.BrushStyle.NoBrush)
                     ring = QRectF(rect).adjusted(2.5, 5.5, -2.5, -4.5)
-                    painter.drawRoundedRect(ring, 5, 5)
+                    painter.drawRoundedRect(ring, 3, 3)
         painter.end()
 
 

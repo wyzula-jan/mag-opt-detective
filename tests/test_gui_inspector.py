@@ -351,7 +351,7 @@ def test_sections_follow_the_plot_on_screen(window, sweep):
     for view, names in visible.items():
         window.plot_area.set_current_view(view)
         assert shown_sections() == names
-        assert window.inspector_subtitle() == "Settings for the plot on screen"
+        assert window.inspector_subtitle() == ""  # no filler line while there are settings
         assert page.field.isHidden() == (view == "stacked")
         assert page.intensity.isHidden() == (view != "stacked")
 
